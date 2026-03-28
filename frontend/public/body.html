@@ -1,0 +1,545 @@
+
+
+<!-- TOP NAV -->
+<nav class="topnav">
+  <a class="nav-brand" href="#">
+    <div class="nav-logo-text">
+      <span class="part-quanly">Quanly</span><span class="part-htx">HTX</span><span class="part-dot">.com</span>
+    </div>
+  </a>
+
+  <div class="nav-search">
+    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    <input type="text" placeholder="Tìm kiếm tài xế, biển số, HTX..." id="globalSearch" oninput="filterTable()" onkeydown="if(event.key==='Enter')filterTable()">
+    <button onclick="filterTable()" style="background:linear-gradient(135deg,var(--blue-d),var(--blue));border:none;border-radius:7px;padding:5px 12px;color:white;font-size:11.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;transition:all .15s;font-family:inherit" onmouseenter="this.style.opacity='.88'" onmouseleave="this.style.opacity='1'">
+      <svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:white"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      Tìm
+    </button>
+  </div>
+
+  <div class="nav-right">
+    <button class="btn btn-ghost" onclick="toggleDark()">
+      <svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+      Dark mode
+    </button>
+    <button class="btn btn-upload" onclick="openUpload()">
+      <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+      UP HỒ SƠ LƯU
+    </button>
+    <div class="avatar" title="trungnm">T</div>
+  </div>
+</nav>
+
+<div class="app">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+
+  <!-- Sidebar Logo -->
+  <div style="padding:4px 6px 16px;border-bottom:1.5px solid var(--border);margin-bottom:6px">
+    <div style="display:flex;align-items:baseline;gap:0;line-height:1;user-select:none">
+      <span style="font-size:19px;font-weight:900;color:var(--text);letter-spacing:-.7px">Quanly</span><span style="font-size:19px;font-weight:900;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.7px">HTX</span><span style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:0;margin-left:1px">.com</span>
+    </div>
+    <div style="font-size:10px;color:var(--muted);font-weight:500;margin-top:3px;letter-spacing:.2px">Quản lý hợp tác xã</div>
+  </div>
+
+  <div class="sidebar-section">Tổng quan</div>
+  <a class="nav-item active" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+    Tổng quan
+  </a>
+
+  <div class="sidebar-section">Quản lý</div>
+  <a class="nav-item" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+    Tài xế
+    <span class="badge-count">99</span>
+  </a>
+  <a class="nav-item nav-child" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+    Giấy tờ tài xế
+  </a>
+  <a class="nav-item" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.08 3.11H5.77L6.85 7zM19 17H5v-5h14v5z"/></svg>
+    Phương tiện
+  </a>
+  <a class="nav-item nav-child" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+    Giấy tờ phương tiện
+  </a>
+  <a class="nav-item" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+    Đơn vị & HTX
+  </a>
+
+  <div class="sidebar-section">Khác</div>
+  <a class="nav-item" onclick="setNav(this)">
+    <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+    Thông báo
+  </a>
+</aside>
+
+<!-- Sidebar Toggle -->
+<div class="sidebar-toggle-wrap" id="sidebarToggleWrap">
+  <div class="sidebar-toggle" onclick="toggleSidebar()" title="Ẩn/Hiện sidebar">
+    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<main class="main" id="mainContent">
+
+  <!-- Page header -->
+  <div class="page-hdr">
+    <div class="page-hdr-left">
+      <h1>Quản lý hồ sơ HTX</h1>
+      <p>CRUD dữ liệu realtime · 5 hợp tác xã · Năm 2022–2026</p>
+    </div>
+    <div class="page-hdr-actions">
+      <button class="btn btn-ghost">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        Xuất Excel
+      </button>
+    </div>
+  </div>
+
+  <!-- HTX Filter Tabs -->
+  <div class="htx-tabs">
+    <button class="htx-tab active" onclick="filterHTX('all',this)">🏢 Tất cả HTX</button>
+    <button class="htx-tab" onclick="filterHTX('MINH VY',this)"><span class="dot" style="background:#2563eb"></span>Minh Vy</button>
+    <button class="htx-tab" onclick="filterHTX('THANH VY',this)"><span class="dot" style="background:#10b981"></span>Thanh Vy</button>
+    <button class="htx-tab" onclick="filterHTX('KIM THINH',this)"><span class="dot" style="background:#f59e0b"></span>Kim Thịnh</button>
+    <button class="htx-tab" onclick="filterHTX('NGHIA PHAT',this)"><span class="dot" style="background:#8b5cf6"></span>Nghĩa Phát</button>
+    <button class="htx-tab" onclick="filterHTX('MINH VY TG',this)"><span class="dot" style="background:#ef4444"></span>Minh Vy TG</button>
+  </div>
+
+  <!-- Stat Cards -->
+  <div class="stats">
+    <div class="stat-card" style="--accent:#2563eb">
+      <div class="stat-label">Tổng tài xế</div>
+      <div class="stat-num">99</div>
+      <div class="stat-sub">5 HTX · 3 năm</div>
+      <div class="stat-icon" style="background:#eff6ff"><svg viewBox="0 0 24 24" fill="#2563eb"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></div>
+    </div>
+    <div class="stat-card" style="--accent:#10b981">
+      <div class="stat-label">Phương tiện</div>
+      <div class="stat-num">99</div>
+      <div class="stat-sub">Đã đăng kiểm</div>
+      <div class="stat-icon" style="background:#ecfdf5"><svg viewBox="0 0 24 24" fill="#10b981"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99z"/></svg></div>
+    </div>
+    <div class="stat-card" style="--accent:#f59e0b">
+      <div class="stat-label">Giấy tờ</div>
+      <div class="stat-num">594</div>
+      <div class="stat-sub">Tổng hồ sơ lưu</div>
+      <div class="stat-icon" style="background:#fffbeb"><svg viewBox="0 0 24 24" fill="#f59e0b"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></div>
+    </div>
+    <div class="stat-card" style="--accent:#ef4444">
+      <div class="stat-label">Sắp hết hạn</div>
+      <div class="stat-num">23 <span>hồ sơ</span></div>
+      <div class="stat-sub">Trong 30 ngày tới</div>
+      <div class="stat-icon" style="background:#fff1f2"><svg viewBox="0 0 24 24" fill="#ef4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></div>
+    </div>
+    <div class="stat-card" style="--accent:#8b5cf6">
+      <div class="stat-label">Đơn vị HTX</div>
+      <div class="stat-num">5</div>
+      <div class="stat-sub">Đang hoạt động</div>
+      <div class="stat-icon" style="background:#f5f3ff"><svg viewBox="0 0 24 24" fill="#8b5cf6"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10z"/></svg></div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="select-wrap">
+      <select onchange="filterTable()" id="filterYear">
+        <option value="">Tất cả năm</option>
+        <option>2022</option>
+        <option>2023</option>
+        <option>2024</option>
+        <option>2025</option>
+        <option>2026</option>
+      </select>
+    </div>
+    <div class="select-wrap">
+      <select onchange="filterTable()" id="filterStatus">
+        <option value="">Tất cả trạng thái</option>
+        <option value="ok">Còn hạn</option>
+        <option value="warn">Sắp hết hạn</option>
+        <option value="bad">Hết hạn</option>
+      </select>
+    </div>
+    <div class="select-wrap">
+      <select onchange="filterTable()" id="filterDocType">
+        <option value="">Tất cả giấy tờ</option>
+        <optgroup label="── Giấy tờ cá nhân">
+          <option value="CCCD">CCCD</option>
+          <option value="Giấy phép lái xe">Giấy phép lái xe</option>
+          <option value="Lý lịch tư pháp">Lý lịch tư pháp</option>
+          <option value="Giấy test ma túy">Giấy test ma túy</option>
+          <option value="Thẻ nghiệp vụ tài xế">Thẻ nghiệp vụ tài xế</option>
+          <option value="Giấy khám sức khỏe">Giấy khám sức khỏe</option>
+        </optgroup>
+        <optgroup label="── Giấy tờ xe">
+          <option value="Cà vẹt xe">Cà vẹt xe</option>
+          <option value="Bảo hiểm TNDS">Bảo hiểm TNDS</option>
+          <option value="Phù hiệu xe">Phù hiệu xe</option>
+          <option value="Đăng kiểm xe">Đăng kiểm xe</option>
+          <option value="Bảo hiểm vật chất xe">Bảo hiểm vật chất xe</option>
+          <option value="Giấy đăng ký xe">Giấy đăng ký xe</option>
+        </optgroup>
+        <optgroup label="── HTX & Vận tải">
+          <option value="Giấy xác nhận xã viên">Giấy xác nhận xã viên</option>
+          <option value="Lệnh vận chuyển">Lệnh vận chuyển</option>
+          <option value="Hộp đen định vị">Hộp đen định vị</option>
+          <option value="VETC">VETC</option>
+        </optgroup>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <button class="btn btn-ghost" onclick="filterTable()">
+        <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+        Lọc
+      </button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-head">
+      <div>
+        <h3>Danh sách tài xế & hồ sơ</h3>
+        <p id="rowCount">Hiển thị 10 / 99 tài xế</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 10px">Chọn tất cả</button>
+        <button class="btn btn-danger" style="font-size:11.5px;padding:5px 10px">Xóa đã chọn</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table id="mainTable">
+      <thead>
+        <tr>
+          <th style="width:36px"><input type="checkbox" style="accent-color:var(--blue)"></th>
+          <th>Chủ xe</th>
+          <th>Tài xế</th>
+          <th>Giấy tờ cá nhân</th>
+          <th>Giấy tờ xe</th>
+          <th>HTX và vận tải</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+      </tbody>
+    </table>
+    </div>
+    <div class="pagination">
+      <span id="paginInfo">Trang 1 / 10</span>
+      <div class="page-btns">
+        <button class="page-btn">‹</button>
+        <button class="page-btn active">1</button>
+        <button class="page-btn">2</button>
+        <button class="page-btn">3</button>
+        <button class="page-btn">...</button>
+        <button class="page-btn">10</button>
+        <button class="page-btn">›</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-panel" id="detailPanel">
+  <div class="dp-hdr">
+    <div class="dp-avatar">🧑‍✈️</div>
+    <div>
+      <div class="dp-name" id="dpName">–</div>
+      <div class="dp-sub" id="dpSub">–</div>
+    </div>
+    <div class="dp-close" onclick="closeDetail()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </div>
+  </div>
+  <div class="dp-section">
+    <div class="dp-section-title">Thông tin cá nhân</div>
+    <div class="dp-field"><span class="dp-field-label">Họ tên</span><span class="dp-field-val" id="dpFullName">–</span></div>
+    <div class="dp-field"><span class="dp-field-label">CCCD/CMND</span><span class="dp-field-val" id="dpCCCD">–</span></div>
+    <div class="dp-field"><span class="dp-field-label">HTX</span><span class="dp-field-val" id="dpHTX">–</span></div>
+    <div class="dp-field"><span class="dp-field-label">Hạng GPLX</span><span class="dp-field-val" id="dpGPLX">–</span></div>
+    <div class="dp-field"><span class="dp-field-label">Năm hồ sơ</span><span class="dp-field-val" id="dpYear">–</span></div>
+    <div class="dp-field"><span class="dp-field-label">Biển số xe</span><span class="dp-field-val" id="dpPlate" style="font-family:'JetBrains Mono',monospace;color:var(--blue)">–</span></div>
+  </div>
+  <div class="dp-section">
+    <div class="dp-section-title">Giấy tờ đính kèm</div>
+    <div class="dp-docs">
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>Đăng ký xe (Cà vẹt)</span><span class="dp-doc-tag tag-ok">✓ Có</span></div>
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>CCCD / CMND</span><span class="dp-doc-tag tag-ok">✓ Có</span></div>
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>Giấy phép lái xe</span><span class="dp-doc-tag tag-warn">⚠ Sắp hết</span></div>
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>Đăng kiểm xe</span><span class="dp-doc-tag tag-ok">✓ Có</span></div>
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>Bảo hiểm TNDS</span><span class="dp-doc-tag tag-bad">✗ Thiếu</span></div>
+      <div class="dp-doc"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg><span>Phù hiệu HTX</span><span class="dp-doc-tag tag-ok">✓ Có</span></div>
+    </div>
+  </div>
+  <div class="dp-footer">
+    <button class="btn btn-primary" style="flex:1" onclick="openUpload()">
+      <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+      UP HỒ SƠ LƯU
+    </button>
+    <button class="btn btn-ghost">
+      <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+      Chỉnh sửa
+    </button>
+  </div>
+</div>
+
+<!-- UPLOAD MODAL -->
+<div class="overlay" id="uploadOverlay" onclick="closeUploadOut(event)">
+  <div class="modal" style="max-width:780px;border-radius:22px;overflow:hidden">
+
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#0f172a,#1e3a6e,#1d4ed8);padding:20px 24px 18px;flex-shrink:0">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:10px;font-weight:800;color:rgba(255,255,255,.5);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">QUẢN LÝ HỒ SƠ</div>
+          <div style="font-size:18px;font-weight:900;color:white;letter-spacing:-.3px">📁 Upload Hồ Sơ Lưu</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.55);margin-top:3px">Lưu giấy tờ vào hệ thống · PDF, JPG, PNG · Tối đa 10MB</div>
+        </div>
+        <button class="dm-close" onclick="closeUpload()">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <!-- progress steps -->
+      <div style="display:flex;align-items:center;gap:0;margin-top:16px">
+        <div class="up-step active" id="upStep1">① Thông tin tài xế</div>
+        <div style="flex:1;height:2px;background:rgba(255,255,255,.15);margin:0 6px"></div>
+        <div class="up-step" id="upStep2">② Chọn giấy tờ</div>
+        <div style="flex:1;height:2px;background:rgba(255,255,255,.15);margin:0 6px"></div>
+        <div class="up-step" id="upStep3">③ Upload & Lưu</div>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div style="display:flex;max-height:520px;overflow:hidden">
+
+      <!-- Step 1: Driver info -->
+      <div id="upPanel1" style="flex:1;overflow-y:auto;padding:20px 24px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label class="form-label">Họ tên chủ xe <span class="req">*</span></label>
+            <input class="form-input" id="upOwner" type="text" placeholder="Nguyễn Văn A">
+          </div>
+          <div class="form-row">
+            <label class="form-label">CCCD / CMND <span class="req">*</span></label>
+            <input class="form-input" id="upCCCD" type="text" placeholder="079 203 012 345">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Tài xế 1</label>
+            <input class="form-input" type="text" placeholder="Họ tên tài xế 1">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Tài xế 2</label>
+            <input class="form-input" type="text" placeholder="Họ tên tài xế 2 (nếu có)">
+          </div>
+          <div class="form-row">
+            <label class="form-label">HTX <span class="req">*</span></label>
+            <select class="form-input" id="upHTX">
+              <option value="">-- Chọn HTX --</option>
+              <option>HTX Minh Vy</option>
+              <option>HTX Thanh Vy</option>
+              <option>HTX Kim Thịnh</option>
+              <option>HTX Nghĩa Phát</option>
+              <option>HTX Minh Vy Tiền Giang</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Năm hồ sơ <span class="req">*</span></label>
+            <select class="form-input">
+              <option>2026</option><option>2025</option><option>2024</option><option>2023</option><option>2022</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Biển số xe</label>
+            <input class="form-input" id="upPlate" type="text" placeholder="51F-123.45" style="font-family:'JetBrains Mono',monospace">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Hạng GPLX</label>
+            <select class="form-input">
+              <option>B2</option><option>C</option><option>D</option><option>E</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Hãng xe</label>
+            <select class="form-input">
+              <option>Toyota</option><option>Hyundai</option><option>Kia</option><option>Ford</option><option>Mitsubishi</option><option>Isuzu</option><option>Hino</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Nhiên liệu</label>
+            <select class="form-input">
+              <option>Xăng</option><option>Dầu diesel</option><option>Điện</option><option>Hybrid</option>
+            </select>
+          </div>
+          <div class="form-row" style="grid-column:1/-1">
+            <label class="form-label">Sale HTX phụ trách <span class="req">*</span></label>
+            <select class="form-input" id="upSale" style="background:linear-gradient(to right,#f0f9ff,#fff);border-color:#bae6fd">
+              <option value="">-- Chọn sale phụ trách --</option>
+              <option>Nguyễn Thị Lan</option>
+              <option>Trần Văn Minh</option>
+              <option>Lê Thị Hoa</option>
+              <option>Phạm Quốc Bảo</option>
+              <option>Hoàng Thị Mai</option>
+              <option>Đặng Ngọc Quân</option>
+              <option>Bùi Thị Thanh</option>
+              <option>Võ Văn Hùng</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:16px;padding:12px 14px;background:var(--blue-l);border:1.5px solid #bfdbfe;border-radius:10px;font-size:12px;color:var(--blue);font-weight:600">
+          💡 Sau khi điền đầy đủ thông tin, nhấn <b>Tiếp theo</b> để chọn và upload từng loại giấy tờ.
+        </div>
+      </div>
+
+      <!-- Step 2: Chọn giấy tờ (tabs) -->
+      <div id="upPanel2" style="flex:1;display:none;flex-direction:column;overflow:hidden">
+        <!-- doc type tabs -->
+        <div style="display:flex;gap:0;border-bottom:2px solid var(--border);flex-shrink:0;overflow-x:auto;padding:0 16px">
+          <button class="up-doc-tab active" onclick="switchDocTab(this,'upDocCN')" style="white-space:nowrap">👤 Cá nhân</button>
+          <button class="up-doc-tab" onclick="switchDocTab(this,'upDocXe')" style="white-space:nowrap">🚗 Giấy tờ xe</button>
+          <button class="up-doc-tab" onclick="switchDocTab(this,'upDocHTX')" style="white-space:nowrap">🏢 HTX & VT</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;padding:16px 20px">
+          <!-- Cá nhân -->
+          <div id="upDocCN">
+            <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">GIẤY TỜ CÁ NHÂN</div>
+            <div id="upDocListCN"></div>
+          </div>
+          <!-- Xe -->
+          <div id="upDocXe" style="display:none">
+            <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">GIẤY TỜ XE</div>
+            <div id="upDocListXe"></div>
+          </div>
+          <!-- HTX -->
+          <div id="upDocHTX" style="display:none">
+            <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">HTX & VẬN TẢI</div>
+            <div id="upDocListHTX"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Summary -->
+      <div id="upPanel3" style="flex:1;display:none;overflow-y:auto;padding:20px 24px">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:14px">✅ Xác nhận và lưu hồ sơ</div>
+        <div id="upSummary" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div style="margin-top:16px;padding:12px 14px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;font-size:12px;color:#166534;font-weight:600">
+          🎉 Sẵn sàng lưu! Kiểm tra lại thông tin bên trên trước khi nhấn <b>Lưu hồ sơ</b>.
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="modal-footer" style="justify-content:space-between">
+      <div style="font-size:12px;color:var(--muted);font-weight:600" id="upStepLabel">Bước 1 / 3</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" id="upBtnBack" onclick="upBack()" style="display:none">‹ Quay lại</button>
+        <button class="btn btn-ghost" onclick="closeUpload()">Hủy</button>
+        <button class="btn btn-primary" id="upBtnNext" onclick="upNext()">
+          Tiếp theo ›
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DOC DETAIL MODAL -->
+<div class="doc-modal-overlay" id="docModalOverlay" onclick="closeDocModalOut(event)">
+  <div class="doc-modal">
+    <!-- Hero -->
+    <div class="dm-hero">
+      <div class="dm-hero-top">
+        <div class="dm-doc-icon" id="dmIcon">📄</div>
+        <div class="dm-hero-info">
+          <div class="dm-doc-type" id="dmType">GIẤY TỜ CÁ NHÂN</div>
+          <div class="dm-doc-name" id="dmName">–</div>
+          <div class="dm-owner">
+            <span id="dmOwner">–</span>
+            <span id="dmPlate">–</span>
+          </div>
+        </div>
+        <button class="dm-close" onclick="closeDocModal()">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="dm-status-bar">
+        <div class="dm-status-pill" id="dmStatusPill">–</div>
+        <div id="dmFineTag" style="display:none" class="dm-fine">⚠ Có thể bị phạt</div>
+        <div class="dm-countdown" id="dmCountdown">
+          <div class="days" id="dmDays">–</div>
+          <div class="label">ngày còn lại</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="dm-body">
+      <!-- Left: image -->
+      <div class="dm-img-panel">
+        <div class="dm-img-wrap" onclick="document.getElementById('dmFileInput').click()">
+          <div class="dm-img-placeholder" id="dmImgPlaceholder">
+            <div class="big-icon" id="dmBigIcon">📄</div>
+            <p>Chưa có ảnh<br>giấy tờ</p>
+          </div>
+          <img id="dmImgPreview" class="dm-img-thumb" style="display:none">
+          <div class="dm-img-overlay">
+            <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+            <span>Xem / Thay ảnh</span>
+          </div>
+        </div>
+
+        <div class="dm-upload-zone" id="dmDropZone"
+             onclick="document.getElementById('dmFileInput').click()"
+             ondragover="event.preventDefault();this.classList.add('drag')"
+             ondragleave="this.classList.remove('drag')"
+             ondrop="handleDmDrop(event)">
+          <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+          <p>Upload giấy tờ mới</p>
+          <span>Sau khi gia hạn · PDF, JPG, PNG</span>
+          <input type="file" id="dmFileInput" accept=".pdf,.jpg,.jpeg,.png" onchange="handleDmFile(this)">
+        </div>
+
+        <div id="dmUploadedFile" style="display:none;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;padding:9px 12px">
+          <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1px;margin-bottom:5px">FILE ĐÃ NỘP</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">📎</span>
+            <span id="dmFileName" style="font-size:11.5px;font-weight:700;color:var(--blue);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">–</span>
+            <span onclick="clearDmFile()" style="cursor:pointer;color:var(--muted);font-size:16px;line-height:1">×</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: fields -->
+      <div class="dm-fields-panel" id="dmFieldsPanel">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="dm-footer">
+      <div class="dm-footer-left">Cập nhật lần cuối: <b id="dmLastUpdate">–</b></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeDocModal()">Đóng</button>
+        <button class="btn btn-primary" onclick="saveDmDoc()">
+          <svg viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+          Lưu & Cập nhật
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+  <span id="toastMsg">Lưu hồ sơ thành công!</span>
+</div>
+

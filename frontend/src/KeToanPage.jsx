@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE } from './lib/api';
 
-const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'https://jewelry.n-lux.com' : '';
+const API = API_BASE;
 
 const fmt = n => n ? Number(n).toLocaleString('vi-VN') : '0';
 const today = () => new Date().toISOString().slice(0, 10);

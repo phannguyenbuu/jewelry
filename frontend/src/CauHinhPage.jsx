@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE } from './lib/api';
 
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'https://jewelry.n-lux.com' : '';
+const API = API_BASE;
 
 const fmt = n => n ? Number(n).toLocaleString('vi-VN') : '—';
 
@@ -115,23 +115,117 @@ function HistPage({ manual, sjcHist, maxLen, totalPages, PAGE_SIZE, fmt, delta }
 
 function KhoTab() {
     const [list, setList] = useState([]);
+    const [thuNgans, setThuNgans] = useState([]);
+    const [quays, setQuays] = useState([]);
+    const [nhanViens, setNhanViens] = useState([]);
     const [modal, setModal] = useState(null);
     const [confirm, setConfirm] = useState(null);
     const [form, setForm] = useState({});
+    const [cashierModal, setCashierModal] = useState(null);
+    const [cashierConfirm, setCashierConfirm] = useState(null);
+    const [cashierForm, setCashierForm] = useState({});
 
     const load = useCallback(async () => {
-        const r = await fetch(`${API}/api/kho`);
-        setList(await r.json());
+        const [khoRes, thuNganRes, quayRes, nhanVienRes] = await Promise.all([
+            fetch(`${API}/api/kho`),
+            fetch(`${API}/api/thu_ngan`),
+            fetch(`${API}/api/quay_nho`),
+            fetch(`${API}/api/nhan_vien`),
+        ]);
+        setList(await khoRes.json());
+        setThuNgans(await thuNganRes.json());
+        setQuays(await quayRes.json());
+        setNhanViens(await nhanVienRes.json());
     }, []);
     useEffect(() => { load(); }, [load]);
 
+    const readResponse = async (res) => {
+        let data = {};
+        try {
+            data = await res.json();
+        } catch {
+            data = {};
+        }
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+    };
+
     const save = async (e) => {
         e.preventDefault();
-        const isEdit = modal !== 'add';
-        await fetch(isEdit ? `${API}/api/kho/${modal.id}` : `${API}/api/kho`,
-            { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-        setModal(null); load();
+        try {
+            const isEdit = modal !== 'add';
+            await readResponse(await fetch(
+                isEdit ? `${API}/api/kho/${modal.id}` : `${API}/api/kho`,
+                { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) },
+            ));
+            setModal(null);
+            await load();
+        } catch (err) {
+            window.alert(err.message);
+        }
     };
+
+    const saveCashier = async (e) => {
+        e.preventDefault();
+        try {
+            const isEdit = cashierModal !== 'add';
+            const payload = {
+                ten_thu_ngan: cashierForm.ten_thu_ngan || '',
+                kho_id: cashierForm.kho_id,
+                nhan_vien_id: cashierForm.nhan_vien_id || null,
+                ghi_chu: cashierForm.ghi_chu || '',
+                quay_ids: cashierForm.quay_ids || [],
+            };
+            await readResponse(await fetch(
+                isEdit ? `${API}/api/thu_ngan/${cashierModal.id}` : `${API}/api/thu_ngan`,
+                { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+            ));
+            setCashierModal(null);
+            await load();
+        } catch (err) {
+            window.alert(err.message);
+        }
+    };
+
+    const openAddCashier = (kho) => {
+        setCashierForm({
+            ten_thu_ngan: '',
+            kho_id: kho.id,
+            kho_ten: kho.ten_kho,
+            nhan_vien_id: '',
+            ghi_chu: '',
+            quay_ids: [],
+        });
+        setCashierModal('add');
+    };
+
+    const openEditCashier = (cashier) => {
+        setCashierForm({
+            ...cashier,
+            kho_ten: cashier.ten_kho,
+            nhan_vien_id: cashier.nhan_vien_id || '',
+            quay_ids: cashier.quay_ids || [],
+        });
+        setCashierModal(cashier);
+    };
+
+    const toggleQuay = (quayId) => {
+        setCashierForm(prev => {
+            const current = prev.quay_ids || [];
+            return {
+                ...prev,
+                quay_ids: current.includes(quayId)
+                    ? current.filter(id => id !== quayId)
+                    : [...current, quayId],
+            };
+        });
+    };
+
+    const currentCashierId = cashierModal && cashierModal !== 'add' ? cashierModal.id : null;
+    const modalQuays = quays
+        .filter(q => q.kho_id === cashierForm.kho_id)
+        .sort((a, b) => (a.ten_quay || '').localeCompare(b.ten_quay || '', 'vi'));
+    const sortedNhanViens = [...nhanViens].sort((a, b) => (a.ho_ten || '').localeCompare(b.ho_ten || '', 'vi'));
 
     return (
         <>
@@ -139,8 +233,12 @@ function KhoTab() {
                 <button onClick={() => { setForm({ ten_kho: '', dia_chi: '', ghi_chu: '', nguoi_phu_trach: '' }); setModal('add'); }}
                     style={{ ...saveBtn, padding: '8px 18px' }}>+ Thêm kho</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-                {list.map(k => (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(360px,1fr))', gap: 14 }}>
+                {list.map(k => {
+                    const khoThuNgans = thuNgans.filter(t => t.kho_id === k.id);
+                    const khoQuays = quays.filter(q => q.kho_id === k.id);
+                    const unassignedQuays = khoQuays.filter(q => !q.thu_ngan_id);
+                    return (
                     <div key={k.id} style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', padding: 18, boxShadow: '0 1px 4px rgba(0,0,0,.04)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
@@ -160,7 +258,8 @@ function KhoTab() {
                             </div>
                         </div>
                     </div>
-                ))}
+                    );
+                })}
             </div>
             <Modal open={!!modal} onClose={() => setModal(null)} title={modal === 'add' ? '+ Thêm kho' : '✏️ Sửa kho'}>
                 <form onSubmit={save}>
@@ -742,14 +841,716 @@ function NhomHangTab() {
     );
 }
 
+// ─── TRAO ĐỔI TAB ─────────────────────────────────────────────────────────────
+function normalizeAscii(text) {
+    return String(text || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function parseTuoiPermille(text) {
+    const value = normalizeAscii(text);
+    if (!value) return null;
+    const fourDigit = value.match(/\b(\d{4})\b/);
+    if (fourDigit) return Math.round(Number(fourDigit[1]) / 10);
+    const threeDigit = value.match(/\b(\d{3})\b/);
+    if (threeDigit) return Number(threeDigit[1]);
+    const karat = value.match(/(\d+(?:[.,]\d+)?)\s*k\b/);
+    if (karat) return Math.round((Number(karat[1].replace(',', '.')) / 24) * 1000);
+    const pct = value.match(/(\d+(?:[.,]\d+)?)\s*%/);
+    if (pct) return Math.round(Number(pct[1].replace(',', '.')) * 10);
+    const small = value.match(/\b(\d+(?:[.,]\d+)?)\b/);
+    if (!small) return null;
+    const num = Number(small[1].replace(',', '.'));
+    return num <= 100 ? Math.round(num * 10) : null;
+}
+
+function loaiVangPermille(loai) {
+    return parseTuoiPermille(loai?.ma_loai) ?? parseTuoiPermille(loai?.ten_loai) ?? parseTuoiPermille(loai?.sjc_key);
+}
+
+const TUOI_VANG_DENSITY = {
+    1000: 19.32,
+    999: 19.25,
+    916: 17.7,
+    750: 15.6,
+    680: 15.0,
+    610: 14.2,
+    585: 13.9,
+    583: 13.86,
+    417: 11.82,
+    416: 11.78,
+    375: 10.9,
+};
+
+function suggestTuoiDensity(tenTuoi) {
+    const permille = parseTuoiPermille(tenTuoi);
+    if (permille == null) return 0;
+    if (TUOI_VANG_DENSITY[permille]) return TUOI_VANG_DENSITY[permille];
+    const density = 11.78 + (((permille / 1000) - 0.416) * (19.32 - 11.78)) / (0.9999 - 0.416);
+    return Math.max(10, Math.min(19.32, Number(density.toFixed(4))));
+}
+
+function suggestTuoiConfig(tenTuoi, loaiList) {
+    const permille = parseTuoiPermille(tenTuoi);
+    const target = normalizeAscii(tenTuoi);
+    let ref = null;
+    for (const loai of loaiList || []) {
+        const hasPrice = Boolean((loai.gia_ban || 0) || (loai.gia_mua || 0));
+        const options = [loai.ma_loai, loai.ten_loai, loai.sjc_key].map(normalizeAscii).filter(Boolean);
+        if (target && options.includes(target) && hasPrice) {
+            ref = loai;
+            break;
+        }
+    }
+    if (!ref && permille != null) {
+        let nearest = null;
+        let smallestDiff = Infinity;
+        for (const loai of loaiList || []) {
+            const hasPrice = Boolean((loai.gia_ban || 0) || (loai.gia_mua || 0));
+            const loaiPermilleValue = loaiVangPermille(loai);
+            if (loaiPermilleValue == null || !hasPrice) continue;
+            const diff = Math.abs(loaiPermilleValue - permille);
+            if (diff < smallestDiff) {
+                smallestDiff = diff;
+                nearest = loai;
+            }
+        }
+        if (nearest && smallestDiff <= 20) ref = nearest;
+    }
+    let giaBan = ref?.gia_ban || 0;
+    let giaMua = ref?.gia_mua || 0;
+    if (!giaBan && !giaMua && permille != null) {
+        let pureRef = null;
+        let purePermille = 0;
+        for (const loai of loaiList || []) {
+            const loaiPermilleValue = loaiVangPermille(loai);
+            if (!loaiPermilleValue || !loai.gia_ban || !loai.gia_mua) continue;
+            if (loaiPermilleValue > purePermille) {
+                pureRef = loai;
+                purePermille = loaiPermilleValue;
+            }
+        }
+        if (pureRef && purePermille) {
+            giaBan = Math.round((pureRef.gia_ban * permille) / purePermille);
+            giaMua = Math.round((pureRef.gia_mua * permille) / purePermille);
+        }
+    }
+    return {
+        gia_ban: giaBan,
+        gia_mua: giaMua,
+        trong_luong_rieng: suggestTuoiDensity(tenTuoi),
+    };
+}
+
+const fmtDensity = n => Number(n || 0)
+    ? Number(n).toLocaleString('vi-VN', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+    : '—';
+
+function TuoiVangTab() {
+    const [list, setList] = useState([]);
+    const [loaiList, setLoaiList] = useState([]);
+    const [modal, setModal] = useState(null);
+    const [priceModal, setPriceModal] = useState(null);
+    const [histModal, setHistModal] = useState(null);
+    const [form, setForm] = useState({ ten_tuoi: '', gia_ban: '', gia_mua: '', trong_luong_rieng: '', ghi_chu: '' });
+    const [priceForm, setPriceForm] = useState({ gia_ban: '', gia_mua: '', note: '' });
+    const [confirm, setConfirm] = useState(null);
+
+    const load = useCallback(async () => {
+        const [tuoiRes, loaiRes] = await Promise.all([
+            fetch(`${API}/api/tuoi_vang`),
+            fetch(`${API}/api/loai_vang`),
+        ]);
+        setList(await tuoiRes.json());
+        setLoaiList(await loaiRes.json());
+    }, []);
+    useEffect(() => { load(); }, [load]);
+
+    const openAdd = () => {
+        setForm({ ten_tuoi: '', gia_ban: '', gia_mua: '', trong_luong_rieng: '', ghi_chu: '' });
+        setModal('add');
+    };
+    const openEdit = item => {
+        setForm({
+            ten_tuoi: item.ten_tuoi || '',
+            gia_ban: item.gia_ban || '',
+            gia_mua: item.gia_mua || '',
+            trong_luong_rieng: item.trong_luong_rieng || '',
+            ghi_chu: item.ghi_chu || '',
+        });
+        setModal(item);
+    };
+    const openPrice = item => {
+        setPriceForm({ gia_ban: item.gia_ban || '', gia_mua: item.gia_mua || '', note: '' });
+        setPriceModal(item);
+    };
+
+    const handleTenTuoiChange = value => {
+        if (modal !== 'add') {
+            setForm({ ...form, ten_tuoi: value });
+            return;
+        }
+        const suggested = suggestTuoiConfig(value, loaiList);
+        setForm({
+            ...form,
+            ten_tuoi: value,
+            gia_ban: suggested.gia_ban || '',
+            gia_mua: suggested.gia_mua || '',
+            trong_luong_rieng: suggested.trong_luong_rieng || '',
+        });
+    };
+
+    const save = async e => {
+        e.preventDefault();
+        const isEdit = modal !== 'add';
+        const r = await fetch(isEdit ? `${API}/api/tuoi_vang/${modal.id}` : `${API}/api/tuoi_vang`, {
+            method: isEdit ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            window.alert(j.error || 'Lưu tuổi vàng thất bại');
+            return;
+        }
+        setModal(null);
+        load();
+    };
+
+    const updatePrice = async e => {
+        e.preventDefault();
+        const r = await fetch(`${API}/api/tuoi_vang/${priceModal.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(priceForm),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            window.alert(j.error || 'Cập nhật giá tuổi vàng thất bại');
+            return;
+        }
+        setPriceModal(null);
+        load();
+    };
+
+    const del = async () => {
+        await fetch(`${API}/api/tuoi_vang/${confirm}`, { method: 'DELETE' });
+        setConfirm(null);
+        load();
+    };
+
+    const delta = n => {
+        if (!n) return null;
+        const c = n > 0 ? '#16a34a' : '#dc2626';
+        return <span style={{ color: c, fontSize: 11, fontWeight: 700 }}>{n > 0 ? '+' : ''}{Number(n).toLocaleString('vi-VN')}</span>;
+    };
+
+    return (
+        <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: '#64748b' }}>{list.length} tuổi vàng</div>
+                <button onClick={openAdd} style={saveBtn}>+ Thêm tuổi vàng</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
+                {list.length === 0 && (
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 60, color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                        Chưa có tuổi vàng nào
+                    </div>
+                )}
+                {list.map(t => (
+                    <div key={t.id} style={{ background: 'white', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,.05)' }}>
+                        <div style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                                <div style={{ color: 'white', fontWeight: 900, fontSize: 18 }}>{t.ten_tuoi}</div>
+                                <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 1 }}>{t.ghi_chu || `Tuổi vàng ${t.ten_tuoi}`}</div>
+                                <div style={{ marginTop: 5, display: 'inline-block', background: 'rgba(0,0,0,.2)', borderRadius: 12, padding: '2px 8px', fontSize: 10, color: 'white' }}>
+                                    ⚖ {fmtDensity(t.trong_luong_rieng)} g/cm³
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 5 }}>
+                                <button onClick={() => openEdit(t)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                </button>
+                                <button onClick={() => setConfirm(t.id)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(220,38,38,.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div style={{ padding: '12px 16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                                <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '8px 12px', border: '1px solid #bbf7d0' }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', marginBottom: 3, letterSpacing: .3 }}>GIÁ BÁN RA</div>
+                                    <div style={{ fontSize: 15, fontWeight: 900, color: '#15803d' }}>{fmt(t.gia_ban)}<span style={{ fontSize: 10 }}> ₫</span></div>
+                                </div>
+                                <div style={{ background: '#fff7ed', borderRadius: 8, padding: '8px 12px', border: '1px solid #fed7aa' }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c2410c', marginBottom: 3, letterSpacing: .3 }}>GIÁ MUA VÀO</div>
+                                    <div style={{ fontSize: 15, fontWeight: 900, color: '#c2410c' }}>{fmt(t.gia_mua)}<span style={{ fontSize: 10 }}> ₫</span></div>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+                                <div style={{ fontSize: 12, color: '#64748b' }}>
+                                    ⚖ Trọng lượng riêng: <b style={{ color: '#1e293b' }}>{fmtDensity(t.trong_luong_rieng)} g/cm³</b>
+                                </div>
+                                <div style={{ background: '#f8fafc', borderRadius: 10, padding: '4px 10px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: 18, fontWeight: 900, color: '#1e293b' }}>{t.so_hang || 0}</div>
+                                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 700 }}>sản phẩm</div>
+                                </div>
+                            </div>
+                            {t.ngay_tao && <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>🕐 {t.ngay_tao}</div>}
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button onClick={() => openPrice(t)} style={{ flex: 1, padding: '7px', borderRadius: 7, border: '1.5px solid #2563eb', background: 'white', color: '#2563eb', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>✅ Cập nhật giá</button>
+                                <button onClick={() => setHistModal(t)} style={{ flex: 1, padding: '7px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>📋 Lịch sử ({t.lich_su?.length || 0})</button>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <Modal open={!!modal} onClose={() => setModal(null)} title={modal === 'add' ? '+ Thêm tuổi vàng' : '✏️ Sửa tuổi vàng'} maxWidth={580}>
+                <form onSubmit={save}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                        <Field label="Tên tuổi vàng *">
+                            <input required style={inp} value={form.ten_tuoi || ''} onChange={e => handleTenTuoiChange(e.target.value)} placeholder="VD: 417" />
+                        </Field>
+                        <Field label="Trọng lượng riêng (g/cm³)">
+                            <input type="number" step="0.0001" style={inp} value={form.trong_luong_rieng || ''} onChange={e => setForm({ ...form, trong_luong_rieng: e.target.value })} placeholder="VD: 11.82" />
+                        </Field>
+                        <Field label="Giá bán ra (₫/chỉ)">
+                            <input type="number" style={inp} value={form.gia_ban || ''} onChange={e => setForm({ ...form, gia_ban: e.target.value })} placeholder="VD: 7071300" />
+                        </Field>
+                        <Field label="Giá mua vào (₫/chỉ)">
+                            <input type="number" style={inp} value={form.gia_mua || ''} onChange={e => setForm({ ...form, gia_mua: e.target.value })} placeholder="VD: 6181300" />
+                        </Field>
+                    </div>
+                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: '#64748b' }}>
+                        Nhập tên tuổi vàng, hệ thống sẽ gợi ý giá và trọng lượng riêng để bạn chỉnh lại trước khi lưu.
+                    </div>
+                    <Field label="Ghi chú">
+                        <textarea style={{ ...inp, height: 70, resize: 'vertical' }} value={form.ghi_chu || ''} onChange={e => setForm({ ...form, ghi_chu: e.target.value })} placeholder="Ghi chú tuổi vàng..." />
+                    </Field>
+                    <BtnRow onClose={() => setModal(null)} label={modal === 'add' ? 'Tạo tuổi vàng' : 'Lưu thay đổi'} />
+                </form>
+            </Modal>
+
+            <Modal open={!!priceModal} onClose={() => setPriceModal(null)} title={`💹 Cập nhật giá — ${priceModal?.ten_tuoi}`} maxWidth={560}>
+                <form onSubmit={updatePrice}>
+                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#64748b' }}>
+                        Hiện tại: <b>{fmt(priceModal?.gia_ban)} ₫</b> (bán) / <b>{fmt(priceModal?.gia_mua)} ₫</b> (mua)
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                        <Field label="Giá bán ra mới (₫)"><input type="number" required style={inp} value={priceForm.gia_ban} onChange={e => setPriceForm({ ...priceForm, gia_ban: e.target.value })} /></Field>
+                        <Field label="Giá mua vào mới (₫)"><input type="number" required style={inp} value={priceForm.gia_mua} onChange={e => setPriceForm({ ...priceForm, gia_mua: e.target.value })} /></Field>
+                    </div>
+                    <Field label="Ghi chú"><input style={inp} placeholder="VD: Điều chỉnh theo thị trường..." value={priceForm.note} onChange={e => setPriceForm({ ...priceForm, note: e.target.value })} /></Field>
+                    <BtnRow onClose={() => setPriceModal(null)} label="Cập nhật giá" />
+                </form>
+            </Modal>
+
+            <Modal open={!!histModal} onClose={() => setHistModal(null)} title={`📋 Lịch sử giá — ${histModal?.ten_tuoi}`} maxWidth={620}>
+                {!histModal?.lich_su?.length ? (
+                    <div style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>Chưa có lịch sử điều chỉnh giá.</div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {[...(histModal.lich_su || [])].reverse().map((h, idx) => (
+                            <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 12px', background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>📅 {h.date} {h.by ? `· ${h.by}` : ''}</div>
+                                <div style={{ fontSize: 13 }}>
+                                    <span style={{ color: '#15803d', fontWeight: 700 }}>{fmt(h.gia_ban)} ₫</span>
+                                    <span style={{ color: '#94a3b8', margin: '0 4px' }}>/</span>
+                                    <span style={{ color: '#c2410c', fontWeight: 700 }}>{fmt(h.gia_mua)} ₫</span>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                                    {delta(h.delta_ban)}
+                                    {delta(h.delta_mua)}
+                                </div>
+                                {h.note && <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>💬 {h.note}</div>}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Modal>
+
+            <ConfirmModal open={confirm !== null} onClose={() => setConfirm(null)}
+                onConfirm={del}
+                message="Xóa tuổi vàng này? Giá đã lưu và lịch sử giá sẽ mất, nhưng hàng hóa đang gắn tuổi vàng sẽ không bị xóa." />
+        </>
+    );
+}
+
+function TraoDoiTab() {
+    const STORAGE_KEY = 'don_hang_exchange_matrix';
+    const [list, setList] = useState([]);
+    const [matrix, setMatrix] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+        catch { return {}; }
+    });
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        fetch(`${API}/api/loai_vang`).then(r => r.json()).then(setList).catch(() => { });
+    }, []);
+
+    const cellKey = (rId, cId) => `${rId}_${cId}`;
+
+    const handleChange = (rId, cId, val) => {
+        setMatrix(m => ({ ...m, [cellKey(rId, cId)]: val }));
+        setSaved(false);
+    };
+
+    const handleSave = () => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2200);
+    };
+
+    const handleReset = () => {
+        if (!window.confirm('Reset toàn bộ bảng tỷ lệ?')) return;
+        setMatrix({});
+        localStorage.removeItem(STORAGE_KEY);
+    };
+
+    return (
+        <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+                <div>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: '#1e293b' }}>🔄 Bảng tỷ lệ trao đổi vàng</div>
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                        Hàng = loại mang đến · Cột = loại đổi sang · Mỗi ô = số chỉ [cột] đổi được 1 chỉ [hàng]
+                    </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {saved && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 700 }}>✅ Đã lưu!</span>}
+                    <button onClick={handleReset} style={{ padding: '7px 14px', borderRadius: 8, border: '1.5px solid #fca5a5', background: '#fff1f2', color: '#dc2626', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                        🗑 Reset
+                    </button>
+                    <button onClick={handleSave} style={{ ...saveBtn, padding: '7px 20px' }}>
+                        💾 Lưu
+                    </button>
+                </div>
+            </div>
+
+            {list.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🧱</div>
+                    <div style={{ fontWeight: 700 }}>Chưa có loại vàng nào</div>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>Hãy thêm loại vàng trong tab <strong>Giá vàng</strong></div>
+                </div>
+            ) : (
+                <div style={{ background: 'white', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'auto', boxShadow: '0 1px 4px rgba(0,0,0,.04)' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                        <thead>
+                            <tr>
+                                <th style={{
+                                    background: '#f8fafc', border: '1.5px solid #e2e8f0',
+                                    padding: '12px 16px', fontSize: 10, color: '#94a3b8',
+                                    fontWeight: 700, textAlign: 'center', minWidth: 130,
+                                    position: 'sticky', left: 0, zIndex: 2,
+                                }}>
+                                    <div style={{ color: '#64748b' }}>Mang đến ↓</div>
+                                    <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: 5, paddingTop: 5 }}>Đổi sang →</div>
+                                </th>
+                                {list.map(col => (
+                                    <th key={col.id} style={{
+                                        background: '#1e293b', color: 'white',
+                                        padding: '12px 10px', fontWeight: 800, fontSize: 12,
+                                        textAlign: 'center', border: '1px solid #334155',
+                                        minWidth: 100, whiteSpace: 'nowrap',
+                                    }}>
+                                        <div>{col.ten_loai || col.ma_loai}</div>
+                                        {col.gia_ban && (
+                                            <div style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8', marginTop: 2 }}>
+                                                {Number(col.gia_ban).toLocaleString('vi-VN')}đ
+                                            </div>
+                                        )}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {list.map((row, ri) => (
+                                <tr key={row.id}>
+                                    <td style={{
+                                        background: '#1e293b', color: 'white',
+                                        padding: '10px 16px', fontWeight: 700, fontSize: 13,
+                                        border: '1px solid #334155', whiteSpace: 'nowrap',
+                                        position: 'sticky', left: 0, zIndex: 1,
+                                    }}>
+                                        <div>{row.ten_loai || row.ma_loai}</div>
+                                        {row.gia_ban && (
+                                            <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400, marginTop: 2 }}>
+                                                {Number(row.gia_ban).toLocaleString('vi-VN')}đ
+                                            </div>
+                                        )}
+                                    </td>
+                                    {list.map((col) => {
+                                        const isDiag = row.id === col.id;
+                                        const key = cellKey(row.id, col.id);
+                                        return (
+                                            <td key={col.id} style={{
+                                                padding: 6, textAlign: 'center',
+                                                background: isDiag ? '#f1f5f9' : (ri % 2 === 0 ? 'white' : '#fafafa'),
+                                                border: '1px solid #e2e8f0',
+                                            }}>
+                                                {isDiag ? (
+                                                    <div style={{
+                                                        height: 36, background: '#e2e8f0',
+                                                        borderRadius: 8, display: 'flex',
+                                                        alignItems: 'center', justifyContent: 'center',
+                                                        fontSize: 18, color: '#94a3b8',
+                                                    }}>—</div>
+                                                ) : (
+                                                    <input
+                                                        type="number" min="0" step="0.001"
+                                                        value={matrix[key] ?? ''}
+                                                        onChange={e => handleChange(row.id, col.id, e.target.value)}
+                                                        placeholder="1.000"
+                                                        style={{
+                                                            width: '100%', height: 36, boxSizing: 'border-box',
+                                                            textAlign: 'center', fontSize: 13, fontWeight: 600,
+                                                            border: matrix[key] ? '2px solid #6366f1' : '1.5px solid #e2e8f0',
+                                                            borderRadius: 8, outline: 'none', padding: '0 6px',
+                                                            background: matrix[key] ? '#eef2ff' : 'white',
+                                                            color: '#1e293b', transition: 'border-color .15s, background .15s',
+                                                        }}
+                                                    />
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    <div style={{ padding: '12px 16px', background: '#fffbeb', borderTop: '1px solid #fde68a', fontSize: 12, color: '#92400e' }}>
+                        💡 <strong>Ví dụ:</strong> Hàng <em>Vàng 18K</em>, Cột <em>Vàng 24K</em> = 0.75 → 1 chỉ 18K đổi được 0.75 chỉ 24K.
+                        Dữ liệu lưu trong trình duyệt.
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
+function normalizeExchangeCell(value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return {
+            plus: value.plus ?? '',
+            minus: value.minus ?? '',
+        };
+    }
+    return { plus: '', minus: '' };
+}
+
+function TraoDoiTabV2() {
+    const STORAGE_KEY = 'don_hang_exchange_matrix_tuoi_vang_v2';
+    const [list, setList] = useState([]);
+    const [matrix, setMatrix] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+        catch { return {}; }
+    });
+
+    useEffect(() => {
+        fetch(`${API}/api/tuoi_vang`)
+            .then(r => r.json())
+            .then(rows => rows.sort((a, b) => {
+                const av = parseTuoiPermille(a.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                const bv = parseTuoiPermille(b.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                return av - bv || String(a.ten_tuoi || '').localeCompare(String(b.ten_tuoi || ''), 'vi');
+            }))
+            .then(setList)
+            .catch(() => { });
+    }, []);
+
+    useEffect(() => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
+    }, [matrix]);
+
+    const cellKey = (rId, cId) => `${rId}_${cId}`;
+
+    const handleChange = (rId, cId, field, val) => {
+        setMatrix(m => {
+            const key = cellKey(rId, cId);
+            const current = normalizeExchangeCell(m[key]);
+            return {
+                ...m,
+                [key]: {
+                    ...current,
+                    [field]: val,
+                },
+            };
+        });
+    };
+
+    const handleReset = () => {
+        if (!window.confirm('Reset toàn bộ bảng tỷ lệ?')) return;
+        setMatrix({});
+        localStorage.removeItem(STORAGE_KEY);
+    };
+
+    return (
+        <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+                <div>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: '#1e293b' }}>🔄 Bảng trao đổi theo tuổi vàng</div>
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                        Hàng = tuổi vàng mang đến · Cột = tuổi vàng đổi sang · Mỗi ô gồm 2 giá trị: `+` màu đỏ và `-` màu xanh lá. Dữ liệu được lưu sống khi nhập.
+                    </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 700 }}>Tự lưu</span>
+                    <button onClick={handleReset} style={{ padding: '7px 14px', borderRadius: 8, border: '1.5px solid #fca5a5', background: '#fff1f2', color: '#dc2626', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                        🗑 Reset
+                    </button>
+                </div>
+            </div>
+
+            {list.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🪙</div>
+                    <div style={{ fontWeight: 700 }}>Chưa có tuổi vàng nào</div>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>Hãy thêm tuổi vàng trong tab <strong>Tuổi vàng</strong></div>
+                </div>
+            ) : (
+                <div style={{ background: 'white', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'auto', boxShadow: '0 1px 4px rgba(0,0,0,.04)' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                        <thead>
+                            <tr>
+                                <th style={{
+                                    background: '#f8fafc', border: '1.5px solid #e2e8f0',
+                                    padding: '12px 16px', fontSize: 10, color: '#94a3b8',
+                                    fontWeight: 700, textAlign: 'center', minWidth: 136,
+                                    position: 'sticky', left: 0, zIndex: 2,
+                                }}>
+                                    <div style={{ color: '#64748b' }}>Mang đến ↓</div>
+                                    <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: 5, paddingTop: 5 }}>Đổi sang →</div>
+                                </th>
+                                {list.map(col => (
+                                    <th key={col.id} style={{
+                                        background: '#1e293b', color: 'white',
+                                        padding: '10px 8px', fontWeight: 800, fontSize: 12,
+                                        textAlign: 'center', border: '1px solid #334155',
+                                        minWidth: 128, whiteSpace: 'nowrap',
+                                    }}>
+                                        <div>{col.ten_tuoi}</div>
+                                        <div style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8', marginTop: 2 }}>
+                                            {fmtDensity(col.trong_luong_rieng)} g/cm³
+                                        </div>
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {list.map((row, ri) => (
+                                <tr key={row.id}>
+                                    <td style={{
+                                        background: '#1e293b', color: 'white',
+                                        padding: '10px 16px', fontWeight: 700, fontSize: 13,
+                                        border: '1px solid #334155', whiteSpace: 'nowrap',
+                                        position: 'sticky', left: 0, zIndex: 1,
+                                    }}>
+                                        <div>{row.ten_tuoi}</div>
+                                        <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400, marginTop: 2 }}>
+                                            {fmtDensity(row.trong_luong_rieng)} g/cm³
+                                        </div>
+                                    </td>
+                                    {list.map(col => {
+                                        const isDiag = row.id === col.id;
+                                        const cell = normalizeExchangeCell(matrix[cellKey(row.id, col.id)]);
+                                        return (
+                                            <td key={col.id} style={{
+                                                padding: 4, textAlign: 'center',
+                                                background: isDiag ? '#f1f5f9' : (ri % 2 === 0 ? 'white' : '#fafafa'),
+                                                border: '1px solid #e2e8f0',
+                                            }}>
+                                                {isDiag ? (
+                                                    <div style={{
+                                                        height: 36, background: '#e2e8f0',
+                                                        borderRadius: 8, display: 'flex',
+                                                        alignItems: 'center', justifyContent: 'center',
+                                                        fontSize: 18, color: '#94a3b8',
+                                                    }}>—</div>
+                                                ) : (
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                                                        <div style={{ position: 'relative', minWidth: 0 }}>
+                                                            <span style={{
+                                                                position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
+                                                                fontSize: 12, fontWeight: 900, color: '#dc2626',
+                                                            }}>+</span>
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.001"
+                                                                value={cell.plus}
+                                                                onChange={e => handleChange(row.id, col.id, 'plus', e.target.value)}
+                                                                placeholder="0.000"
+                                                                style={{
+                                                                    width: '100%', height: 32, boxSizing: 'border-box',
+                                                                    textAlign: 'center', fontSize: 11, fontWeight: 700,
+                                                                    border: cell.plus ? '1.5px solid #fca5a5' : '1.5px solid #fecaca',
+                                                                    borderRadius: 8, outline: 'none', padding: '0 6px 0 18px',
+                                                                    background: cell.plus ? '#fff1f2' : '#fff5f5',
+                                                                    color: '#dc2626',
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div style={{ position: 'relative', minWidth: 0 }}>
+                                                            <span style={{
+                                                                position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
+                                                                fontSize: 12, fontWeight: 900, color: '#16a34a',
+                                                            }}>-</span>
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.001"
+                                                                value={cell.minus}
+                                                                onChange={e => handleChange(row.id, col.id, 'minus', e.target.value)}
+                                                                placeholder="0.000"
+                                                                style={{
+                                                                    width: '100%', height: 32, boxSizing: 'border-box',
+                                                                    textAlign: 'center', fontSize: 11, fontWeight: 700,
+                                                                    border: cell.minus ? '1.5px solid #86efac' : '1.5px solid #bbf7d0',
+                                                                    borderRadius: 8, outline: 'none', padding: '0 6px 0 18px',
+                                                                    background: cell.minus ? '#f0fdf4' : '#f7fee7',
+                                                                    color: '#16a34a',
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    <div style={{ padding: '12px 16px', background: '#fffbeb', borderTop: '1px solid #fde68a', fontSize: 12, color: '#92400e' }}>
+                        💡 <strong>Ví dụ:</strong> Hàng <em>416</em>, Cột <em>585</em>. Dòng <span style={{ color: '#dc2626', fontWeight: 700 }}>+</span> là phần cộng thêm, dòng <span style={{ color: '#16a34a', fontWeight: 700 }}>-</span> là phần trừ bớt. Dữ liệu lưu trong trình duyệt.
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
 
 const SUB_TABS = [
     { key: 'gia_vang', label: '🥇 Giá vàng', Component: GiaVangTab },
+    { key: 'tuoi_vang', label: '🪙 Tuổi vàng', Component: TuoiVangTab },
     { key: 'nhom_hang', label: '🏷️ Nhóm hàng', Component: NhomHangTab },
     { key: 'kho', label: '🏪 Kho', Component: KhoTab },
     { key: 'quay_nho', label: '🗂 Quầy nhỏ', Component: QuayTab },
+    { key: 'trao_doi', label: '🔄 Trao đổi', Component: TraoDoiTabV2 },
 ];
+
 
 export default function CauHinhPage() {
     const [tab, setTab] = useState('gia_vang');

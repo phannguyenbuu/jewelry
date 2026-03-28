@@ -1,26 +1,25 @@
 /**
  * ImageOcrUpload — Reusable image upload + OCR component
  * -------------------------------------------------------
- * Uses the /api/ocr endpoint (Gemini Vision) to extract text from an uploaded image.
- *
  * Props:
- *   onExtracted(text)   — called when user clicks "Dùng làm mô tả" with the extracted text
- *   apiUrl              — base URL of the backend (default: '' = same origin)
- *   label               — button label  (default: "📎 Đính kèm / OCR")
- *   accept              — file accept string (default: "image/*")
- *   accentColor         — hex color for the button border & icon (default: "#6366f1")
- *   ocrEndpoint         — path of the OCR endpoint (default: "/api/ocr")
+ *   onExtracted(text)  — called when user clicks "Dùng làm mô tả"
+ *   apiUrl             — base URL (default: '' = same origin)
+ *   label              — button label (default: "📎 Đính kèm / OCR")
+ *   accept             — file accept string (default: "image/*")
+ *   accentColor        — hex accent color (default: "#6366f1")
+ *   ocrEndpoint        — OCR endpoint path (default: "/api/ocr")
+ *   initialFile        — File object: open modal + run OCR immediately on this file
+ *   onClose            — called when modal closes (useful in initialFile mode)
  *
- * Usage:
- *   import ImageOcrUpload from './components/ImageOcrUpload';
+ * Usage — standalone upload button:
  *   <ImageOcrUpload onExtracted={text => setForm(f => ({ ...f, mo_ta: text }))} />
  *
- * Backend contract (POST ocrEndpoint):
- *   Request:  { image_base64: string, mime_type: string, file_name: string }
- *   Response: { text: string } | { error: string }
+ * Usage — OCR an existing file (e.g. from DocUploadSection):
+ *   <ImageOcrUpload initialFile={file} onClose={() => setOcrFile(null)}
+ *                   onExtracted={text => setNote(text)} />
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 const DEFAULT_ACCENT = '#6366f1';
 
@@ -31,14 +30,34 @@ export default function ImageOcrUpload({
     accept = 'image/*',
     accentColor = DEFAULT_ACCENT,
     ocrEndpoint = '/api/ocr',
+    initialFile = null,
+    onClose: onCloseProp,
 }) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(!!initialFile);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState('');
     const [preview, setPreview] = useState('');
     const [fileName, setFileName] = useState('');
     const [dragOver, setDragOver] = useState(false);
     const fileRef = useRef();
+
+    /* ── Auto-trigger when initialFile provided ── */
+    useEffect(() => {
+        if (!initialFile) return;
+        const url = URL.createObjectURL(initialFile);
+        setPreview(url);
+        setFileName(initialFile.name);
+        setOpen(true);
+        runOcr(initialFile);
+        return () => URL.revokeObjectURL(url);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialFile]);
+
+    /* ── Close handler ────────────────────────────────────────────── */
+    const handleClose = () => {
+        setOpen(false);
+        onCloseProp && onCloseProp();
+    };
 
     /* ── OCR call ─────────────────────────────────────────────────── */
     const runOcr = (file) => {
@@ -57,6 +76,7 @@ export default function ImageOcrUpload({
                         file_name: file.name,
                     }),
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 setResult(data.text || data.error || 'Không đọc được nội dung');
             } catch (e) {
@@ -125,33 +145,35 @@ export default function ImageOcrUpload({
 
     return (
         <>
-            {/* ── Trigger area (button + drag zone) ── */}
-            <div
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={onDrop}
-                style={{
-                    border: `2px dashed ${dragOver ? accentColor : '#e2e8f0'}`,
-                    borderRadius: 10, padding: '10px 14px',
-                    background: dragOver ? accentColor + '0d' : '#fafafa',
-                    transition: 'all .2s', display: 'flex', alignItems: 'center', gap: 10,
-                }}
-            >
-                <label style={pill}>
-                    {label}
-                    <input
-                        ref={fileRef} type="file" accept={accept}
-                        style={{ display: 'none' }} onChange={onInputChange}
-                    />
-                </label>
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                    {dragOver ? 'Thả ảnh vào đây...' : 'hoặc kéo thả ảnh vào đây'}
-                </span>
-            </div>
+            {/* ── Trigger area — hidden when in initialFile mode ── */}
+            {!initialFile && (
+                <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    style={{
+                        border: `2px dashed ${dragOver ? accentColor : '#e2e8f0'}`,
+                        borderRadius: 10, padding: '10px 14px',
+                        background: dragOver ? accentColor + '0d' : '#fafafa',
+                        transition: 'all .2s', display: 'flex', alignItems: 'center', gap: 10,
+                    }}
+                >
+                    <label style={pill}>
+                        {label}
+                        <input
+                            ref={fileRef} type="file" accept={accept}
+                            style={{ display: 'none' }} onChange={onInputChange}
+                        />
+                    </label>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                        {dragOver ? 'Thả ảnh vào đây...' : 'hoặc kéo thả ảnh vào đây'}
+                    </span>
+                </div>
+            )}
 
             {/* ── Modal: preview + OCR result ── */}
             {open && (
-                <div style={overlay} onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+                <div style={overlay} onClick={(e) => e.target === e.currentTarget && handleClose()}>
                     <div style={modalBox}>
                         {/* Header */}
                         <div style={{
@@ -166,7 +188,7 @@ export default function ImageOcrUpload({
                                     Nhận dạng văn bản bằng Gemini AI · Chọn kết quả để điền vào form
                                 </div>
                             </div>
-                            <button onClick={() => setOpen(false)}
+                            <button onClick={handleClose}
                                 style={{ background: 'none', border: 'none', color: 'white', fontSize: 24, cursor: 'pointer', lineHeight: 1 }}>
                                 ×
                             </button>
@@ -226,17 +248,19 @@ export default function ImageOcrUpload({
                                             📋 Copy toàn bộ
                                         </button>
                                         <button
-                                            onClick={() => { onExtracted && onExtracted(result); setOpen(false); }}
+                                            onClick={() => { onExtracted && onExtracted(result); handleClose(); }}
                                             style={btnBase(accentColor)}
                                         >
                                             ✓ Dùng làm mô tả
                                         </button>
-                                        <button
-                                            onClick={() => fileRef.current?.click()}
-                                            style={btnBase('#f1f5f9', '#475569')}
-                                        >
-                                            🔄 Ảnh khác
-                                        </button>
+                                        {!initialFile && (
+                                            <button
+                                                onClick={() => fileRef.current?.click()}
+                                                style={btnBase('#f1f5f9', '#475569')}
+                                            >
+                                                🔄 Ảnh khác
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>

@@ -1,0 +1,24 @@
+# Git metadata
+.git/
+
+# Frontend build/runtime
+frontend/node_modules/
+frontend/dist/
+
+# Backend runtime/generated data
+backend/uploads/
+backend/instance/
+instance/
+
+# Python cache
+__pycache__/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log

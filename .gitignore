@@ -1,0 +1,17 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+instance/
+backend/instance/
+backend/uploads/
+
+frontend/node_modules/
+frontend/dist/
+
+.DS_Store

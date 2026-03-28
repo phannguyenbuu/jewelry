@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import ImageOcrUpload from './components/ImageOcrUpload';
+import { API_BASE } from './lib/api';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = API_BASE;
 const fmt = n => n ? Number(n).toLocaleString('vi-VN') : '0';
 const fmtB = n => { // format tỷ/triệu
     if (!n) return '0';
@@ -166,83 +168,6 @@ function Field({ label, children, half }) {
     );
 }
 
-// ── Document Upload + OCR Section ────────────────────────────────────
-function OcrModal({ file, onClose }) {
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState('');
-    const [preview, setPreview] = useState('');
-
-    useEffect(() => {
-        if (!file) return;
-        const url = URL.createObjectURL(file);
-        setPreview(url);
-        runOcr(file);
-        return () => URL.revokeObjectURL(url);
-    }, [file]);
-
-    const runOcr = async (f) => {
-        setLoading(true); setResult('');
-        try {
-            const reader = new FileReader();
-            reader.onload = async (ev) => {
-                const base64 = ev.target.result.split(',')[1];
-                const mime = f.type || 'image/jpeg';
-                const res = await fetch(`${API}/api/ocr`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image_base64: base64, mime_type: mime, file_name: f.name }),
-                });
-                const data = await res.json();
-                setResult(data.text || data.error || 'Không đọc được nội dung');
-                setLoading(false);
-            };
-            reader.readAsDataURL(f);
-        } catch (e) {
-            setResult('Lỗi kết nối: ' + e.message);
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: 20 }}>
-            <div style={{ background: 'white', borderRadius: 16, width: '100%', maxWidth: 820, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
-                <div style={{ padding: '14px 20px', background: '#1e293b', borderRadius: '16px 16px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ color: 'white', fontWeight: 800, fontSize: 14 }}>🔍 OCR — {file?.name}</div>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'white', fontSize: 22, cursor: 'pointer' }}>×</button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-                    {/* Preview */}
-                    <div style={{ borderRight: '1px solid #e2e8f0', padding: 16, overflowY: 'auto', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {preview && (file?.type?.startsWith('image') ?
-                            <img src={preview} style={{ maxWidth: '100%', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,.1)' }} alt="preview" /> :
-                            <div style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>📄 {file?.name}</div>
-                        )}
-                    </div>
-                    {/* OCR Result */}
-                    <div style={{ padding: 16, overflowY: 'auto' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, letterSpacing: .4 }}>NỘI DUNG TRÍCH XUẤT</div>
-                        {loading ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 0', color: '#64748b' }}>
-                                <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                                <div style={{ fontSize: 13 }}>Đang nhận dạng bằng AI...</div>
-                            </div>
-                        ) : (
-                            <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: '#1e293b', background: '#f0f4f8', borderRadius: 8, padding: 14, fontFamily: 'monospace', userSelect: 'all' }}>
-                                {result || '—'}
-                            </div>
-                        )}
-                        {result && (
-                            <button onClick={() => navigator.clipboard.writeText(result)}
-                                style={{ marginTop: 10, padding: '7px 16px', borderRadius: 7, border: '1px solid #e2e8f0', background: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6366f1' }}>
-                                📋 Copy nội dung
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
 
 function DocUploadSection({ docs, onChange }) {
     const [ocrTarget, setOcrTarget] = useState(null); // File object for OCR
@@ -288,8 +213,13 @@ function DocUploadSection({ docs, onChange }) {
                     </div>
                 ))}
             </div>
-            {ocrTarget && <OcrModal file={ocrTarget} onClose={() => setOcrTarget(null)} />}
-            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+            {ocrTarget && (
+                <ImageOcrUpload
+                    initialFile={ocrTarget}
+                    onClose={() => setOcrTarget(null)}
+                    apiUrl={typeof API !== 'undefined' ? API : ''}
+                />
+            )}
         </div>
     );
 }

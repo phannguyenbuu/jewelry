@@ -11,11 +11,14 @@ import urllib.request
 app = Flask(__name__)
 CORS(app)
 
-# PostgreSQL on VPS, SQLite for local dev
+# PostgreSQL-only runtime; DATABASE_URL can still override when needed.
 import os as _os
-_pg = 'postgresql://jewelry_user:jewelry2026@localhost/jewelry_db'
-_sl = 'sqlite:///jewelry.db'
-app.config['SQLALCHEMY_DATABASE_URI'] = _os.environ.get('DATABASE_URL', _pg if _os.path.exists('/var/www/jewelry') else _sl)
+_pg_host = _os.environ.get('PGHOST', 'localhost' if _os.path.exists('/var/www/jewelry') else 'jewelry.n-lux.com')
+_pg_user = _os.environ.get('PGUSER', 'postgres')
+_pg_password = _os.environ.get('PGPASSWORD', 'myPass')
+_pg_database = _os.environ.get('PGDATABASE', 'jsql')
+_pg = f'postgresql://{_pg_user}:{_pg_password}@{_pg_host}/{_pg_database}'
+app.config['SQLALCHEMY_DATABASE_URI'] = _os.environ.get('DATABASE_URL', _pg)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -250,6 +253,7 @@ def _migrate_thu_ngan_so_quy_amount_scale():
     if marker:
         return
 
+    timestamp = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     any_changed = False
     for model in (ThuNganSoQuy, ThuNganSoQuyTheoNguoi):
         for obj in model.query.all():
@@ -277,8 +281,8 @@ def _migrate_thu_ngan_so_quy_amount_scale():
         config_key=THU_NGAN_AMOUNT_MIGRATION_KEY,
         data={'scale': THU_NGAN_AMOUNT_SCALE},
         ghi_chu='Scale thu ngan amounts to thousandths',
-        ngay_tao=now_str(),
-        cap_nhat_luc=now_str(),
+        ngay_tao=timestamp,
+        cap_nhat_luc=timestamp,
     ))
     db.session.commit()
 

@@ -3,9 +3,9 @@ set -e
 systemctl stop jewelry || true
 
 # Drop & recreate DB
-su -c "psql -c 'DROP DATABASE IF EXISTS jewelry_db;'" postgres
-su -c "psql -c 'CREATE DATABASE jewelry_db OWNER jewelry_user;'" postgres
-su -c "psql -d jewelry_db -c 'GRANT ALL ON SCHEMA public TO jewelry_user;'" postgres
+su -c "psql -c 'DROP DATABASE IF EXISTS jsql;'" postgres
+su -c "psql -c 'CREATE DATABASE jsql OWNER postgres;'" postgres
+su -c "psql -d jsql -c 'GRANT ALL ON SCHEMA public TO postgres;'" postgres
 echo "DB recreated"
 
 systemctl start jewelry

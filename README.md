@@ -5,7 +5,7 @@ Vaan Kim Jewelry Management System is a full-stack web app for a jewelry store w
 ## Project Structure
 
 - `frontend/` - React + Vite single-page app with CSS-based UI.
-- `backend/` - Flask + SQLAlchemy API server with image upload and Gemini OCR integration.
+- `backend/` - Flask + SQLAlchemy API server with PostgreSQL persistence, image upload, and Gemini OCR integration.
 
 ### Frontend Structure
 
@@ -21,7 +21,7 @@ Vaan Kim Jewelry Management System is a full-stack web app for a jewelry store w
 - `backend/scale_agent_config.example.json` - Example config for the scale agent.
 - `backend/requirements-scale-agent.txt` - Agent-only dependencies (`requests`, `pyserial`).
 - `backend/uploads/` - Uploaded images served back through the API.
-- `backend/instance/` - Local runtime data for SQLite and Flask instance files.
+- `backend/instance/` - Local SQLite snapshot used as a migration source / backup.
 
 ## Core Flows
 
@@ -128,6 +128,15 @@ python app_jewelry.py
 ```
 
 The backend runs on port `5001` by default.
+By default it connects to PostgreSQL database `jsql` on `jewelry.n-lux.com` unless `DATABASE_URL` overrides it.
+
+To migrate the local SQLite snapshot into PostgreSQL:
+
+```bash
+cd backend
+python migrate_sqlite_to_jsql.py
+python smoke_test_jsql.py
+```
 
 ### Scale Agent on the machine connected to GP-20K
 
@@ -152,6 +161,12 @@ Set the following environment variable on the backend server:
 
 ```bash
 GEMINI_API_KEY=your_gemini_api_key
+```
+
+Optional backend override:
+
+```bash
+DATABASE_URL=postgresql://postgres:myPass@jewelry.n-lux.com/jsql
 ```
 
 Optional frontend override:

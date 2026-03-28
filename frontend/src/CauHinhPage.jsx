@@ -1,9 +1,30 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE } from './lib/api';
 
 const API = API_BASE;
 
 const fmt = n => n ? Number(n).toLocaleString('vi-VN') : '—';
+const byName = key => (a, b) => (a?.[key] || '').localeCompare(b?.[key] || '', 'vi');
+
+async function readJsonSafe(res, fallback = []) {
+    try {
+        const data = await res.json();
+        return res.ok ? data : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+async function readResponse(res) {
+    let data = {};
+    try {
+        data = await res.json();
+    } catch {
+        data = {};
+    }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
@@ -124,6 +145,7 @@ function KhoTab() {
     const [cashierModal, setCashierModal] = useState(null);
     const [cashierConfirm, setCashierConfirm] = useState(null);
     const [cashierForm, setCashierForm] = useState({});
+    const [cashierApiReady, setCashierApiReady] = useState(true);
 
     const load = useCallback(async () => {
         const [khoRes, thuNganRes, quayRes, nhanVienRes] = await Promise.all([
@@ -132,23 +154,19 @@ function KhoTab() {
             fetch(`${API}/api/quay_nho`),
             fetch(`${API}/api/nhan_vien`),
         ]);
-        setList(await khoRes.json());
-        setThuNgans(await thuNganRes.json());
-        setQuays(await quayRes.json());
-        setNhanViens(await nhanVienRes.json());
+        const [khoData, thuNganData, quayData, nhanVienData] = await Promise.all([
+            readJsonSafe(khoRes, []),
+            readJsonSafe(thuNganRes, []),
+            readJsonSafe(quayRes, []),
+            readJsonSafe(nhanVienRes, []),
+        ]);
+        setCashierApiReady(thuNganRes.ok);
+        setList(Array.isArray(khoData) ? khoData : []);
+        setThuNgans(Array.isArray(thuNganData) ? thuNganData : []);
+        setQuays(Array.isArray(quayData) ? quayData : []);
+        setNhanViens(Array.isArray(nhanVienData) ? nhanVienData : []);
     }, []);
     useEffect(() => { load(); }, [load]);
-
-    const readResponse = async (res) => {
-        let data = {};
-        try {
-            data = await res.json();
-        } catch {
-            data = {};
-        }
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        return data;
-    };
 
     const save = async (e) => {
         e.preventDefault();
@@ -204,7 +222,7 @@ function KhoTab() {
             ...cashier,
             kho_ten: cashier.ten_kho,
             nhan_vien_id: cashier.nhan_vien_id || '',
-            quay_ids: cashier.quay_ids || [],
+            quay_ids: cashier.quay_ids || cashier.quays?.map(q => q.id) || [],
         });
         setCashierModal(cashier);
     };
@@ -222,33 +240,69 @@ function KhoTab() {
     };
 
     const currentCashierId = cashierModal && cashierModal !== 'add' ? cashierModal.id : null;
-    const modalQuays = quays
+    const quaysById = Object.fromEntries(quays.map(q => [q.id, q]));
+    const modalQuays = [...quays]
         .filter(q => q.kho_id === cashierForm.kho_id)
-        .sort((a, b) => (a.ten_quay || '').localeCompare(b.ten_quay || '', 'vi'));
-    const sortedNhanViens = [...nhanViens].sort((a, b) => (a.ho_ten || '').localeCompare(b.ho_ten || '', 'vi'));
+        .sort(byName('ten_quay'));
+    const sortedNhanViens = [...nhanViens].sort(byName('ho_ten'));
+    const sortedKhos = [...list].sort(byName('ten_kho'));
+
+    const handleCashierKhoChange = (e) => {
+        const nextKhoId = e.target.value ? Number(e.target.value) : '';
+        const nextKho = sortedKhos.find(kho => kho.id === nextKhoId);
+        setCashierForm(prev => ({
+            ...prev,
+            kho_id: nextKhoId,
+            kho_ten: nextKho?.ten_kho || '',
+            quay_ids: (prev.quay_ids || []).filter(id => quaysById[id]?.kho_id === nextKhoId),
+        }));
+    };
+
+    const handleCashierStaffChange = (e) => {
+        const nextStaffId = e.target.value ? Number(e.target.value) : '';
+        const selectedStaff = sortedNhanViens.find(nv => nv.id === nextStaffId);
+        setCashierForm(prev => ({
+            ...prev,
+            nhan_vien_id: nextStaffId,
+            ten_thu_ngan: prev.ten_thu_ngan || selectedStaff?.ho_ten || '',
+        }));
+    };
 
     return (
         <>
+            {!cashierApiReady && (
+                <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 12, border: '1px solid #fed7aa', background: '#fff7ed', color: '#9a3412', fontSize: 12, lineHeight: 1.6 }}>
+                    API <b>Thu ngân</b> trên backend hiện tại chưa sẵn sàng. Danh sách <b>quầy nhỏ</b> vẫn được tải bình thường, nhưng để gán đúng thu ngân bạn cần chạy backend mới hoặc trỏ `VITE_API_BASE_URL` về server đã cập nhật.
+                </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
                 <button onClick={() => { setForm({ ten_kho: '', dia_chi: '', ghi_chu: '', nguoi_phu_trach: '' }); setModal('add'); }}
-                    style={{ ...saveBtn, padding: '8px 18px' }}>+ Thêm kho</button>
+                    style={{ ...saveBtn, padding: '8px 18px', whiteSpace: 'nowrap' }}>+ Thêm kho</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(360px,1fr))', gap: 14 }}>
-                {list.map(k => {
-                    const khoThuNgans = thuNgans.filter(t => t.kho_id === k.id);
-                    const khoQuays = quays.filter(q => q.kho_id === k.id);
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+                {sortedKhos.map(k => {
+                    const khoThuNgans = [...thuNgans].filter(t => t.kho_id === k.id).sort(byName('ten_thu_ngan'));
+                    const khoQuays = [...quays].filter(q => q.kho_id === k.id).sort(byName('ten_quay'));
                     const unassignedQuays = khoQuays.filter(q => !q.thu_ngan_id);
                     return (
                     <div key={k.id} style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', padding: 18, boxShadow: '0 1px 4px rgba(0,0,0,.04)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                             <div>
                                 <div style={{ fontWeight: 800, fontSize: 15, color: '#1e293b' }}>🏪 {k.ten_kho}</div>
                                 {k.dia_chi && <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>📍 {k.dia_chi}</div>}
                                 {k.nguoi_phu_trach && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>👤 {k.nguoi_phu_trach}</div>}
                                 {k.ngay_tao && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>🕐 {k.ngay_tao}</div>}
                                 {k.ghi_chu && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>💬 {k.ghi_chu}</div>}
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                                    <span style={{ fontSize: 11, color: '#1d4ed8', background: '#dbeafe', borderRadius: 999, padding: '3px 9px', fontWeight: 700 }}>
+                                        {khoThuNgans.length} thu ngân
+                                    </span>
+                                    <span style={{ fontSize: 11, color: '#0f766e', background: '#ccfbf1', borderRadius: 999, padding: '3px 9px', fontWeight: 700 }}>
+                                        {khoQuays.length} quầy nhỏ
+                                    </span>
+                                </div>
                             </div>
-                            <div style={{ display: 'flex', gap: 6 }}>
+                            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                                 <button onClick={() => { setForm({ ...k }); setModal(k); }} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                                 </button>
@@ -256,6 +310,92 @@ function KhoTab() {
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
                                 </button>
                             </div>
+                        </div>
+                        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px dashed #e2e8f0' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                                <div>
+                                    <div style={{ fontWeight: 800, fontSize: 13, color: '#334155' }}>Thu ngân thuộc kho này</div>
+                                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>Mỗi quầy nhỏ chỉ thuộc về 1 thu ngân, nhưng một thu ngân có thể phụ trách nhiều quầy nhỏ.</div>
+                                </div>
+                                <button type="button" onClick={() => openAddCashier(k)} style={{ ...saveBtn, padding: '7px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
+                                    + Thêm thu ngân
+                                </button>
+                            </div>
+
+                            {khoThuNgans.length === 0 ? (
+                                <div style={{ marginLeft: 18, padding: '10px 12px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12, fontStyle: 'italic' }}>
+                                    Chưa có thu ngân nào trong kho này.
+                                </div>
+                            ) : (
+                                <div style={{ marginLeft: 18, paddingLeft: 14, borderLeft: '3px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    {khoThuNgans.map(cashier => {
+                                        const assignedQuays = (cashier.quays || [])
+                                            .map(item => quaysById[item.id] || item)
+                                            .sort(byName('ten_quay'));
+                                        return (
+                                            <div key={cashier.id} style={{ background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', padding: 12 }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                            <span style={{ fontWeight: 800, fontSize: 13, color: '#1e293b' }}>👤 {cashier.ten_thu_ngan}</span>
+                                                            {cashier.nguoi_quan_ly && (
+                                                                <span style={{ fontSize: 10, color: '#4338ca', background: '#eef2ff', borderRadius: 999, padding: '3px 8px', fontWeight: 700 }}>
+                                                                    Nhân sự: {cashier.nguoi_quan_ly}
+                                                                </span>
+                                                            )}
+                                                            <span style={{ fontSize: 10, color: '#0f766e', background: '#ccfbf1', borderRadius: 999, padding: '3px 8px', fontWeight: 700 }}>
+                                                                {assignedQuays.length} quầy nhỏ
+                                                            </span>
+                                                        </div>
+                                                        {cashier.ngay_tao && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 5 }}>🕐 {cashier.ngay_tao}</div>}
+                                                        {cashier.ghi_chu && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>💬 {cashier.ghi_chu}</div>}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                                                        <button type="button" onClick={() => openEditCashier(cashier)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                                        </button>
+                                                        <button type="button" onClick={() => setCashierConfirm(cashier.id)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #fca5a5', background: '#fff1f2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}>
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ marginTop: 10 }}>
+                                                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Quầy nhỏ phụ trách</div>
+                                                    {assignedQuays.length === 0 ? (
+                                                        <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Chưa được gán quầy nhỏ.</div>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                            {assignedQuays.map(q => (
+                                                                <div key={q.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: 'white', border: '1px solid #e2e8f0' }}>
+                                                                    <div>
+                                                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>🗂 {q.ten_quay}</div>
+                                                                        {q.ghi_chu && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{q.ghi_chu}</div>}
+                                                                    </div>
+                                                                    {q.nguoi_phu_trach && <div style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap' }}>👤 {q.nguoi_phu_trach}</div>}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {unassignedQuays.length > 0 && (
+                                <div style={{ marginTop: 12, marginLeft: 18, padding: '10px 12px', borderRadius: 10, background: '#fff7ed', border: '1px solid #fed7aa' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 800, color: '#9a3412', marginBottom: 6 }}>Quầy nhỏ chưa giao thu ngân</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                        {unassignedQuays.map(q => (
+                                            <span key={q.id} style={{ fontSize: 11, color: '#9a3412', background: '#ffedd5', borderRadius: 999, padding: '4px 9px', fontWeight: 700 }}>
+                                                {q.ten_quay}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                     );
@@ -273,6 +413,81 @@ function KhoTab() {
             <ConfirmModal open={confirm !== null} onClose={() => setConfirm(null)}
                 onConfirm={async () => { await fetch(`${API}/api/kho/${confirm}`, { method: 'DELETE' }); load(); }}
                 message="Xác nhận xóa kho này?" />
+            <Modal open={!!cashierModal} onClose={() => setCashierModal(null)} title={cashierModal === 'add' ? '+ Thêm thu ngân' : 'Sửa thu ngân'} maxWidth={640}>
+                <form onSubmit={saveCashier}>
+                    <Field label="Tên thu ngân *">
+                        <input required style={inp} value={cashierForm.ten_thu_ngan || ''} onChange={e => setCashierForm({ ...cashierForm, ten_thu_ngan: e.target.value })} />
+                    </Field>
+                    <Field label="Thuộc kho *">
+                        <select required style={inp} value={cashierForm.kho_id || ''} onChange={handleCashierKhoChange}>
+                            <option value="">-- Chọn kho --</option>
+                            {sortedKhos.map(k => <option key={k.id} value={k.id}>{k.ten_kho}</option>)}
+                        </select>
+                    </Field>
+                    <Field label="Nhân sự phụ trách">
+                        <select style={inp} value={cashierForm.nhan_vien_id || ''} onChange={handleCashierStaffChange}>
+                            <option value="">-- Chọn nhân sự --</option>
+                            {sortedNhanViens.map(nv => (
+                                <option key={nv.id} value={nv.id}>
+                                    {nv.ho_ten}{nv.chuc_vu ? ` - ${nv.chuc_vu}` : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </Field>
+                    <Field label="Quầy nhỏ phụ trách">
+                        {cashierForm.kho_id ? (
+                            modalQuays.length === 0 ? (
+                                <div style={{ padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12 }}>
+                                    Kho này chưa có quầy nhỏ để phân công.
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                                        Chọn được nhiều quầy nhỏ. Mỗi quầy nhỏ chỉ được gán cho đúng 1 thu ngân.
+                                    </div>
+                                    {modalQuays.map(q => {
+                                        const checked = (cashierForm.quay_ids || []).includes(q.id);
+                                        const lockedByOther = !!q.thu_ngan_id && q.thu_ngan_id !== currentCashierId;
+                                        return (
+                                            <label key={q.id} style={{
+                                                display: 'flex',
+                                                gap: 10,
+                                                alignItems: 'flex-start',
+                                                padding: '10px 12px',
+                                                borderRadius: 9,
+                                                border: `1px solid ${lockedByOther ? '#fecaca' : checked ? '#bfdbfe' : '#e2e8f0'}`,
+                                                background: lockedByOther ? '#fff1f2' : checked ? '#eff6ff' : 'white',
+                                                cursor: lockedByOther ? 'not-allowed' : 'pointer',
+                                                opacity: lockedByOther ? 0.75 : 1,
+                                            }}>
+                                                <input type="checkbox" checked={checked} disabled={lockedByOther} onChange={() => toggleQuay(q.id)} style={{ marginTop: 2 }} />
+                                                <div style={{ minWidth: 0 }}>
+                                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>🗂 {q.ten_quay}</div>
+                                                    <div style={{ fontSize: 10, color: lockedByOther ? '#dc2626' : '#64748b', marginTop: 3 }}>
+                                                        {lockedByOther ? `Đang thuộc ${q.ten_thu_ngan}` : checked ? 'Đang gán cho thu ngân này' : 'Chưa gán thu ngân'}
+                                                    </div>
+                                                    {q.nguoi_phu_trach && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Nhân sự quầy: {q.nguoi_phu_trach}</div>}
+                                                </div>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            )
+                        ) : (
+                            <div style={{ padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12 }}>
+                                Chọn kho trước để gán quầy nhỏ cho thu ngân.
+                            </div>
+                        )}
+                    </Field>
+                    <Field label="Ghi chú">
+                        <textarea style={{ ...inp, height: 72, resize: 'vertical' }} value={cashierForm.ghi_chu || ''} onChange={e => setCashierForm({ ...cashierForm, ghi_chu: e.target.value })} />
+                    </Field>
+                    <BtnRow onClose={() => setCashierModal(null)} label={cashierModal === 'add' ? 'Tạo mới' : 'Lưu thay đổi'} />
+                </form>
+            </Modal>
+            <ConfirmModal open={cashierConfirm !== null} onClose={() => setCashierConfirm(null)}
+                onConfirm={async () => { await fetch(`${API}/api/thu_ngan/${cashierConfirm}`, { method: 'DELETE' }); load(); }}
+                message="Xóa thu ngân này? Các quầy nhỏ đang gán sẽ được trả về trạng thái chưa phân công." />
         </>
     );
 }
@@ -282,37 +497,96 @@ function KhoTab() {
 function QuayTab() {
     const [list, setList] = useState([]);
     const [khos, setKhos] = useState([]);
+    const [thuNgans, setThuNgans] = useState([]);
     const [modal, setModal] = useState(null);
     const [confirm, setConfirm] = useState(null);
     const [form, setForm] = useState({});
 
     const load = useCallback(async () => {
-        const [q, k] = await Promise.all([
-            fetch(`${API}/api/quay_nho`).then(r => r.json()),
-            fetch(`${API}/api/kho`).then(r => r.json()),
+        const [quayRes, khoRes, thuNganRes] = await Promise.all([
+            fetch(`${API}/api/quay_nho`),
+            fetch(`${API}/api/kho`),
+            fetch(`${API}/api/thu_ngan`),
         ]);
-        setList(q); setKhos(k);
+        const [quayData, khoData, thuNganData] = await Promise.all([
+            readJsonSafe(quayRes, []),
+            readJsonSafe(khoRes, []),
+            readJsonSafe(thuNganRes, []),
+        ]);
+        setList(Array.isArray(quayData) ? quayData : []);
+        setKhos(Array.isArray(khoData) ? khoData : []);
+        setThuNgans(Array.isArray(thuNganData) ? thuNganData : []);
     }, []);
     useEffect(() => { load(); }, [load]);
 
     const save = async (e) => {
         e.preventDefault();
-        const isEdit = modal !== 'add';
-        await fetch(isEdit ? `${API}/api/quay_nho/${modal.id}` : `${API}/api/quay_nho`,
-            { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-        setModal(null); load();
+        try {
+            const isEdit = modal !== 'add';
+            const payload = {
+                ten_quay: form.ten_quay || '',
+                kho_id: form.kho_id || null,
+                ghi_chu: form.ghi_chu || '',
+                nguoi_phu_trach: form.nguoi_phu_trach || '',
+                thu_ngan_id: form.thu_ngan_id || null,
+            };
+            await readResponse(await fetch(
+                isEdit ? `${API}/api/quay_nho/${modal.id}` : `${API}/api/quay_nho`,
+                { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+            ));
+            setModal(null);
+            await load();
+        } catch (err) {
+            window.alert(err.message);
+        }
+    };
+
+    const sortedKhos = [...khos].sort(byName('ten_kho'));
+    const sortedThuNgans = [...thuNgans].sort(byName('ten_thu_ngan'));
+    const sortedQuays = [...list].sort(byName('ten_quay'));
+    const availableThuNgans = sortedThuNgans.filter(t => t.kho_id === form.kho_id);
+
+    const handleKhoChange = (e) => {
+        const nextKhoId = e.target.value ? Number(e.target.value) : '';
+        setForm(prev => {
+            const keepThuNgan = sortedThuNgans.some(item => item.id === prev.thu_ngan_id && item.kho_id === nextKhoId);
+            return {
+                ...prev,
+                kho_id: nextKhoId,
+                thu_ngan_id: keepThuNgan ? prev.thu_ngan_id : '',
+            };
+        });
+    };
+
+    const openAdd = () => {
+        setForm({ ten_quay: '', kho_id: '', ghi_chu: '', nguoi_phu_trach: '', thu_ngan_id: '' });
+        setModal('add');
+    };
+
+    const openEdit = (q) => {
+        setForm({
+            ...q,
+            kho_id: q.kho_id || '',
+            thu_ngan_id: q.thu_ngan_id || '',
+        });
+        setModal(q);
     };
 
     const renderQ = q => (
         <div key={q.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #f1f5f9', marginBottom: 6 }}>
             <div>
                 <span style={{ fontWeight: 700, color: '#1e293b', fontSize: 13 }}>🗂 {q.ten_quay}</span>
-                {q.nguoi_phu_trach && <span style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>👤 {q.nguoi_phu_trach}</span>}
-                {q.ngay_tao && <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 8 }}>🕐 {q.ngay_tao}</span>}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: q.ten_thu_ngan ? '#0f766e' : '#9a3412', background: q.ten_thu_ngan ? '#ccfbf1' : '#ffedd5', borderRadius: 999, padding: '3px 8px', fontWeight: 700 }}>
+                        {q.ten_thu_ngan ? `Thu ngân: ${q.ten_thu_ngan}` : 'Chưa phân thu ngân'}
+                    </span>
+                    {q.nguoi_phu_trach && <span style={{ fontSize: 10, color: '#4338ca', background: '#eef2ff', borderRadius: 999, padding: '3px 8px', fontWeight: 700 }}>Nhân sự quầy: {q.nguoi_phu_trach}</span>}
+                    {q.ngay_tao && <span style={{ fontSize: 10, color: '#94a3b8' }}>🕐 {q.ngay_tao}</span>}
+                </div>
                 {q.ghi_chu && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{q.ghi_chu}</div>}
             </div>
             <div style={{ display: 'flex', gap: 5 }}>
-                <button onClick={() => { setForm({ ...q }); setModal(q); }} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
+                <button onClick={() => openEdit(q)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                 </button>
                 <button onClick={() => setConfirm(q.id)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #fca5a5', background: '#fff1f2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}>
@@ -324,32 +598,64 @@ function QuayTab() {
 
     return (
         <>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-                <button onClick={() => { setForm({ ten_quay: '', kho_id: '', ghi_chu: '', nguoi_phu_trach: '' }); setModal('add'); }} style={{ ...saveBtn, padding: '8px 18px' }}>+ Thêm quầy</button>
+            <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 12, border: '1px solid #dbeafe', background: '#eff6ff', color: '#1d4ed8', fontSize: 12, lineHeight: 1.6 }}>
+                Tab <b>Quầy nhỏ</b> dùng để quản lý danh sách quầy nhỏ và gán mỗi quầy nhỏ cho đúng một thu ngân. Một thu ngân có thể phụ trách nhiều quầy nhỏ.
             </div>
-            {khos.map(k => (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+                <button onClick={openAdd} style={{ ...saveBtn, padding: '8px 18px' }}>+ Thêm quầy nhỏ</button>
+            </div>
+            {sortedKhos.map(k => (
                 <div key={k.id} style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', padding: '14px 18px', marginBottom: 12 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>🏪 {k.ten_kho}</div>
-                    {list.filter(q => q.kho_id === k.id).length === 0
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b' }}>🏪 {k.ten_kho}</div>
+                        <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>
+                            {sortedQuays.filter(q => q.kho_id === k.id).length} quầy nhỏ
+                        </div>
+                    </div>
+                    {sortedQuays.filter(q => q.kho_id === k.id).length === 0
                         ? <div style={{ color: '#94a3b8', fontSize: 12, fontStyle: 'italic' }}>Chưa có quầy nào</div>
-                        : list.filter(q => q.kho_id === k.id).map(renderQ)}
+                        : sortedQuays.filter(q => q.kho_id === k.id).map(renderQ)}
                 </div>
             ))}
-            {list.filter(q => !q.kho_id).length > 0 && (
+            {sortedQuays.filter(q => !q.kho_id).length > 0 && (
                 <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', padding: '14px 18px' }}>
                     <div style={{ fontWeight: 800, fontSize: 14, color: '#94a3b8', marginBottom: 10 }}>📋 Chưa phân kho</div>
-                    {list.filter(q => !q.kho_id).map(renderQ)}
+                    {sortedQuays.filter(q => !q.kho_id).map(renderQ)}
                 </div>
             )}
             <Modal open={!!modal} onClose={() => setModal(null)} title={modal === 'add' ? '+ Thêm quầy nhỏ' : '✏️ Sửa quầy nhỏ'}>
                 <form onSubmit={save}>
                     <Field label="Tên quầy *"><input required style={inp} value={form.ten_quay || ''} onChange={e => setForm({ ...form, ten_quay: e.target.value })} /></Field>
-                    <Field label="Người phụ trách"><input style={inp} placeholder="VD: Nguyễn Văn B" value={form.nguoi_phu_trach || ''} onChange={e => setForm({ ...form, nguoi_phu_trach: e.target.value })} /></Field>
+                    <Field label="Nhân sự tại quầy"><input style={inp} placeholder="VD: Nguyễn Văn B" value={form.nguoi_phu_trach || ''} onChange={e => setForm({ ...form, nguoi_phu_trach: e.target.value })} /></Field>
                     <Field label="Thuộc kho">
-                        <select style={inp} value={form.kho_id || ''} onChange={e => setForm({ ...form, kho_id: e.target.value ? Number(e.target.value) : null })}>
+                        <select style={inp} value={form.kho_id || ''} onChange={handleKhoChange}>
                             <option value="">— Chưa phân kho —</option>
-                            {khos.map(k => <option key={k.id} value={k.id}>{k.ten_kho}</option>)}
+                            {sortedKhos.map(k => <option key={k.id} value={k.id}>{k.ten_kho}</option>)}
                         </select>
+                    </Field>
+                    <Field label="Thu ngân phụ trách">
+                        {!form.kho_id ? (
+                            <div style={{ padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12 }}>
+                                Chọn kho trước để phân công thu ngân cho quầy nhỏ này.
+                            </div>
+                        ) : (
+                            <>
+                                <select style={inp} value={form.thu_ngan_id || ''} onChange={e => setForm({ ...form, thu_ngan_id: e.target.value ? Number(e.target.value) : '' })}>
+                                    <option value="">— Chưa phân thu ngân —</option>
+                                    {availableThuNgans.map(cashier => (
+                                        <option key={cashier.id} value={cashier.id}>{cashier.ten_thu_ngan}</option>
+                                    ))}
+                                </select>
+                                <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+                                    Mỗi quầy nhỏ chỉ chọn được 1 thu ngân. Danh sách lấy từ tab/kho thu ngân hiện có trong cùng kho.
+                                </div>
+                                {availableThuNgans.length === 0 && (
+                                    <div style={{ fontSize: 11, color: '#9a3412', marginTop: 6 }}>
+                                        Kho này chưa có thu ngân để phân công.
+                                    </div>
+                                )}
+                            </>
+                        )}
                     </Field>
                     <Field label="Ghi chú"><textarea style={{ ...inp, height: 64, resize: 'vertical' }} value={form.ghi_chu || ''} onChange={e => setForm({ ...form, ghi_chu: e.target.value })} /></Field>
                     <BtnRow onClose={() => setModal(null)} label={modal === 'add' ? 'Tạo mới' : 'Lưu thay đổi'} />
@@ -952,6 +1258,19 @@ const fmtDensity = n => Number(n || 0)
     ? Number(n).toLocaleString('vi-VN', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
     : '—';
 
+const parseHistoryDateMs = (value) => {
+    if (!value) return 0;
+    const text = String(value).trim();
+    const normalized = text.replace(' ', 'T');
+    const parsed = Date.parse(normalized);
+    if (!Number.isNaN(parsed)) return parsed;
+    const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (!match) return 0;
+    const [, day, month, year, hour = '00', minute = '00', second = '00'] = match;
+    const dt = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(dt.getTime()) ? 0 : dt.getTime();
+};
+
 function TuoiVangTab() {
     const [list, setList] = useState([]);
     const [loaiList, setLoaiList] = useState([]);
@@ -1051,66 +1370,177 @@ function TuoiVangTab() {
         return <span style={{ color: c, fontSize: 11, fontWeight: 700 }}>{n > 0 ? '+' : ''}{Number(n).toLocaleString('vi-VN')}</span>;
     };
 
+    const historyRows = useMemo(() => (
+        list.flatMap(item => (
+            (item.lich_su || []).map(entry => ({
+                ...entry,
+                ten_tuoi: item.ten_tuoi,
+                tuoi_id: item.id,
+                sortMs: parseHistoryDateMs(entry.date),
+            }))
+        )).sort((a, b) => b.sortMs - a.sortMs)
+    ), [list]);
+
+    const summary = useMemo(() => {
+        const densities = list
+            .map(item => Number(item.trong_luong_rieng))
+            .filter(value => Number.isFinite(value) && value > 0);
+        const totalProducts = list.reduce((acc, item) => acc + Number(item.so_hang || 0), 0);
+        const avgDensity = densities.length ? densities.reduce((acc, value) => acc + value, 0) / densities.length : 0;
+        return {
+            soTuoiVang: list.length,
+            tongSanPham: totalProducts,
+            avgDensity,
+            soLanDieuChinh: historyRows.length,
+        };
+    }, [historyRows.length, list]);
+
     return (
         <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div style={{ fontSize: 13, color: '#64748b' }}>{list.length} tuổi vàng</div>
-                <button onClick={openAdd} style={saveBtn}>+ Thêm tuổi vàng</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
+                <div>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a' }}>Tuổi vàng</div>
+                    <div style={{ fontSize: 13, color: '#64748b', marginTop: 4, lineHeight: 1.6, maxWidth: 720 }}>
+                        Quản lý cấu hình tuổi vàng, giá mua bán, trọng lượng riêng và lịch sử điều chỉnh giá. Nội dung giữ nguyên, phần trình bày được đổi sang bố cục kiểu Thu ngân.
+                    </div>
+                </div>
+                <div style={{ minWidth: 220, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+                    <div style={{ fontSize: 12, color: '#64748b', textAlign: 'right' }}>
+                        {historyRows[0]?.date ? `Cập nhật gần nhất: ${historyRows[0].date}` : 'Chưa có lịch sử điều chỉnh giá'}
+                    </div>
+                    <button onClick={openAdd} style={saveBtn}>+ Thêm tuổi vàng</button>
+                </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-                {list.length === 0 && (
-                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 60, color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
-                        Chưa có tuổi vàng nào
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 18 }}>
+                <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 18 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>SỐ TUỔI VÀNG</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{summary.soTuoiVang}</div>
+                </div>
+                <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 18 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>TỔNG SẢN PHẨM</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: '#0f766e' }}>{fmt(summary.tongSanPham)}</div>
+                </div>
+                <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 18 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>TỶ TRỌNG TB</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: '#1d4ed8' }}>{fmtDensity(summary.avgDensity)}</div>
+                </div>
+                <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 18 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>LẦN ĐIỀU CHỈNH</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: '#d97706' }}>{fmt(summary.soLanDieuChinh)}</div>
+                </div>
+            </div>
+
+            <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 18 }}>
+                <div style={{ padding: '16px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Danh sách tuổi vàng</div>
+                        <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Quản lý tên tuổi vàng, giá và cấu hình trọng lượng riêng</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>{list.length} dòng</div>
+                </div>
+
+                {list.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>Chưa có tuổi vàng nào</div>
+                ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                    {['Tuổi vàng', 'Giá bán', 'Giá mua', 'Trọng lượng riêng', 'Sản phẩm', 'Ngày tạo', ''].map(label => (
+                                        <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 800, borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>
+                                            {label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {list.map((t, index) => (
+                                    <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', background: index % 2 === 0 ? 'white' : '#fcfcfd' }}>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>{t.ten_tuoi}</div>
+                                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                                                {t.ghi_chu || `Tuổi vàng ${t.ten_tuoi}`}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ fontSize: 14, fontWeight: 900, color: '#15803d' }}>{fmt(t.gia_ban)} ₫</div>
+                                        </td>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ fontSize: 14, fontWeight: 900, color: '#c2410c' }}>{fmt(t.gia_mua)} ₫</div>
+                                        </td>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>{fmtDensity(t.trong_luong_rieng)} g/cm³</div>
+                                        </td>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>{fmt(t.so_hang || 0)}</div>
+                                        </td>
+                                        <td style={{ padding: '14px', fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>
+                                            {t.ngay_tao || '—'}
+                                        </td>
+                                        <td style={{ padding: '14px' }}>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                                                <button onClick={() => openEdit(t)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #cbd5e1', background: 'white', color: '#2563eb', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>Sửa</button>
+                                                <button onClick={() => openPrice(t)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>Giá</button>
+                                                <button onClick={() => setHistModal(t)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>Lịch sử ({t.lich_su?.length || 0})</button>
+                                                <button onClick={() => setConfirm(t.id)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #fecdd3', background: '#fff1f2', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>Xóa</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
-                {list.map(t => (
-                    <div key={t.id} style={{ background: 'white', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,.05)' }}>
-                        <div style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                                <div style={{ color: 'white', fontWeight: 900, fontSize: 18 }}>{t.ten_tuoi}</div>
-                                <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 1 }}>{t.ghi_chu || `Tuổi vàng ${t.ten_tuoi}`}</div>
-                                <div style={{ marginTop: 5, display: 'inline-block', background: 'rgba(0,0,0,.2)', borderRadius: 12, padding: '2px 8px', fontSize: 10, color: 'white' }}>
-                                    ⚖ {fmtDensity(t.trong_luong_rieng)} g/cm³
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 5 }}>
-                                <button onClick={() => openEdit(t)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.15)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                                </button>
-                                <button onClick={() => setConfirm(t.id)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(220,38,38,.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div style={{ padding: '12px 16px' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                                <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '8px 12px', border: '1px solid #bbf7d0' }}>
-                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', marginBottom: 3, letterSpacing: .3 }}>GIÁ BÁN RA</div>
-                                    <div style={{ fontSize: 15, fontWeight: 900, color: '#15803d' }}>{fmt(t.gia_ban)}<span style={{ fontSize: 10 }}> ₫</span></div>
-                                </div>
-                                <div style={{ background: '#fff7ed', borderRadius: 8, padding: '8px 12px', border: '1px solid #fed7aa' }}>
-                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#c2410c', marginBottom: 3, letterSpacing: .3 }}>GIÁ MUA VÀO</div>
-                                    <div style={{ fontSize: 15, fontWeight: 900, color: '#c2410c' }}>{fmt(t.gia_mua)}<span style={{ fontSize: 10 }}> ₫</span></div>
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
-                                <div style={{ fontSize: 12, color: '#64748b' }}>
-                                    ⚖ Trọng lượng riêng: <b style={{ color: '#1e293b' }}>{fmtDensity(t.trong_luong_rieng)} g/cm³</b>
-                                </div>
-                                <div style={{ background: '#f8fafc', borderRadius: 10, padding: '4px 10px', textAlign: 'center' }}>
-                                    <div style={{ fontSize: 18, fontWeight: 900, color: '#1e293b' }}>{t.so_hang || 0}</div>
-                                    <div style={{ fontSize: 9, color: '#64748b', fontWeight: 700 }}>sản phẩm</div>
-                                </div>
-                            </div>
-                            {t.ngay_tao && <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>🕐 {t.ngay_tao}</div>}
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <button onClick={() => openPrice(t)} style={{ flex: 1, padding: '7px', borderRadius: 7, border: '1.5px solid #2563eb', background: 'white', color: '#2563eb', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>✅ Cập nhật giá</button>
-                                <button onClick={() => setHistModal(t)} style={{ flex: 1, padding: '7px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 700, cursor: 'pointer', fontSize: 11 }}>📋 Lịch sử ({t.lich_su?.length || 0})</button>
-                            </div>
-                        </div>
+            </div>
+
+            <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Lịch sử điều chỉnh giá</div>
+                        <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Gộp toàn bộ lịch sử điều chỉnh giá của các tuổi vàng</div>
                     </div>
-                ))}
+                    <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>{historyRows.length} lần cập nhật</div>
+                </div>
+
+                {historyRows.length === 0 ? (
+                    <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>Chưa có lịch sử điều chỉnh giá.</div>
+                ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                    {['Thời gian', 'Tuổi vàng', 'Giá bán', 'Giá mua', 'Biến động', 'Ghi chú'].map(label => (
+                                        <th key={label} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, color: '#64748b', fontWeight: 800, borderBottom: '1px solid #e2e8f0' }}>
+                                            {label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {historyRows.map((entry, index) => (
+                                    <tr key={`${entry.tuoi_id}-${entry.date}-${index}`} style={{ borderBottom: '1px solid #f1f5f9', background: index % 2 === 0 ? 'white' : '#fafafa' }}>
+                                        <td style={{ padding: '12px 16px', color: '#334155', whiteSpace: 'nowrap' }}>{entry.date || '—'}</td>
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <div style={{ fontWeight: 800, color: '#0f172a' }}>{entry.ten_tuoi}</div>
+                                            {entry.by && <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>{entry.by}</div>}
+                                        </td>
+                                        <td style={{ padding: '12px 16px', fontWeight: 700, color: '#15803d' }}>{fmt(entry.gia_ban)} ₫</td>
+                                        <td style={{ padding: '12px 16px', fontWeight: 700, color: '#c2410c' }}>{fmt(entry.gia_mua)} ₫</td>
+                                        <td style={{ padding: '12px 16px' }}>
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                {delta(entry.delta_ban)}
+                                                {delta(entry.delta_mua)}
+                                                {!entry.delta_ban && !entry.delta_mua && <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>}
+                                            </div>
+                                        </td>
+                                        <td style={{ padding: '12px 16px', color: '#64748b' }}>{entry.note || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             <Modal open={!!modal} onClose={() => setModal(null)} title={modal === 'add' ? '+ Thêm tuổi vàng' : '✏️ Sửa tuổi vàng'} maxWidth={580}>
@@ -1216,6 +1646,17 @@ function TraoDoiTab() {
         localStorage.removeItem(STORAGE_KEY);
     };
 
+    const syncStatus = 'saved';
+    const syncError = '';
+    const loading = false;
+    const syncMeta = {
+        loading: { text: 'Dang tai DB', color: '#64748b' },
+        pending: { text: 'Cho luu DB', color: '#ea580c' },
+        saving: { text: 'Dang luu DB', color: '#2563eb' },
+        saved: { text: 'Da luu DB', color: '#16a34a' },
+        error: { text: 'Loi luu DB', color: '#dc2626' },
+    }[syncStatus] || { text: 'Dang tai DB', color: '#64748b' };
+
     return (
         <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
@@ -1224,9 +1665,14 @@ function TraoDoiTab() {
                     <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
                         Hàng = loại mang đến · Cột = loại đổi sang · Mỗi ô = số chỉ [cột] đổi được 1 chỉ [hàng]
                     </div>
+                    <div style={{ fontSize: 12, color: '#2563eb', marginTop: 6, fontWeight: 700 }}>Nguon luu hien tai: database</div>
+                    {!!syncError && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 6 }}>{syncError}</div>}
+                    <div style={{ fontSize: 12, color: '#2563eb', marginTop: 6, fontWeight: 700 }}>Nguon luu hien tai: database</div>
+                    {!!syncError && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 6 }}>{syncError}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {saved && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 700 }}>✅ Đã lưu!</span>}
+                    <span style={{ fontSize: 12, color: syncMeta.color, fontWeight: 700 }}>{syncMeta.text}</span>
                     <button onClick={handleReset} style={{ padding: '7px 14px', borderRadius: 8, border: '1.5px solid #fca5a5', background: '#fff1f2', color: '#dc2626', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                         🗑 Reset
                     </button>
@@ -1236,7 +1682,11 @@ function TraoDoiTab() {
                 </div>
             </div>
 
-            {list.length === 0 ? (
+            {loading ? (
+                <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 700 }}>Dang tai cau hinh trao doi...</div>
+                </div>
+            ) : list.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8', background: 'white', borderRadius: 14, border: '1px solid #e2e8f0' }}>
                     <div style={{ fontSize: 36, marginBottom: 12 }}>🧱</div>
                     <div style={{ fontWeight: 700 }}>Chưa có loại vàng nào</div>
@@ -1299,12 +1749,38 @@ function TraoDoiTab() {
                                                 border: '1px solid #e2e8f0',
                                             }}>
                                                 {isDiag ? (
+                                                    <>
+                                                        <div style={{ position: 'relative', minWidth: 0 }}>
+                                                            <span style={{
+                                                                position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
+                                                                fontSize: 12, fontWeight: 900, color: '#dc2626',
+                                                            }}>+</span>
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.001"
+                                                                value={cell.plus}
+                                                                onChange={e => handleChange(row.id, col.id, 'plus', e.target.value)}
+                                                                placeholder="0.000"
+                                                                style={{
+                                                                    width: '100%', height: 32, boxSizing: 'border-box',
+                                                                    textAlign: 'center', fontSize: 11, fontWeight: 700,
+                                                                    border: cell.plus ? '1.5px solid #fca5a5' : '1.5px solid #fecaca',
+                                                                    borderRadius: 8, outline: 'none', padding: '0 6px 0 18px',
+                                                                    background: cell.plus ? '#fff1f2' : '#fff5f5',
+                                                                    color: '#dc2626',
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        {false && (
                                                     <div style={{
                                                         height: 36, background: '#e2e8f0',
                                                         borderRadius: 8, display: 'flex',
                                                         alignItems: 'center', justifyContent: 'center',
                                                         fontSize: 18, color: '#94a3b8',
                                                     }}>—</div>
+                                                        )}
+                                                    </>
                                                 ) : (
                                                     <input
                                                         type="number" min="0" step="0.001"
@@ -1348,29 +1824,119 @@ function normalizeExchangeCell(value) {
     return { plus: '', minus: '' };
 }
 
+function normalizeExchangeMatrix(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.entries(value).reduce((acc, [key, cell]) => {
+        const normalized = normalizeExchangeCell(cell);
+        if (normalized.plus || normalized.minus) acc[key] = normalized;
+        return acc;
+    }, {});
+}
+
+function readLocalExchangeMatrix(storageKey) {
+    try {
+        return normalizeExchangeMatrix(JSON.parse(localStorage.getItem(storageKey) || '{}'));
+    } catch {
+        return {};
+    }
+}
+
 function TraoDoiTabV2() {
     const STORAGE_KEY = 'don_hang_exchange_matrix_tuoi_vang_v2';
     const [list, setList] = useState([]);
-    const [matrix, setMatrix] = useState(() => {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-        catch { return {}; }
-    });
+    const [matrix, setMatrix] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [bootstrapped, setBootstrapped] = useState(false);
+    const [syncStatus, setSyncStatus] = useState('loading');
+    const [syncError, setSyncError] = useState('');
+    const lastSavedJsonRef = useRef('{}');
 
     useEffect(() => {
-        fetch(`${API}/api/tuoi_vang`)
-            .then(r => r.json())
-            .then(rows => rows.sort((a, b) => {
-                const av = parseTuoiPermille(a.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
-                const bv = parseTuoiPermille(b.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
-                return av - bv || String(a.ten_tuoi || '').localeCompare(String(b.ten_tuoi || ''), 'vi');
-            }))
-            .then(setList)
-            .catch(() => { });
+        let active = true;
+        (async () => {
+            const localMatrix = readLocalExchangeMatrix(STORAGE_KEY);
+            try {
+                const [rowsRes, configRes] = await Promise.all([
+                    fetch(`${API}/api/tuoi_vang`),
+                    fetch(`${API}/api/cau_hinh/trao_doi_tuoi_vang`),
+                ]);
+                const rows = await readJsonSafe(rowsRes, []);
+                const config = await readResponse(configRes);
+                if (!active) return;
+                const sortedRows = rows.sort((a, b) => {
+                    const av = parseTuoiPermille(a.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                    const bv = parseTuoiPermille(b.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                    return av - bv || String(a.ten_tuoi || '').localeCompare(String(b.ten_tuoi || ''), 'vi');
+                });
+                const serverMatrix = normalizeExchangeMatrix(config.matrix);
+                const shouldMigrateLocal = Object.keys(serverMatrix).length === 0 && Object.keys(localMatrix).length > 0;
+                const nextMatrix = shouldMigrateLocal ? localMatrix : serverMatrix;
+                const nextJson = JSON.stringify(nextMatrix);
+                setList(sortedRows);
+                setMatrix(nextMatrix);
+                localStorage.setItem(STORAGE_KEY, nextJson);
+                lastSavedJsonRef.current = shouldMigrateLocal ? '{}' : nextJson;
+                setSyncStatus(shouldMigrateLocal ? 'pending' : 'saved');
+                setSyncError('');
+            } catch (err) {
+                if (!active) return;
+                setMatrix(localMatrix);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(localMatrix));
+                lastSavedJsonRef.current = JSON.stringify(localMatrix);
+                setSyncStatus('error');
+                setSyncError(err.message || 'Khong the tai cau hinh trao doi tu database.');
+                fetch(`${API}/api/tuoi_vang`)
+                    .then(r => readJsonSafe(r, []))
+                    .then(rows => {
+                        if (!active) return;
+                        setList(rows.sort((a, b) => {
+                            const av = parseTuoiPermille(a.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                            const bv = parseTuoiPermille(b.ten_tuoi) ?? Number.MAX_SAFE_INTEGER;
+                            return av - bv || String(a.ten_tuoi || '').localeCompare(String(b.ten_tuoi || ''), 'vi');
+                        }));
+                    })
+                    .catch(() => { });
+            } finally {
+                if (!active) return;
+                setLoading(false);
+                setBootstrapped(true);
+            }
+        })();
+        return () => { active = false; };
     }, []);
 
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
-    }, [matrix]);
+        if (!bootstrapped) return;
+        const normalizedMatrix = normalizeExchangeMatrix(matrix);
+        const nextJson = JSON.stringify(normalizedMatrix);
+        localStorage.setItem(STORAGE_KEY, nextJson);
+        if (nextJson === lastSavedJsonRef.current) return;
+        setSyncStatus('saving');
+        const timer = setTimeout(async () => {
+            try {
+                const res = await fetch(`${API}/api/cau_hinh/trao_doi_tuoi_vang`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ matrix: normalizedMatrix }),
+                });
+                const payload = await readResponse(res);
+                const savedMatrix = normalizeExchangeMatrix(payload.matrix);
+                const savedJson = JSON.stringify(savedMatrix);
+                lastSavedJsonRef.current = savedJson;
+                localStorage.setItem(STORAGE_KEY, savedJson);
+                setMatrix(current => {
+                    const currentJson = JSON.stringify(normalizeExchangeMatrix(current));
+                    return currentJson === nextJson ? savedMatrix : current;
+                });
+                setSyncStatus('saved');
+                setSyncError('');
+            } catch (err) {
+                setSyncStatus('error');
+                setSyncError(err.message || 'Khong the luu cau hinh trao doi vao database.');
+            }
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [bootstrapped, matrix]);
 
     const cellKey = (rId, cId) => `${rId}_${cId}`;
 
@@ -1378,12 +1944,18 @@ function TraoDoiTabV2() {
         setMatrix(m => {
             const key = cellKey(rId, cId);
             const current = normalizeExchangeCell(m[key]);
+            const nextCell = normalizeExchangeCell({
+                ...current,
+                [field]: val,
+            });
+            if (!nextCell.plus && !nextCell.minus) {
+                const nextMatrix = { ...m };
+                delete nextMatrix[key];
+                return nextMatrix;
+            }
             return {
                 ...m,
-                [key]: {
-                    ...current,
-                    [field]: val,
-                },
+                [key]: nextCell,
             };
         });
     };
@@ -1393,6 +1965,14 @@ function TraoDoiTabV2() {
         setMatrix({});
         localStorage.removeItem(STORAGE_KEY);
     };
+
+    const syncMeta = {
+        loading: { text: 'Dang tai DB', color: '#64748b' },
+        pending: { text: 'Cho luu DB', color: '#ea580c' },
+        saving: { text: 'Dang luu DB', color: '#2563eb' },
+        saved: { text: 'Da luu DB', color: '#16a34a' },
+        error: { text: 'Loi luu DB', color: '#dc2626' },
+    }[syncStatus] || { text: 'Dang tai DB', color: '#64748b' };
 
     return (
         <>
@@ -1470,12 +2050,38 @@ function TraoDoiTabV2() {
                                                 border: '1px solid #e2e8f0',
                                             }}>
                                                 {isDiag ? (
+                                                    <>
+                                                        <div style={{ position: 'relative', minWidth: 0 }}>
+                                                            <span style={{
+                                                                position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
+                                                                fontSize: 12, fontWeight: 900, color: '#dc2626',
+                                                            }}>+</span>
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.001"
+                                                                value={cell.plus}
+                                                                onChange={e => handleChange(row.id, col.id, 'plus', e.target.value)}
+                                                                placeholder="0.000"
+                                                                style={{
+                                                                    width: '100%', height: 32, boxSizing: 'border-box',
+                                                                    textAlign: 'center', fontSize: 11, fontWeight: 700,
+                                                                    border: cell.plus ? '1.5px solid #fca5a5' : '1.5px solid #fecaca',
+                                                                    borderRadius: 8, outline: 'none', padding: '0 6px 0 18px',
+                                                                    background: cell.plus ? '#fff1f2' : '#fff5f5',
+                                                                    color: '#dc2626',
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        {false && (
                                                     <div style={{
                                                         height: 36, background: '#e2e8f0',
                                                         borderRadius: 8, display: 'flex',
                                                         alignItems: 'center', justifyContent: 'center',
                                                         fontSize: 18, color: '#94a3b8',
                                                     }}>—</div>
+                                                        )}
+                                                    </>
                                                 ) : (
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                                                         <div style={{ position: 'relative', minWidth: 0 }}>
@@ -1553,13 +2159,16 @@ const SUB_TABS = [
 
 
 export default function CauHinhPage() {
-    const [tab, setTab] = useState('gia_vang');
-    const Active = SUB_TABS.find(t => t.key === tab)?.Component || (() => null);
+    const [tab, setTab] = useState('tuoi_vang');
+    const orderedTabs = ['tuoi_vang', 'nhom_hang', 'kho', 'quay_nho', 'trao_doi', 'gia_vang']
+        .map(key => SUB_TABS.find(t => t.key === key))
+        .filter(Boolean);
+    const Active = orderedTabs.find(t => t.key === tab)?.Component || (() => null);
 
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', padding: '0 28px', display: 'flex', gap: 4 }}>
-                {SUB_TABS.map(t => (
+                {orderedTabs.map(t => (
                     <button key={t.key} onClick={() => setTab(t.key)} style={{
                         padding: '12px 18px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
                         background: 'none', color: tab === t.key ? '#1e293b' : '#94a3b8',

@@ -6,20 +6,17 @@ import DonHangPage from './DonHangPage';
 import NhanSuPage from './NhanSuPage';
 import KeToanPage from './KeToanPage';
 import TaiChinhPage from './TaiChinhPage';
+import ThuNganPage from './ThuNganPage';
 import MayCanVangPage from './MayCanVangPage';
+import NhapVangPage from './NhapVangPage';
 import KhachHangPage from './KhachHangPage';
 import DoiTacPage from './DoiTacPage';
 import SalePosMobile from './SalePosMobile';
 import CameraOcrPage from './CameraOcrPage';
 import { API_BASE } from './lib/api';
+import { printItemCertification } from './lib/printItemCertification';
 
 const API = API_BASE;
-
-const STATUS_COLORS = {
-  'Tồn kho': { bg: '#dcfce7', text: '#166534' },
-  'Đã bán': { bg: '#fee2e2', text: '#991b1b' },
-  'Luân chuyển': { bg: '#fef3c7', text: '#92400e' },
-};
 
 // Palette for Nhóm hàng badges
 const NHOM_PALETTE = [
@@ -104,14 +101,17 @@ const numericOrText = (value) => {
 
 const NAV_ITEMS = [
   { key: 'hang_ton', label: 'Danh mục hàng', icon: '💎' },
+  { key: 'thu_ngan', label: 'Thu Ngân', icon: '💵' },
+  { key: 'nhap_vang', label: 'Nhập Hàng', icon: '🪙' },
   { key: 'don_hang', label: 'Đơn Hàng', icon: '📦' },
+  { key: 'divider_orders_people' },
   { key: 'nhan_su', label: 'Nhân Sự', icon: '👥' },
   { key: 'khach_hang', label: 'Khách Hàng', icon: '🤝' },
   { key: 'doi_tac', label: 'Đối Tác', icon: '🏭' },
   { key: 'ke_toan', label: 'Kế Toán', icon: '📊' },
   { key: 'tai_chinh', label: 'Tài Chính', icon: '💰' },
   { key: 'may_can_vang', label: 'Máy cân vàng', icon: '⚖️' },
-  { key: 'divider' },
+  { key: 'divider_settings' },
   { key: 'cau_hinh', label: 'Cài Đặt', icon: '⚙️' },
 ];
 
@@ -300,6 +300,10 @@ export default function App() {
     fetchData();
   };
 
+  const handlePrintCertification = (item) => {
+    printItemCertification(item, { title: 'Certification sản phẩm' });
+  };
+
   // Unique option lists
   const nhomList = [...new Set(data.map(d => d.nhom_hang).filter(Boolean))].sort();
   const quayList = [...new Set(data.map(d => d.quay_nho).filter(Boolean))].sort();
@@ -339,8 +343,8 @@ export default function App() {
         return [numericOrText(item.cong_le), numericOrText(item.cong_si)];
       case 'tong_tl':
         return [numericOrText(item.tong_tl)];
-      case 'status':
-        return [item.status || ''];
+      case 'gia_hien_tai':
+        return [Number(item.gia_hien_tai || 0)];
       default:
         return [item.id || 0];
     }
@@ -469,7 +473,7 @@ export default function App() {
         </div>
         <nav style={{ flex: 1, padding: '12px 10px' }}>
           {NAV_ITEMS.map(({ key, label, icon }) => {
-            if (key === 'divider') return <div key="divider" style={{ height: 1, background: 'rgba(255,255,255,.08)', margin: '8px 12px' }} />;
+            if (key.startsWith('divider')) return <div key={key} style={{ height: 1, background: 'rgba(255,255,255,.08)', margin: '8px 12px' }} />;
             const active = activeTab === key;
             return (
               <button key={key} onClick={() => setActiveTab(key)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', marginBottom: 4, borderRadius: 10, border: 'none', cursor: 'pointer', background: active ? 'rgba(255,255,255,.12)' : 'transparent', color: active ? 'white' : '#94a3b8', fontWeight: active ? 700 : 500, fontSize: 14, textAlign: 'left', borderLeft: active ? '3px solid #f59e0b' : '3px solid transparent' }}>
@@ -549,11 +553,13 @@ export default function App() {
 
         {activeTab === 'cau_hinh' ? <CauHinhPage /> :
           activeTab === 'don_hang' ? <div style={{ padding: '20px 28px' }}><DonHangPage /></div> :
+            activeTab === 'thu_ngan' ? <ThuNganPage /> :
             activeTab === 'nhan_su' ? <div style={{ padding: '20px 28px' }}><NhanSuPage /></div> :
               activeTab === 'khach_hang' ? <div style={{ padding: '20px 28px' }}><KhachHangPage /></div> :
                 activeTab === 'doi_tac' ? <div style={{ padding: '20px 28px' }}><DoiTacPage /></div> :
                   activeTab === 'ke_toan' ? <div style={{ padding: '20px 28px' }}><KeToanPage /></div> :
                     activeTab === 'tai_chinh' ? <TaiChinhPage /> :
+                      activeTab === 'nhap_vang' ? <div style={{ padding: '20px 28px' }}><NhapVangPage /></div> :
                       activeTab === 'may_can_vang' ? <MayCanVangPage /> :
                       activeTab !== 'hang_ton' ? <ComingSoon label={NAV_ITEMS.find(n => n.key === activeTab)?.label} /> : (
 
@@ -613,7 +619,7 @@ export default function App() {
                                       { label: 'Tuổi vàng', align: 'left', sortKey: 'tuoi_vang' },
                                       { label: 'Công lẻ / sỉ', align: 'right', sortKey: 'cong' },
                                       { label: 'Trọng lượng (đá + vàng = tổng)', align: 'right', sortKey: 'tong_tl' },
-                                      { label: 'Trạng thái', align: 'left', sortKey: 'status' },
+                                      { label: 'Giá hiện tại', align: 'right', sortKey: 'gia_hien_tai' },
                                       { label: '', align: 'center', sortKey: null },
                                     ].map(h => (
                                       <th key={`${h.label}-${h.align}`} style={{ padding: '10px 12px', fontWeight: 700, fontSize: 12, letterSpacing: .4, whiteSpace: 'nowrap', textAlign: h.align }}>
@@ -704,15 +710,18 @@ export default function App() {
                                           <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 20, background: '#1e293b', color: 'white', fontWeight: 800, fontSize: 12 }}>{formatWeightDisplay(r.tong_tl)}</span>
                                         </td>
 
-                                        {/* Trạng thái */}
-                                        <td style={{ padding: '9px 12px' }}>
-                                          <span style={{ padding: '3px 9px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: STATUS_COLORS[r.status]?.bg || '#f1f5f9', color: STATUS_COLORS[r.status]?.text || '#334155' }}>
-                                            {r.status}
+                                        {/* Giá hiện tại */}
+                                        <td style={{ padding: '9px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                          <span style={{ fontWeight: 800, color: (r.gia_hien_tai || 0) > 0 ? '#dc2626' : '#94a3b8' }}>
+                                            {(r.gia_hien_tai || 0) > 0 ? `${Number(r.gia_hien_tai).toLocaleString('vi-VN')} ₫` : '—'}
                                           </span>
                                         </td>
 
                                         {/* Actions */}
                                         <td style={{ padding: '9px 12px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                          <button onClick={() => handlePrintCertification(r)} title="In certification" style={{ marginRight: 5, width: 30, height: 30, borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#0f172a' }}>
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" rx="1" /><circle cx="18" cy="12" r="1" /></svg>
+                                          </button>
                                           {/* Info button */}
                                           <button onClick={() => setInfoModal(r)} title="Xem ảnh" style={{ marginRight: 5, width: 30, height: 30, borderRadius: 6, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', position: 'relative' }}>
                                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
@@ -794,195 +803,208 @@ export default function App() {
               <button onClick={() => setEditModal({ isOpen: false, item: null })} style={{ background: 'transparent', border: 'none', color: 'white', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>&times;</button>
             </div>
             <form onSubmit={handleSave} style={{ padding: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '3fr 3fr 1fr', gap: 18, alignItems: 'start' }}>
+                <div style={{ gridColumn: '1 / span 2', minWidth: 0 }}>
 
-              {/* Fields grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
-                {[
-                  { key: 'ma_hang', label: 'Mã hàng', required: true },
-                  { key: 'ncc', label: 'NCC (Tên hàng)' },
-                  { key: 'cong_le', label: 'Công lẻ' },
-                  { key: 'cong_si', label: 'Công sỉ' },
-                  { key: 'tong_tl', label: 'Tổng TL' },
-                  { key: 'tl_da', label: 'TL đá' },
-                  { key: 'tl_vang', label: 'TL vàng' },
-                ].map(({ key, label, required }) => (
-                  <div key={key}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>{label}</label>
-                    <input required={!!required} value={form[key] || ''} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} />
-                  </div>
-                ))}
-
-                {/* Nhóm hàng — dropdown từ Cài Đặt */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Nhóm hàng</label>
-                  <select value={form.nhom_hang || ''} onChange={e => setForm({ ...form, nhom_hang: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
-                    <option value=''>-- Chọn nhóm --</option>
-                    {nhomHangList.map(n => (
-                      <option key={n.id} value={n.ten_nhom}>{n.ten_nhom}</option>
+                  {/* Fields grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    {[
+                      { key: 'ma_hang', label: 'Mã hàng', required: true },
+                      { key: 'ncc', label: 'NCC (Tên hàng)' },
+                      { key: 'cong_le', label: 'Công lẻ' },
+                      { key: 'cong_si', label: 'Công sỉ' },
+                      { key: 'tong_tl', label: 'Tổng TL' },
+                      { key: 'tl_da', label: 'TL đá' },
+                      { key: 'tl_vang', label: 'TL vàng' },
+                    ].map(({ key, label, required }) => (
+                      <div key={key}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>{label}</label>
+                        <input required={!!required} value={form[key] || ''} onChange={e => setForm({ ...form, [key]: e.target.value })}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, boxSizing: 'border-box' }} />
+                      </div>
                     ))}
-                    {/* Giữ giá trị cũ nếu không có trong list */}
-                    {form.nhom_hang && !nhomHangList.find(n => n.ten_nhom === form.nhom_hang) && (
-                      <option value={form.nhom_hang}>{form.nhom_hang} (cũ)</option>
-                    )}
-                  </select>
-                </div>
 
-                {/* Quầy nhỏ */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Quầy nhỏ</label>
-                  <select value={form.quay_nho || ''} onChange={e => setForm({ ...form, quay_nho: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white', boxSizing: 'border-box' }}>
-                    <option value=''>-- Chọn quầy --</option>
-                    {quayNhoList.map(q => (
-                      <option key={q.id} value={q.ten_quay}>{q.ten_quay}</option>
-                    ))}
-                    {/* Giữ giá trị cũ nếu không có trong list */}
-                    {form.quay_nho && !quayNhoList.find(q => q.ten_quay === form.quay_nho) && (
-                      <option value={form.quay_nho}>{form.quay_nho} (cũ)</option>
-                    )}
-                  </select>
-                </div>
-
-                {/* Loại vàng — dropdown từ Cài Đặt > Giá vàng */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Loại vàng</label>
-                  <select value={form.loai_vang || ''} onChange={e => setForm({ ...form, loai_vang: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
-                    <option value=''>-- Chọn loại --</option>
-                    {loaiVangList.map(v => (
-                      <option key={v.id} value={v.ma_loai}>{v.ma_loai} — {v.ten_loai}</option>
-                    ))}
-                    {/* Giữ giá trị cũ nếu không có trong list */}
-                    {form.loai_vang && !loaiVangList.find(v => v.ma_loai === form.loai_vang) && (
-                      <option value={form.loai_vang}>{form.loai_vang} (cũ)</option>
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Tuổi vàng</label>
-                  <select value={form.tuoi_vang || ''} onChange={e => setForm({ ...form, tuoi_vang: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
-                    <option value=''>-- Chọn tuổi vàng --</option>
-                    {tuoiVangList.map(t => (
-                      <option key={t.id} value={t.ten_tuoi}>{t.ten_tuoi}</option>
-                    ))}
-                    {form.tuoi_vang && !tuoiVangList.find(t => t.ten_tuoi === form.tuoi_vang) && (
-                      <option value={form.tuoi_vang}>{form.tuoi_vang} (cũ)</option>
-                    )}
-                  </select>
-                </div>
-
-                {/* Trạng thái */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Trạng thái</label>
-                  <select value={form.status || 'Tồn kho'} onChange={e => setForm({ ...form, status: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13 }}>
-                    <option>Tồn kho</option>
-                    <option>Đã bán</option>
-                    <option>Luân chuyển</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* ─── GIÁ MUA (GIÁ VỐN) ─── */}
-              {(() => {
-                const tl = parseFloat(form.tl_vang) || 0;
-                const gv = parseInt(form.gia_vang_mua) || 0;
-                const gh = parseInt(form.gia_hat) || 0;
-                const gnc = parseInt(form.gia_nhan_cong) || 0;
-                const dc = parseInt(form.dieu_chinh) || 0;
-                const total = Math.round(gv * tl + gh + gnc + dc);
-                const fmtN = n => n ? Number(n).toLocaleString('vi-VN') : '0';
-                const inpS = { width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, boxSizing: 'border-box' };
-                return (
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16, marginBottom: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: .4 }}>💰 GIÁ MUA (GIÁ VỐN)</label>
-                      {total > 0 && (
-                        <span style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 20, padding: '3px 12px', fontSize: 12, fontWeight: 800, color: '#15803d' }}>
-                          = {fmtN(total)} ₫
-                        </span>
-                      )}
+                    {/* Nhóm hàng — dropdown từ Cài Đặt */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Nhóm hàng</label>
+                      <select value={form.nhom_hang || ''} onChange={e => setForm({ ...form, nhom_hang: e.target.value })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
+                        <option value=''>-- Chọn nhóm --</option>
+                        {nhomHangList.map(n => (
+                          <option key={n.id} value={n.ten_nhom}>{n.ten_nhom}</option>
+                        ))}
+                        {/* Giữ giá trị cũ nếu không có trong list */}
+                        {form.nhom_hang && !nhomHangList.find(n => n.ten_nhom === form.nhom_hang) && (
+                          <option value={form.nhom_hang}>{form.nhom_hang} (cũ)</option>
+                        )}
+                      </select>
                     </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: '14px 16px', border: '1px solid #e2e8f0' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
-                        <div>
-                          <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ VÀNG ĐƠN VỊ (₫/chỉ)</label>
-                          <input type="number" style={inpS} value={form.gia_vang_mua || ''} placeholder="VD: 17000000"
-                            onChange={e => setForm({ ...form, gia_vang_mua: e.target.value })} />
-                          {form.loai_vang && loaiVangList.length > 0 && (() => {
-                            const lv = loaiVangList.find(v => v.ma_loai === form.loai_vang);
-                            return lv ? (
-                              <button type="button" onClick={() => setForm({ ...form, gia_vang_mua: String(lv.gia_mua) })}
-                                style={{ marginTop: 4, fontSize: 11, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
-                                ↖ Lấy giá mua SJC hiện tại ({fmtN(lv.gia_mua)} ₫)
-                              </button>
-                            ) : null;
-                          })()}
+
+                    {/* Quầy nhỏ */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Quầy nhỏ</label>
+                      <select value={form.quay_nho || ''} onChange={e => setForm({ ...form, quay_nho: e.target.value })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white', boxSizing: 'border-box' }}>
+                        <option value=''>-- Chọn quầy --</option>
+                        {quayNhoList.map(q => (
+                          <option key={q.id} value={q.ten_quay}>{q.ten_quay}</option>
+                        ))}
+                        {/* Giữ giá trị cũ nếu không có trong list */}
+                        {form.quay_nho && !quayNhoList.find(q => q.ten_quay === form.quay_nho) && (
+                          <option value={form.quay_nho}>{form.quay_nho} (cũ)</option>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Loại vàng — dropdown từ Cài Đặt > Giá vàng */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Loại vàng</label>
+                      <select value={form.loai_vang || ''} onChange={e => setForm({ ...form, loai_vang: e.target.value })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
+                        <option value=''>-- Chọn loại --</option>
+                        {loaiVangList.map(v => (
+                          <option key={v.id} value={v.ma_loai}>{v.ma_loai} — {v.ten_loai}</option>
+                        ))}
+                        {/* Giữ giá trị cũ nếu không có trong list */}
+                        {form.loai_vang && !loaiVangList.find(v => v.ma_loai === form.loai_vang) && (
+                          <option value={form.loai_vang}>{form.loai_vang} (cũ)</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Tuổi vàng</label>
+                      <select value={form.tuoi_vang || ''} onChange={e => setForm({ ...form, tuoi_vang: e.target.value })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, background: 'white' }}>
+                        <option value=''>-- Chọn tuổi vàng --</option>
+                        {tuoiVangList.map(t => (
+                          <option key={t.id} value={t.ten_tuoi}>{t.ten_tuoi}</option>
+                        ))}
+                        {form.tuoi_vang && !tuoiVangList.find(t => t.ten_tuoi === form.tuoi_vang) && (
+                          <option value={form.tuoi_vang}>{form.tuoi_vang} (cũ)</option>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Trạng thái */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>Trạng thái</label>
+                      <select value={form.status || 'Tồn kho'} onChange={e => setForm({ ...form, status: e.target.value })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13 }}>
+                        <option>Tồn kho</option>
+                        <option>Đã bán</option>
+                        <option>Luân chuyển</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* ─── GIÁ MUA (GIÁ VỐN) ─── */}
+                  {(() => {
+                    const tl = parseFloat(form.tl_vang) || 0;
+                    const gv = parseInt(form.gia_vang_mua) || 0;
+                    const gh = parseInt(form.gia_hat) || 0;
+                    const gnc = parseInt(form.gia_nhan_cong) || 0;
+                    const dc = parseInt(form.dieu_chinh) || 0;
+                    const total = Math.round(gv * tl + gh + gnc + dc);
+                    const fmtN = n => n ? Number(n).toLocaleString('vi-VN') : '0';
+                    const inpS = { width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', fontSize: 13, boxSizing: 'border-box' };
+                    return (
+                      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16, marginBottom: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: .4 }}>💰 GIÁ MUA (GIÁ VỐN)</label>
+                          {total > 0 && (
+                            <span style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 20, padding: '3px 12px', fontSize: 12, fontWeight: 800, color: '#15803d' }}>
+                              = {fmtN(total)} ₫
+                            </span>
+                          )}
                         </div>
-                        <div>
-                          <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ HẠT / ĐÁ (₫)</label>
-                          <input type="number" style={inpS} value={form.gia_hat || ''} placeholder="0"
-                            onChange={e => setForm({ ...form, gia_hat: e.target.value })} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ NHÂN CÔNG (₫)</label>
-                          <input type="number" style={inpS} value={form.gia_nhan_cong || ''} placeholder="0"
-                            onChange={e => setForm({ ...form, gia_nhan_cong: e.target.value })} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>ĐIỀU CHỈNH +/- (₫)</label>
-                          <input type="number" style={inpS} value={form.dieu_chinh || ''} placeholder="0"
-                            onChange={e => setForm({ ...form, dieu_chinh: e.target.value })} />
+                        <div style={{ background: '#f8fafc', borderRadius: 10, padding: '14px 16px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+                            <div>
+                              <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ VÀNG ĐƠN VỊ (₫/chỉ)</label>
+                              <input type="number" style={inpS} value={form.gia_vang_mua || ''} placeholder="VD: 17000000"
+                                onChange={e => setForm({ ...form, gia_vang_mua: e.target.value })} />
+                              {form.loai_vang && loaiVangList.length > 0 && (() => {
+                                const lv = loaiVangList.find(v => v.ma_loai === form.loai_vang);
+                                return lv ? (
+                                  <button type="button" onClick={() => setForm({ ...form, gia_vang_mua: String(lv.gia_mua) })}
+                                    style={{ marginTop: 4, fontSize: 11, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
+                                    ↖ Lấy giá mua SJC hiện tại ({fmtN(lv.gia_mua)} ₫)
+                                  </button>
+                                ) : null;
+                              })()}
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ HẠT / ĐÁ (₫)</label>
+                              <input type="number" style={inpS} value={form.gia_hat || ''} placeholder="0"
+                                onChange={e => setForm({ ...form, gia_hat: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>GIÁ NHÂN CÔNG (₫)</label>
+                              <input type="number" style={inpS} value={form.gia_nhan_cong || ''} placeholder="0"
+                                onChange={e => setForm({ ...form, gia_nhan_cong: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>ĐIỀU CHỈNH +/- (₫)</label>
+                              <input type="number" style={inpS} value={form.dieu_chinh || ''} placeholder="0"
+                                onChange={e => setForm({ ...form, dieu_chinh: e.target.value })} />
+                            </div>
+                          </div>
+                          {(gv > 0 || gh > 0 || gnc > 0 || dc !== 0) && (
+                            <div style={{ fontSize: 11, color: '#94a3b8', borderTop: '1px dashed #e2e8f0', paddingTop: 8, fontFamily: 'monospace' }}>
+                              {fmtN(gv)} × {tl || 0} chỉ + {fmtN(gh)} + {fmtN(gnc)} {dc >= 0 ? '+' : ''}{fmtN(dc)}
+                              {' = '}
+                              <strong style={{ color: '#15803d', fontSize: 12 }}>{fmtN(total)} ₫</strong>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      {/* Công thức hiển thị */}
-                      {(gv > 0 || gh > 0 || gnc > 0 || dc !== 0) && (
-                        <div style={{ fontSize: 11, color: '#94a3b8', borderTop: '1px dashed #e2e8f0', paddingTop: 8, fontFamily: 'monospace' }}>
-                          {fmtN(gv)} × {tl || 0} chỉ + {fmtN(gh)} + {fmtN(gnc)} {dc >= 0 ? '+' : ''}{fmtN(dc)}
-                          {' = '}
-                          <strong style={{ color: '#15803d', fontSize: 12 }}>{fmtN(total)} ₫</strong>
-                        </div>
+                    );
+                  })()}
+                </div>
+
+                <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 18, minWidth: 0 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10, letterSpacing: .4 }}>HÌNH ẢNH SẢN PHẨM</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <label
+                      style={{ width: '100%', minHeight: 96, borderRadius: 12, border: '2px dashed #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', background: uploading ? '#f8fafc' : 'white', transition: 'background .15s', boxSizing: 'border-box', textAlign: 'center', padding: '12px 10px' }}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); uploadImages([...e.dataTransfer.files]); }}
+                    >
+                      <input type="file" multiple accept="image/*" style={{ display: 'none' }}
+                        onChange={e => uploadImages([...e.target.files])} />
+                      {uploading ? (
+                        <div style={{ fontSize: 20 }}>⏳</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 22, color: '#94a3b8' }}>+</div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, fontWeight: 700 }}>Tải ảnh</div>
+                        </>
                       )}
+                    </label>
+
+                    {(form.images || []).length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {(form.images || []).map((img, i) => (
+                          <div key={i} style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', borderRadius: 12, overflow: 'hidden', border: '1.5px solid #e2e8f0', background: '#f8fafc' }}>
+                            <img src={`${API}${img.url}`} alt={img.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <button type="button" onClick={() => removeImage(i)}
+                              style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: '50%', background: 'rgba(220,38,38,.88)', border: 'none', color: 'white', fontWeight: 900, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '10px 12px' }}>
+                        Chưa có ảnh sản phẩm nào.
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.6 }}>
+                      Kéo thả hoặc click để chọn nhiều ảnh. Hỗ trợ JPG, PNG, WEBP.
                     </div>
                   </div>
-                );
-              })()}
-
-              {/* Image upload */}
-              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 18 }}>
-                <label style={{ fontSize: 11, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10, letterSpacing: .4 }}>HÌNH ẢNH SẢN PHẨM</label>
-
-                {/* Thumbnails */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                  {(form.images || []).map((img, i) => (
-                    <div key={i} style={{ position: 'relative', width: 80, height: 80, borderRadius: 10, overflow: 'hidden', border: '1.5px solid #e2e8f0', flexShrink: 0 }}>
-                      <img src={`${API}${img.url}`} alt={img.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <button type="button" onClick={() => removeImage(i)}
-                        style={{ position: 'absolute', top: 3, right: 3, width: 20, height: 20, borderRadius: '50%', background: 'rgba(220,38,38,.85)', border: 'none', color: 'white', fontWeight: 900, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-                        ×
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Drop zone */}
-                  <label style={{ width: 80, height: 80, borderRadius: 10, border: '2px dashed #cbd5e1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', background: uploading ? '#f8fafc' : 'white', flexShrink: 0, transition: 'background .15s' }}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => { e.preventDefault(); uploadImages([...e.dataTransfer.files]); }}>
-                    <input type="file" multiple accept="image/*" style={{ display: 'none' }}
-                      onChange={e => uploadImages([...e.target.files])} />
-                    {uploading
-                      ? <div style={{ fontSize: 20 }}>⏳</div>
-                      : <>
-                        <div style={{ fontSize: 22, color: '#94a3b8' }}>+</div>
-                        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Tải ảnh</div>
-                      </>}
-                  </label>
                 </div>
-                <div style={{ fontSize: 11, color: '#94a3b8' }}>Kéo thả hoặc click vào ô + để chọn nhiều ảnh. Hỗ trợ JPG, PNG, WEBP.</div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>

@@ -173,6 +173,8 @@ export default function MayCanVangPage() {
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [notice, setNotice] = useState('');
+  const [agentScript, setAgentScript] = useState('');
+  const [scriptLoading, setScriptLoading] = useState(false);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) || agents[0] || null;
 
@@ -208,6 +210,28 @@ export default function MayCanVangPage() {
         console.error(error);
       } finally {
         if (!stopped) setLoading(false);
+      }
+    };
+
+    run();
+    return () => { stopped = true; };
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+
+    const run = async () => {
+      try {
+        setScriptLoading(true);
+        const response = await fetch(`${API}/api/scale/agent/script`);
+        if (!response.ok) throw new Error('Khong tai duoc script agent.');
+        const text = await response.text();
+        if (!stopped) setAgentScript(text);
+      } catch (error) {
+        console.error(error);
+        if (!stopped) setAgentScript('# Khong tai duoc script agent Python.');
+      } finally {
+        if (!stopped) setScriptLoading(false);
       }
     };
 
@@ -349,6 +373,15 @@ export default function MayCanVangPage() {
       console.error(error);
       window.alert('Không copy được cấu hình.');
     }
+  };
+
+  const downloadScript = () => {
+    const link = document.createElement('a');
+    link.href = `${API}/api/scale/agent/script?download=1`;
+    link.download = 'scale_agent_gp20k.py';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const agentConfigText = selectedAgent ? JSON.stringify({
@@ -535,6 +568,24 @@ export default function MayCanVangPage() {
               <div>2. Cắm cân A&D GP-20K vào máy Windows qua RS-232C hoặc bộ chuyển USB-COM.</div>
               <div>3. Cài `pyserial` và `requests`, chạy script agent Python với file config vừa copy.</div>
               <div>4. Khi agent online, bấm `Đọc ngay` hoặc `Đọc ổn định` từ server để lấy dữ liệu.</div>
+            </div>
+          </div>
+          <div style={{ ...cardStyle, padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 800, color: '#0f172a' }}>Script agent Python</div>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  Xem nhanh nội dung script và tải file `.py` về máy đang kết nối máy cân.
+                </div>
+              </div>
+              <button type="button" onClick={downloadScript} style={buttonStyle('#1d4ed8')}>
+                Download script .py
+              </button>
+            </div>
+            <div style={{ border: '1px solid #dbe3ef', borderRadius: 12, background: '#0f172a', color: '#e2e8f0', maxHeight: 420, overflowY: 'auto', overflowX: 'auto', padding: 14 }}>
+              <pre style={{ margin: 0, fontFamily: "Consolas, 'Courier New', monospace", fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre' }}>
+                {scriptLoading ? '# Dang tai script...' : agentScript}
+              </pre>
             </div>
           </div>
         </div>

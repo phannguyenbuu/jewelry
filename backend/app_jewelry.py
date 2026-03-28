@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import inspect, text
 from sqlalchemy.orm.attributes import flag_modified
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import os, uuid, datetime, base64, json, re, unicodedata
 import urllib.request
 
@@ -100,6 +100,21 @@ class DonHang(db.Model):
     ngay_tao      = db.Column(db.String(30), default='')
 
 # ─── NHÂN SỰ ──────────────────────────────────────────────────────────────────
+class HangSuaBo(db.Model):
+    __tablename__ = 'hang_sua_bo'
+    id            = db.Column(db.Integer, primary_key=True)
+    ma_phieu      = db.Column(db.String(80), unique=True, nullable=False)
+    loai_xu_ly    = db.Column(db.String(20), default='sua')
+    items         = db.Column(db.JSON, default=list)
+    tong_dong     = db.Column(db.Integer, default=0)
+    tong_them_tl  = db.Column(db.String(50), default='')
+    tong_bot_tl   = db.Column(db.String(50), default='')
+    ghi_chu       = db.Column(db.Text)
+    nguoi_tao     = db.Column(db.String(150), default='')
+    trang_thai    = db.Column(db.String(50), default='Mới')
+    ngay_tao      = db.Column(db.String(30), default='')
+    cap_nhat_luc  = db.Column(db.String(30), default='')
+
 class NhanVien(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     ma_nv         = db.Column(db.String(50), unique=True)
@@ -128,6 +143,30 @@ class ThuChi(db.Model):
     ngay_tao    = db.Column(db.String(30), default='')
 
 # ─── KẾ TOÁN: CHỨNG TỪ ───────────────────────────────────────────────────────
+class ThuNganSoQuy(db.Model):
+    __tablename__    = 'thu_ngan_so_quy'
+    id               = db.Column(db.Integer, primary_key=True)
+    ngay             = db.Column(db.String(20), unique=True, nullable=False)
+    so_tien_dau_ngay = db.Column(db.BigInteger, default=0)
+    so_tien_hien_tai = db.Column(db.BigInteger, default=0)
+    lich_su_chot     = db.Column(db.JSON, default=list)
+    ghi_chu          = db.Column(db.Text)
+    ngay_tao         = db.Column(db.String(30), default='')
+    cap_nhat_luc     = db.Column(db.String(30), default='')
+
+class ThuNganSoQuyTheoNguoi(db.Model):
+    __tablename__    = 'thu_ngan_so_quy_theo_nguoi'
+    id               = db.Column(db.Integer, primary_key=True)
+    ngay             = db.Column(db.String(20), nullable=False)
+    thu_ngan_id      = db.Column(db.Integer, nullable=False)
+    so_tien_dau_ngay = db.Column(db.BigInteger, default=0)
+    so_tien_hien_tai = db.Column(db.BigInteger, default=0)
+    chi_tiet         = db.Column(db.JSON, default=list)
+    lich_su_chot     = db.Column(db.JSON, default=list)
+    ghi_chu          = db.Column(db.Text)
+    ngay_tao         = db.Column(db.String(30), default='')
+    cap_nhat_luc     = db.Column(db.String(30), default='')
+
 class ChungTu(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     ma_ct         = db.Column(db.String(50), unique=True)
@@ -162,6 +201,86 @@ class TuoiVang(db.Model):
     ghi_chu   = db.Column(db.Text)
     lich_su   = db.Column(db.JSON, default=list)
     ngay_tao  = db.Column(db.String(30), default='')
+
+class HeThongCauHinh(db.Model):
+    __tablename__ = 'he_thong_cau_hinh'
+    id            = db.Column(db.Integer, primary_key=True)
+    config_key    = db.Column(db.String(120), nullable=False, unique=True)
+    data          = db.Column(db.JSON, default=dict)
+    ghi_chu       = db.Column(db.Text)
+    ngay_tao      = db.Column(db.String(30), default='')
+    cap_nhat_luc  = db.Column(db.String(30), default='')
+
+
+def _scale_legacy_thu_ngan_detail_rows(rows):
+    changed = False
+    scaled_rows = []
+    for row in list(rows or []):
+        item = dict(row or {})
+        original = dict(item)
+        for field in ['ton_dau_ky', 'so_du_hien_tai', 'gia_tri_lech', 'so_tien_dau_ngay', 'so_tien_hien_tai', 'chenh_lech']:
+            if field in item and item.get(field) not in (None, ''):
+                item[field] = _parse_bigint(item.get(field), 0) * THU_NGAN_AMOUNT_SCALE
+        if item != original:
+            changed = True
+        scaled_rows.append(item)
+    return scaled_rows, changed
+
+
+def _scale_legacy_thu_ngan_history_entries(entries):
+    changed = False
+    scaled_entries = []
+    for entry in list(entries or []):
+        item = dict(entry or {})
+        original = dict(item)
+        for field in ['so_tien_dau_ngay', 'so_tien', 'so_tien_chenh_lech', 'chenh_lech']:
+            if field in item and item.get(field) not in (None, ''):
+                item[field] = _parse_bigint(item.get(field), 0) * THU_NGAN_AMOUNT_SCALE
+        detail_rows, detail_changed = _scale_legacy_thu_ngan_detail_rows(item.get('chi_tiet') or [])
+        if detail_changed:
+            item['chi_tiet'] = detail_rows
+        if item != original or detail_changed:
+            changed = True
+        scaled_entries.append(item)
+    return scaled_entries, changed
+
+
+def _migrate_thu_ngan_so_quy_amount_scale():
+    marker = HeThongCauHinh.query.filter_by(config_key=THU_NGAN_AMOUNT_MIGRATION_KEY).first()
+    if marker:
+        return
+
+    any_changed = False
+    for model in (ThuNganSoQuy, ThuNganSoQuyTheoNguoi):
+        for obj in model.query.all():
+            old_dau_ky = _parse_bigint(obj.so_tien_dau_ngay, 0)
+            old_hien_tai = _parse_bigint(obj.so_tien_hien_tai, 0)
+            obj.so_tien_dau_ngay = old_dau_ky * THU_NGAN_AMOUNT_SCALE
+            obj.so_tien_hien_tai = old_hien_tai * THU_NGAN_AMOUNT_SCALE
+            if old_dau_ky or old_hien_tai:
+                any_changed = True
+
+            if hasattr(obj, 'chi_tiet'):
+                scaled_rows, detail_changed = _scale_legacy_thu_ngan_detail_rows(getattr(obj, 'chi_tiet', None) or [])
+                if detail_changed:
+                    obj.chi_tiet = scaled_rows
+                    flag_modified(obj, 'chi_tiet')
+                    any_changed = True
+
+            scaled_history, history_changed = _scale_legacy_thu_ngan_history_entries(obj.lich_su_chot or [])
+            if history_changed:
+                obj.lich_su_chot = scaled_history
+                flag_modified(obj, 'lich_su_chot')
+                any_changed = True
+
+    db.session.add(HeThongCauHinh(
+        config_key=THU_NGAN_AMOUNT_MIGRATION_KEY,
+        data={'scale': THU_NGAN_AMOUNT_SCALE},
+        ghi_chu='Scale thu ngan amounts to thousandths',
+        ngay_tao=now_str(),
+        cap_nhat_luc=now_str(),
+    ))
+    db.session.commit()
 
 # ─── TÀI CHÍNH: KHOẢN VAY ─────────────────────────────────────────────────────
 class KhoanVay(db.Model):
@@ -266,6 +385,40 @@ class ScaleReading(db.Model):
     raw_line     = db.Column(db.String(120), default='')
     meta         = db.Column(db.JSON, default=dict)
     created_at   = db.Column(db.String(30), default='')
+
+
+class NhapVangList(db.Model):
+    __tablename__ = 'nhap_vang_list'
+    id            = db.Column(db.Integer, primary_key=True)
+    ten_danh_sach = db.Column(db.String(200), nullable=False)
+    ghi_chu       = db.Column(db.Text)
+    trang_thai    = db.Column(db.String(30), default='dang_mo')
+    nguoi_tao     = db.Column(db.String(150), default='')
+    ngay_tao      = db.Column(db.String(30), default='')
+    ngay_cap_nhat = db.Column(db.String(30), default='')
+    items         = db.relationship(
+        'NhapVangItem',
+        backref='danh_sach',
+        cascade='all,delete-orphan',
+        lazy=True,
+        order_by='NhapVangItem.thu_tu, NhapVangItem.id'
+    )
+
+
+class NhapVangItem(db.Model):
+    __tablename__ = 'nhap_vang_item'
+    id                = db.Column(db.Integer, primary_key=True)
+    list_id           = db.Column(db.Integer, db.ForeignKey('nhap_vang_list.id'), nullable=False)
+    ten_hang          = db.Column(db.String(200), nullable=False)
+    nhom_hang         = db.Column(db.String(150), default='')
+    tuoi_vang         = db.Column(db.String(150), default='')
+    trong_luong       = db.Column(db.String(50), default='')
+    so_luong_yeu_cau  = db.Column(db.Integer, default=0)
+    so_luong_da_nhap  = db.Column(db.Integer, default=0)
+    ghi_chu           = db.Column(db.Text)
+    thu_tu            = db.Column(db.Integer, default=0)
+    ngay_tao          = db.Column(db.String(30), default='')
+    ngay_cap_nhat     = db.Column(db.String(30), default='')
 
 SEED_KHO = [
     {'ten_kho': 'Kho Tổng', 'dia_chi': '11 Lê Thị Pha, P.1, Bảo Lộc'},
@@ -396,6 +549,18 @@ def _ensure_quay_nho_thu_ngan_column():
     db.session.commit()
 
 
+def _ensure_thu_ngan_so_quy_detail_columns():
+    table_name = ThuNganSoQuyTheoNguoi.__table__.name
+    inspector = inspect(db.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    column_names = {col['name'] for col in inspector.get_columns(table_name)}
+    if 'chi_tiet' in column_names:
+        return
+    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN chi_tiet JSON'))
+    db.session.commit()
+
+
 def _parse_int_id(value):
     try:
         if value in (None, ''):
@@ -435,6 +600,28 @@ def _parse_float_value(value, fallback=0.0):
         return float(Decimal(text))
     except (InvalidOperation, ValueError):
         return fallback
+
+
+THU_NGAN_AMOUNT_SCALE = 1000
+THU_NGAN_AMOUNT_SCALE_DECIMAL = Decimal(str(THU_NGAN_AMOUNT_SCALE))
+THU_NGAN_AMOUNT_QUANT = Decimal('0.001')
+THU_NGAN_AMOUNT_MIGRATION_KEY = 'thu_ngan_so_quy_amount_scale_v1'
+
+
+def _parse_thu_ngan_amount_input(value, fallback=0):
+    text = _clean_text(value).replace(',', '')
+    if not text:
+        return fallback
+    try:
+        scaled = (Decimal(text) * THU_NGAN_AMOUNT_SCALE_DECIMAL).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+        return int(scaled)
+    except (InvalidOperation, ValueError):
+        return fallback
+
+
+def _format_thu_ngan_amount_output(value):
+    scaled = _parse_bigint(value, 0)
+    return float((Decimal(scaled) / THU_NGAN_AMOUNT_SCALE_DECIMAL).quantize(THU_NGAN_AMOUNT_QUANT))
 
 
 def _fold_ascii_text(text):
@@ -657,6 +844,8 @@ with app.app_context():
     _ensure_item_tuoi_vang_column()
     _ensure_tuoi_vang_columns()
     _ensure_quay_nho_thu_ngan_column()
+    _ensure_thu_ngan_so_quy_detail_columns()
+    _migrate_thu_ngan_so_quy_amount_scale()
     if Kho.query.count() == 0:
         for k in SEED_KHO:
             db.session.add(Kho(**k))
@@ -723,6 +912,10 @@ with app.app_context():
 
 def now_str():
     return datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+
+
+def today_iso():
+    return datetime.date.today().isoformat()
 
 
 IMPORT_HEADER_ALIASES = {
@@ -951,6 +1144,58 @@ def _build_scale_command_payload(data):
     }
 
 
+def _touch_nhap_vang_list(obj):
+    obj.ngay_cap_nhat = now_str()
+
+
+def _normalize_nhap_vang_qty(required_qty, imported_qty):
+    required_qty = max(0, int(required_qty or 0))
+    imported_qty = max(0, int(imported_qty or 0))
+    return required_qty, min(imported_qty, required_qty)
+
+
+def nhap_vang_item_json(item):
+    required_qty = int(item.so_luong_yeu_cau or 0)
+    imported_qty = int(item.so_luong_da_nhap or 0)
+    remaining_qty = max(0, required_qty - imported_qty)
+    return {
+        'id': item.id,
+        'list_id': item.list_id,
+        'ten_hang': item.ten_hang or '',
+        'nhom_hang': item.nhom_hang or '',
+        'tuoi_vang': item.tuoi_vang or '',
+        'trong_luong': item.trong_luong or '',
+        'so_luong_yeu_cau': required_qty,
+        'so_luong_da_nhap': imported_qty,
+        'so_luong_con_lai': remaining_qty,
+        'ghi_chu': item.ghi_chu or '',
+        'thu_tu': item.thu_tu or 0,
+        'hoan_thanh': remaining_qty == 0 and required_qty > 0,
+        'ngay_tao': item.ngay_tao or '',
+        'ngay_cap_nhat': item.ngay_cap_nhat or '',
+    }
+
+
+def nhap_vang_list_json(obj, include_items=True):
+    items = [nhap_vang_item_json(item) for item in obj.items] if include_items else []
+    total_required = sum(item['so_luong_yeu_cau'] for item in items)
+    total_imported = sum(item['so_luong_da_nhap'] for item in items)
+    total_remaining = max(0, total_required - total_imported)
+    return {
+        'id': obj.id,
+        'ten_danh_sach': obj.ten_danh_sach or '',
+        'ghi_chu': obj.ghi_chu or '',
+        'trang_thai': obj.trang_thai or 'dang_mo',
+        'nguoi_tao': obj.nguoi_tao or '',
+        'ngay_tao': obj.ngay_tao or '',
+        'ngay_cap_nhat': obj.ngay_cap_nhat or '',
+        'tong_so_luong': total_required,
+        'da_nhap': total_imported,
+        'con_lai': total_remaining,
+        'items': items,
+    }
+
+
 def _decimal_or_none(value):
     text = _clean_text(value).replace(',', '')
     if not text:
@@ -1069,7 +1314,7 @@ def _item_json(it):
         'loai_vang': it.loai_vang, 'tuoi_vang': it.tuoi_vang or '', 'status': it.status,
         'images': it.images, 'certificates': it.certificates, 'history': it.history,
         'gia_vang_mua': gv, 'gia_hat': gh, 'gia_nhan_cong': gnc, 'dieu_chinh': dc,
-        'gia_mua_tinh': gia_mua_tinh,
+        'gia_mua_tinh': gia_mua_tinh, 'gia_hien_tai': None,
     }
 
 @app.route('/api/items', methods=['GET'])
@@ -1119,6 +1364,19 @@ def update_item(item_id):
     flag_modified(it,'history')
     db.session.commit()
     return jsonify({'msg': 'Updated'})
+
+@app.route('/api/items/purge_sold', methods=['POST'])
+def purge_sold_items():
+    sold_status = _clean_text('Đã bán').lower()
+    sold_items = [
+        it for it in Item.query.order_by(Item.id).all()
+        if _clean_text(it.status).lower() == sold_status
+    ]
+    deleted_count = len(sold_items)
+    for it in sold_items:
+        db.session.delete(it)
+    db.session.commit()
+    return jsonify({'msg': 'Purged sold items', 'deleted_count': deleted_count})
 
 # ─── KHO ───────────────────────────────────────────────────────────────────────
 
@@ -1186,6 +1444,17 @@ def _save_thu_ngan_record(obj, data, is_new=False):
 
     db.session.commit()
     return obj, None
+
+
+def _resolve_thu_ngan_for_quay(kho_id, thu_ngan_id):
+    if thu_ngan_id is None:
+        return None, None
+    thu_ngan = ThuNgan.query.get(thu_ngan_id)
+    if not thu_ngan:
+        return None, ('Thu ngân không tồn tại.', 404)
+    if thu_ngan.kho_id != kho_id:
+        return None, ('Thu ngân không thuộc kho đã chọn.', 400)
+    return thu_ngan, None
 
 
 @app.route('/api/kho', methods=['GET'])
@@ -1281,8 +1550,13 @@ def get_quay():
 def add_quay():
     d = request.json or {}
     kho_id = _parse_int_id(d.get('kho_id')) or _get_or_create_default_kho().id
+    thu_ngan_id = _parse_int_id(d.get('thu_ngan_id'))
+    thu_ngan, error = _resolve_thu_ngan_for_quay(kho_id, thu_ngan_id)
+    if error:
+        return jsonify({'error': error[0]}), error[1]
     q = QuayNho(ten_quay=d.get('ten_quay',''), kho_id=kho_id, ghi_chu=d.get('ghi_chu',''),
-                nguoi_phu_trach=d.get('nguoi_phu_trach',''), ngay_tao=now_str())
+                nguoi_phu_trach=d.get('nguoi_phu_trach',''), ngay_tao=now_str(),
+                thu_ngan_id=thu_ngan.id if thu_ngan else None)
     db.session.add(q); db.session.commit()
     return jsonify({'msg':'Created','id':q.id})
 
@@ -1293,14 +1567,21 @@ def update_quay(qid):
         db.session.delete(q); db.session.commit(); return jsonify({'msg':'Deleted'})
     d = request.json or {}
     new_kho_id = _parse_int_id(d.get('kho_id')) or _get_or_create_default_kho().id
+    next_thu_ngan_id = q.thu_ngan_id
+    if 'thu_ngan_id' in d:
+        next_thu_ngan_id = _parse_int_id(d.get('thu_ngan_id'))
+    elif next_thu_ngan_id:
+        assigned_cashier = ThuNgan.query.get(next_thu_ngan_id)
+        if not assigned_cashier or assigned_cashier.kho_id != new_kho_id:
+            next_thu_ngan_id = None
+    thu_ngan, error = _resolve_thu_ngan_for_quay(new_kho_id, next_thu_ngan_id)
+    if error:
+        return jsonify({'error': error[0]}), error[1]
     q.ten_quay          = d.get('ten_quay', q.ten_quay)
     q.kho_id            = new_kho_id
     q.ghi_chu           = d.get('ghi_chu', q.ghi_chu)
     q.nguoi_phu_trach   = d.get('nguoi_phu_trach', q.nguoi_phu_trach or '')
-    if q.thu_ngan_id:
-        assigned_cashier = ThuNgan.query.get(q.thu_ngan_id)
-        if not assigned_cashier or assigned_cashier.kho_id != new_kho_id:
-            q.thu_ngan_id = None
+    q.thu_ngan_id       = thu_ngan.id if thu_ngan else None
     db.session.commit(); return jsonify({'msg':'Updated'})
 
 # ─── LOẠI VÀNG ─────────────────────────────────────────────────────────────────
@@ -1552,20 +1833,210 @@ def uploaded_file(filename):
 # ─── ĐƠN HÀNG CRUD ────────────────────────────────────────────────────────────
 
 def don_json(d):
-    return {'id':d.id,'ma_don':d.ma_don,'khach_hang':d.khach_hang,
-            'so_dien_thoai':d.so_dien_thoai,'dia_chi':d.dia_chi,
-            'ngay_dat':d.ngay_dat,'ngay_giao':d.ngay_giao,
-            'items':d.items or [],'tong_tien':d.tong_tien,'dat_coc':d.dat_coc,
-            'trang_thai':d.trang_thai,'ghi_chu':d.ghi_chu,
-            'nguoi_tao':d.nguoi_tao,'ngay_tao':d.ngay_tao}
+    return {'id': d.id, 'ma_don': d.ma_don, 'loai_don': getattr(d, 'loai_don', 'Mua') or 'Mua',
+            'khach_hang': d.khach_hang, 'cccd': getattr(d, 'cccd', '') or '', 'so_dien_thoai': d.so_dien_thoai,
+            'dia_chi_kh': getattr(d, 'dia_chi_kh', '') or '', 'dia_chi': d.dia_chi, 'ngay_dat': d.ngay_dat,
+            'ngay_giao': d.ngay_giao, 'items': d.items or [], 'tong_tien': d.tong_tien,
+            'dat_coc': d.dat_coc, 'trang_thai': d.trang_thai, 'ghi_chu': d.ghi_chu,
+            'chung_tu': getattr(d, 'chung_tu', []) or [], 'nguoi_tao': d.nguoi_tao, 'ngay_tao': d.ngay_tao}
 
-def don_json(d):
-    return {'id':d.id,'ma_don':d.ma_don,'loai_don':d.loai_don or 'Mua',
-            'khach_hang':d.khach_hang,'cccd':d.cccd or '','so_dien_thoai':d.so_dien_thoai,
-            'dia_chi_kh':d.dia_chi_kh or '','dia_chi':d.dia_chi,'ngay_dat':d.ngay_dat,
-            'ngay_giao':d.ngay_giao,'items':d.items or [],'tong_tien':d.tong_tien,
-            'dat_coc':d.dat_coc,'trang_thai':d.trang_thai,'ghi_chu':d.ghi_chu,
-            'chung_tu':d.chung_tu or [],'nguoi_tao':d.nguoi_tao,'ngay_tao':d.ngay_tao}
+
+def _unique_hang_sua_bo_code(base_code):
+    code = _clean_text(base_code) or f"SB{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
+    next_code = code
+    idx = 2
+    while HangSuaBo.query.filter_by(ma_phieu=next_code).first():
+        next_code = f'{code}-{idx}'
+        idx += 1
+    return next_code
+
+
+def _sum_weight_key(items, key):
+    total = Decimal('0')
+    for item in items or []:
+        total += _decimal_or_none((item or {}).get(key)) or Decimal('0')
+    return _format_decimal(total, max_decimals=4)
+
+
+def _append_item_history(item, action, by='POS Mobile'):
+    history = list(item.history or [])
+    history.append({
+        'date': now_str(),
+        'action': action,
+        'by': by or 'POS Mobile',
+    })
+    item.history = history
+    flag_modified(item, 'history')
+
+
+def _normalize_hang_sua_bo_item(raw_item, loai_xu_ly, line_no):
+    payload = raw_item if isinstance(raw_item, dict) else {}
+    item_id = _parse_int_id(payload.get('item_id'))
+    inventory_item = Item.query.get(item_id) if item_id is not None else None
+
+    if item_id is not None and inventory_item is None:
+        return None, None, (f'Sản phẩm dòng {line_no} không tồn tại trong kho.', 404)
+
+    ma_hang = _clean_text(payload.get('ma_hang') or (inventory_item.ma_hang if inventory_item else ''))
+    if not ma_hang:
+        return None, None, (f'Dòng {line_no} thiếu mã hàng.', 400)
+
+    ten_hang = _clean_text(payload.get('ten_hang') or payload.get('ncc') or (inventory_item.ncc if inventory_item else ''))
+    nhom_hang = _clean_text(payload.get('nhom_hang') or (inventory_item.nhom_hang if inventory_item else ''))
+    quay_nho = _clean_text(payload.get('quay_nho') or (inventory_item.quay_nho if inventory_item else ''))
+    tuoi_vang = _clean_text(payload.get('tuoi_vang') or (inventory_item.tuoi_vang if inventory_item else ''))
+    status = _clean_text(payload.get('status') or (inventory_item.status if inventory_item else ''))
+    tl_vang_hien_tai = _normalize_weight_text(payload.get('tl_vang_hien_tai') or payload.get('tl_vang') or (inventory_item.tl_vang if inventory_item else ''))
+    ghi_chu = _clean_text(payload.get('ghi_chu'))
+
+    them_tl_vang = ''
+    bot_tl_vang = ''
+    tl_vang_sau_xu_ly = tl_vang_hien_tai
+
+    if loai_xu_ly == 'sua':
+        them_tl_vang = _normalize_weight_text(payload.get('them_tl_vang'))
+        bot_tl_vang = _normalize_weight_text(payload.get('bot_tl_vang'))
+        them_decimal = _decimal_or_none(them_tl_vang) or Decimal('0')
+        bot_decimal = _decimal_or_none(bot_tl_vang) or Decimal('0')
+        if them_decimal <= 0 and bot_decimal <= 0:
+            return None, None, (f'Dòng {line_no} cần nhập thêm hoặc bớt trọng lượng vàng.', 400)
+        tl_hien_tai_decimal = _decimal_or_none(tl_vang_hien_tai) or Decimal('0')
+        if tl_hien_tai_decimal + them_decimal - bot_decimal < 0:
+            return None, None, (f'DÃ²ng {line_no} cÃ³ trá»ng lÆ°á»£ng vÃ ng sau xá»­ lÃ½ Ã¢m.', 400)
+        tl_vang_sau_xu_ly = _format_decimal(tl_hien_tai_decimal + them_decimal - bot_decimal, max_decimals=4)
+
+    normalized = {
+        'item_id': inventory_item.id if inventory_item else item_id,
+        'ma_hang': ma_hang,
+        'ten_hang': ten_hang,
+        'nhom_hang': nhom_hang,
+        'quay_nho': quay_nho,
+        'tuoi_vang': tuoi_vang,
+        'status': status,
+        'tl_vang_hien_tai': tl_vang_hien_tai,
+        'them_tl_vang': them_tl_vang,
+        'bot_tl_vang': bot_tl_vang,
+        'tl_vang_sau_xu_ly': tl_vang_sau_xu_ly,
+        'ghi_chu': ghi_chu,
+    }
+    return normalized, inventory_item, None
+
+
+def hang_sua_bo_json(obj):
+    items = obj.items or []
+    return {
+        'id': obj.id,
+        'ma_phieu': obj.ma_phieu or '',
+        'loai_xu_ly': obj.loai_xu_ly or 'sua',
+        'tong_dong': obj.tong_dong or len(items),
+        'tong_them_tl': obj.tong_them_tl or _sum_weight_key(items, 'them_tl_vang'),
+        'tong_bot_tl': obj.tong_bot_tl or _sum_weight_key(items, 'bot_tl_vang'),
+        'ghi_chu': obj.ghi_chu or '',
+        'nguoi_tao': obj.nguoi_tao or '',
+        'trang_thai': obj.trang_thai or 'Mới',
+        'ngay_tao': obj.ngay_tao or '',
+        'cap_nhat_luc': obj.cap_nhat_luc or '',
+        'items': items,
+    }
+
+
+def _match_hang_sua_bo_date(obj, date_text):
+    text = _clean_text(date_text)
+    if not text:
+        return True
+    parsed = _parse_local_datetime(obj.ngay_tao or obj.cap_nhat_luc)
+    if parsed is None:
+        return False
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+        return parsed.strftime('%Y-%m-%d') == text
+    return parsed.strftime('%d/%m/%Y') == text
+
+
+@app.route('/api/hang_sua_bo', methods=['GET'])
+def get_hang_sua_bo():
+    rows = HangSuaBo.query.order_by(HangSuaBo.id.desc()).all()
+    date = _clean_text(request.args.get('date'))
+    today = _clean_text(request.args.get('today')).lower()
+    if today in ('1', 'true', 'yes'):
+        date = datetime.date.today().strftime('%Y-%m-%d')
+    if date:
+        rows = [row for row in rows if _match_hang_sua_bo_date(row, date)]
+    return jsonify([hang_sua_bo_json(row) for row in rows])
+
+
+@app.route('/api/hang_sua_bo', methods=['POST'])
+def add_hang_sua_bo():
+    d = request.json or {}
+    loai_xu_ly = _clean_text(d.get('loai_xu_ly') or 'sua').lower()
+    if loai_xu_ly not in {'sua', 'bo'}:
+        return jsonify({'error': 'Loại xử lý không hợp lệ.'}), 400
+
+    raw_items = d.get('items') or []
+    if not isinstance(raw_items, list) or not raw_items:
+        return jsonify({'error': 'Cần chọn ít nhất 1 sản phẩm trong kho.'}), 400
+
+    ma_phieu = _unique_hang_sua_bo_code(d.get('ma_phieu') or f"SB{datetime.datetime.now().strftime('%y%m%d%H%M%S')}")
+    nguoi_tao = _clean_text(d.get('nguoi_tao')) or 'POS Mobile'
+    next_status = 'Đang sửa' if loai_xu_ly == 'sua' else 'Đã bỏ'
+    blocked_statuses = {
+        _clean_text('Đã bán').lower(),
+        _clean_text('Đang sửa').lower(),
+        _clean_text('Đã bỏ').lower(),
+    }
+
+    normalized_items = []
+    item_updates = []
+    seen_item_ids = set()
+    for line_no, raw_item in enumerate(raw_items, start=1):
+        normalized, inventory_item, error = _normalize_hang_sua_bo_item(raw_item, loai_xu_ly, line_no)
+        if error:
+            return jsonify({'error': error[0]}), error[1]
+        if inventory_item is None:
+            return jsonify({'error': f'Dòng {line_no} cần chọn sản phẩm từ kho hàng.'}), 400
+        if inventory_item.id in seen_item_ids:
+            return jsonify({'error': f'Sản phẩm {normalized["ma_hang"]} đang bị lặp trong phiếu.'}), 400
+        seen_item_ids.add(inventory_item.id)
+        if _clean_text(inventory_item.status).lower() in blocked_statuses:
+            return jsonify({'error': f'Sản phẩm {normalized["ma_hang"]} đang ở trạng thái {inventory_item.status}, không thể tạo phiếu mới.'}), 400
+        normalized['status'] = next_status
+        normalized_items.append(normalized)
+        item_updates.append((normalized, inventory_item))
+
+    now_value = now_str()
+    obj = HangSuaBo(
+        ma_phieu=ma_phieu,
+        loai_xu_ly=loai_xu_ly,
+        items=normalized_items,
+        tong_dong=len(normalized_items),
+        tong_them_tl=_sum_weight_key(normalized_items, 'them_tl_vang'),
+        tong_bot_tl=_sum_weight_key(normalized_items, 'bot_tl_vang'),
+        ghi_chu=_clean_text(d.get('ghi_chu')),
+        nguoi_tao=nguoi_tao,
+        trang_thai=_clean_text(d.get('trang_thai')) or 'Mới',
+        ngay_tao=now_value,
+        cap_nhat_luc=now_value,
+    )
+    db.session.add(obj)
+
+    for normalized, inventory_item in item_updates:
+        inventory_item.status = next_status
+        if loai_xu_ly == 'sua':
+            delta_parts = []
+            if normalized.get('them_tl_vang'):
+                delta_parts.append(f"+{normalized['them_tl_vang']}")
+            if normalized.get('bot_tl_vang'):
+                delta_parts.append(f"-{normalized['bot_tl_vang']}")
+            delta_text = ' / '.join(delta_parts) if delta_parts else 'không điều chỉnh'
+            action = (
+                f"Phiếu sửa {ma_phieu}: {delta_text} vàng"
+                f" -> dự kiến {normalized.get('tl_vang_sau_xu_ly') or normalized.get('tl_vang_hien_tai') or '0'}"
+            )
+        else:
+            action = f"Phiếu bỏ hàng {ma_phieu}"
+        _append_item_history(inventory_item, action, by=nguoi_tao)
+
+    db.session.commit()
+    return jsonify({'msg': 'Created', 'id': obj.id, 'ma_phieu': obj.ma_phieu, 'record': hang_sua_bo_json(obj)}), 201
 
 @app.route('/api/don_hang', methods=['GET'])
 def get_don_hang():
@@ -1582,14 +2053,13 @@ def get_don_hang():
 def add_don_hang():
     d = request.json or {}
     ma = d.get('ma_don') or f"DH{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
-    obj = DonHang(ma_don=ma, loai_don=d.get('loai_don','Mua'),
-                  khach_hang=d.get('khach_hang',''), cccd=d.get('cccd',''),
+    obj = DonHang(ma_don=ma,
+                  khach_hang=d.get('khach_hang',''),
                   so_dien_thoai=d.get('so_dien_thoai',''), dia_chi=d.get('dia_chi',''),
-                  dia_chi_kh=d.get('dia_chi_kh',''),
                   ngay_dat=d.get('ngay_dat',''), ngay_giao=d.get('ngay_giao',''),
                   items=d.get('items',[]), tong_tien=int(d.get('tong_tien') or 0),
                   dat_coc=int(d.get('dat_coc') or 0), trang_thai=d.get('trang_thai','Mới'),
-                  ghi_chu=d.get('ghi_chu',''), chung_tu=d.get('chung_tu',[]),
+                  ghi_chu=d.get('ghi_chu',''),
                   nguoi_tao=d.get('nguoi_tao',''), ngay_tao=now_str())
     db.session.add(obj); db.session.commit()
     return jsonify({'msg':'Created','id':obj.id}), 201
@@ -1601,11 +2071,10 @@ def update_don_hang(did):
     if request.method == 'DELETE':
         db.session.delete(obj); db.session.commit(); return jsonify({'msg':'Deleted'})
     d = request.json or {}
-    for f in ['loai_don','khach_hang','cccd','so_dien_thoai','dia_chi','dia_chi_kh',
+    for f in ['khach_hang','so_dien_thoai','dia_chi',
                'ngay_dat','ngay_giao','trang_thai','ghi_chu','nguoi_tao']:
         if f in d: setattr(obj, f, d[f])
     if 'items'    in d: obj.items    = d['items']
-    if 'chung_tu' in d: obj.chung_tu = d['chung_tu']
     if 'tong_tien' in d: obj.tong_tien = int(d['tong_tien'] or 0)
     if 'dat_coc'   in d: obj.dat_coc   = int(d['dat_coc'] or 0)
     db.session.commit(); return jsonify({'msg':'Updated'})
@@ -1679,6 +2148,468 @@ def update_thu_chi(tid):
         if f in d: setattr(obj, f, d[f])
     if 'so_tien' in d: obj.so_tien = int(d['so_tien'] or 0)
     db.session.commit(); return jsonify({'msg':'Updated'})
+
+def _parse_vi_datetime(value):
+    try:
+        return datetime.datetime.strptime(value or '', '%d/%m/%Y %H:%M:%S')
+    except Exception:
+        return datetime.datetime.min
+
+
+def _load_thu_ngan_rows():
+    kho_map = {k.id: k.ten_kho for k in Kho.query.order_by(Kho.id).all()}
+    nhan_vien_map = {n.id: n for n in NhanVien.query.order_by(NhanVien.id).all()}
+    quays_by_thu_ngan = {}
+    for q in QuayNho.query.order_by(QuayNho.id).all():
+        if not q.thu_ngan_id:
+            continue
+        quays_by_thu_ngan.setdefault(q.thu_ngan_id, []).append(q)
+    return [
+        _thu_ngan_json(obj, kho_map, nhan_vien_map, quays_by_thu_ngan)
+        for obj in ThuNgan.query.order_by(ThuNgan.kho_id, ThuNgan.id).all()
+    ]
+
+
+def _make_thu_ngan_so_quy_detail_row(tuoi_vang='', ton_dau_ky=0, so_du_hien_tai=0, gia_tri_lech=0, row_id='', input_mode=False):
+    parser = _parse_thu_ngan_amount_input if input_mode else _parse_bigint
+    return {
+        'row_id': _clean_text(row_id) or uuid.uuid4().hex,
+        'tuoi_vang': _clean_text(tuoi_vang),
+        'ton_dau_ky': parser(ton_dau_ky, 0),
+        'so_du_hien_tai': parser(so_du_hien_tai, 0),
+        'gia_tri_lech': parser(gia_tri_lech, 0),
+    }
+
+
+def _normalize_thu_ngan_so_quy_detail_rows(rows, fallback_so_tien_dau_ngay=0, fallback_so_tien_hien_tai=0, fallback_chenh_lech=None, input_mode=False):
+    normalized_rows = []
+    changed = False
+    fallback_opening = _parse_bigint(fallback_so_tien_dau_ngay, 0)
+    fallback_current = _parse_bigint(fallback_so_tien_hien_tai, 0)
+    fallback_diff = _parse_bigint(
+        fallback_chenh_lech,
+        fallback_current - fallback_opening,
+    )
+    parser = _parse_thu_ngan_amount_input if input_mode else _parse_bigint
+
+    for row in list(rows or []):
+        item = dict(row or {})
+        original = dict(item)
+        ton_dau_ky = parser(
+            item.get('ton_dau_ky', item.get('so_tien_dau_ngay')),
+            0,
+        )
+        so_du_hien_tai = parser(
+            item.get('so_du_hien_tai', item.get('so_tien_hien_tai')),
+            0,
+        )
+        default_diff = so_du_hien_tai - ton_dau_ky
+        raw_diff = item.get('gia_tri_lech', item.get('chenh_lech'))
+        normalized_item = _make_thu_ngan_so_quy_detail_row(
+            tuoi_vang=item.get('tuoi_vang', ''),
+            ton_dau_ky=ton_dau_ky,
+            so_du_hien_tai=so_du_hien_tai,
+            gia_tri_lech=default_diff if raw_diff in (None, '') else parser(raw_diff, default_diff),
+            row_id=item.get('row_id', ''),
+            input_mode=False,
+        )
+        if normalized_item != original:
+            changed = True
+        normalized_rows.append(normalized_item)
+
+    if not normalized_rows and (fallback_opening or fallback_current or fallback_diff):
+        normalized_rows.append(_make_thu_ngan_so_quy_detail_row(
+            ton_dau_ky=fallback_opening,
+            so_du_hien_tai=fallback_current,
+            gia_tri_lech=fallback_diff,
+        ))
+        changed = True
+
+    return normalized_rows, changed
+
+
+def _thu_ngan_so_quy_detail_row_json(row):
+    item = row or {}
+    return {
+        'row_id': item.get('row_id') or uuid.uuid4().hex,
+        'tuoi_vang': item.get('tuoi_vang') or '',
+        'ton_dau_ky': _format_thu_ngan_amount_output(item.get('ton_dau_ky')),
+        'so_du_hien_tai': _format_thu_ngan_amount_output(item.get('so_du_hien_tai')),
+        'gia_tri_lech': _format_thu_ngan_amount_output(item.get('gia_tri_lech')),
+    }
+
+
+def _sum_thu_ngan_so_quy_detail_rows(rows):
+    totals = {'so_tien_dau_ngay': 0, 'so_tien_hien_tai': 0, 'chenh_lech': 0}
+    for row in rows or []:
+        totals['so_tien_dau_ngay'] += _parse_bigint((row or {}).get('ton_dau_ky'), 0)
+        totals['so_tien_hien_tai'] += _parse_bigint((row or {}).get('so_du_hien_tai'), 0)
+        totals['chenh_lech'] += _parse_bigint((row or {}).get('gia_tri_lech'), 0)
+    return totals
+
+
+def _sync_thu_ngan_so_quy_detail_totals(obj):
+    detail_rows, detail_changed = _normalize_thu_ngan_so_quy_detail_rows(
+        obj.chi_tiet or [],
+        fallback_so_tien_dau_ngay=obj.so_tien_dau_ngay or 0,
+        fallback_so_tien_hien_tai=obj.so_tien_hien_tai or 0,
+        fallback_chenh_lech=(obj.so_tien_hien_tai or 0) - (obj.so_tien_dau_ngay or 0),
+    )
+    changed = detail_changed
+    if detail_changed:
+        obj.chi_tiet = detail_rows
+        flag_modified(obj, 'chi_tiet')
+    totals = _sum_thu_ngan_so_quy_detail_rows(detail_rows)
+    if int(obj.so_tien_dau_ngay or 0) != totals['so_tien_dau_ngay']:
+        obj.so_tien_dau_ngay = totals['so_tien_dau_ngay']
+        changed = True
+    if int(obj.so_tien_hien_tai or 0) != totals['so_tien_hien_tai']:
+        obj.so_tien_hien_tai = totals['so_tien_hien_tai']
+        changed = True
+    return changed
+
+
+def thu_ngan_so_quy_row_json(cashier, obj, ngay=None):
+    chi_tiet = []
+    if obj:
+        chi_tiet, _ = _normalize_thu_ngan_so_quy_detail_rows(
+            obj.chi_tiet or [],
+            fallback_so_tien_dau_ngay=obj.so_tien_dau_ngay or 0,
+            fallback_so_tien_hien_tai=obj.so_tien_hien_tai or 0,
+            fallback_chenh_lech=(obj.so_tien_hien_tai or 0) - (obj.so_tien_dau_ngay or 0),
+        )
+    totals = _sum_thu_ngan_so_quy_detail_rows(chi_tiet)
+    so_tien_dau_ngay = totals['so_tien_dau_ngay'] if chi_tiet else (obj.so_tien_dau_ngay if obj else 0)
+    so_tien_hien_tai = totals['so_tien_hien_tai'] if chi_tiet else (obj.so_tien_hien_tai if obj else 0)
+    chenh_lech = totals['chenh_lech'] if chi_tiet else (so_tien_hien_tai - so_tien_dau_ngay)
+    return {
+        'id': obj.id if obj else None,
+        'ngay': obj.ngay if obj else (ngay or today_iso()),
+        'thu_ngan_id': cashier['id'],
+        'ten_thu_ngan': cashier.get('ten_thu_ngan', ''),
+        'kho_id': cashier.get('kho_id'),
+        'ten_kho': cashier.get('ten_kho', ''),
+        'nhan_vien_id': cashier.get('nhan_vien_id'),
+        'nguoi_quan_ly': cashier.get('nguoi_quan_ly', ''),
+        'quay_ids': cashier.get('quay_ids', []),
+        'quays': cashier.get('quays', []),
+        'so_quay': cashier.get('so_quay', 0),
+        'so_tien_dau_ngay': _format_thu_ngan_amount_output(so_tien_dau_ngay),
+        'so_tien_hien_tai': _format_thu_ngan_amount_output(so_tien_hien_tai),
+        'chenh_lech': _format_thu_ngan_amount_output(chenh_lech),
+        'chi_tiet': [_thu_ngan_so_quy_detail_row_json(item) for item in chi_tiet],
+        'lich_su_chot': (obj.lich_su_chot or []) if obj else [],
+        'ghi_chu': (obj.ghi_chu or '') if obj else '',
+        'ngay_tao': (obj.ngay_tao or '') if obj else '',
+        'cap_nhat_luc': (obj.cap_nhat_luc or '') if obj else '',
+    }
+
+
+def _get_or_create_thu_ngan_so_quy_row(ngay, thu_ngan_id):
+    obj = ThuNganSoQuyTheoNguoi.query.filter_by(ngay=ngay, thu_ngan_id=thu_ngan_id).first()
+    if obj:
+        return obj
+    obj = ThuNganSoQuyTheoNguoi(
+        ngay=ngay,
+        thu_ngan_id=thu_ngan_id,
+        so_tien_dau_ngay=0,
+        so_tien_hien_tai=0,
+        chi_tiet=[],
+        lich_su_chot=[],
+        ghi_chu='',
+        ngay_tao=now_str(),
+        cap_nhat_luc=now_str(),
+    )
+    db.session.add(obj)
+    db.session.flush()
+    return obj
+
+
+def _normalize_thu_ngan_so_quy_history_entries(entries, fallback_so_tien_dau_ngay=0, fallback_so_tien_hien_tai=0, fallback_chenh_lech=None):
+    normalized_entries = []
+    changed = False
+    fallback_value = _parse_bigint(fallback_so_tien_dau_ngay, 0)
+    fallback_current = _parse_bigint(fallback_so_tien_hien_tai, 0)
+    fallback_diff = _parse_bigint(fallback_chenh_lech, fallback_current - fallback_value)
+
+    first_known = None
+    for entry in list(entries or []):
+        raw_so_tien_dau_ngay = (entry or {}).get('so_tien_dau_ngay')
+        if raw_so_tien_dau_ngay is None or _clean_text(raw_so_tien_dau_ngay) == '':
+            continue
+        first_known = _parse_bigint(raw_so_tien_dau_ngay, fallback_value)
+        break
+    last_known = fallback_value if first_known is None else first_known
+
+    for entry in list(entries or []):
+        item = dict(entry or {})
+        original = dict(item)
+
+        if not _clean_text(item.get('entry_id')):
+            item['entry_id'] = uuid.uuid4().hex
+
+        raw_so_tien_dau_ngay = item.get('so_tien_dau_ngay')
+        if raw_so_tien_dau_ngay is None or _clean_text(raw_so_tien_dau_ngay) == '':
+            item['so_tien_dau_ngay'] = last_known
+        else:
+            item['so_tien_dau_ngay'] = _parse_bigint(raw_so_tien_dau_ngay, last_known)
+
+        item['so_tien'] = _parse_bigint(item.get('so_tien'), 0)
+        item['so_tien_chenh_lech'] = _parse_bigint(
+            item.get('so_tien_chenh_lech', item.get('chenh_lech')),
+            item['so_tien'] - item['so_tien_dau_ngay'],
+        )
+        detail_rows, detail_changed = _normalize_thu_ngan_so_quy_detail_rows(
+            item.get('chi_tiet') or [],
+            fallback_so_tien_dau_ngay=item['so_tien_dau_ngay'],
+            fallback_so_tien_hien_tai=item['so_tien'],
+            fallback_chenh_lech=item['so_tien_chenh_lech'],
+        )
+        if detail_rows:
+            detail_totals = _sum_thu_ngan_so_quy_detail_rows(detail_rows)
+            item['so_tien_dau_ngay'] = detail_totals['so_tien_dau_ngay']
+            item['so_tien'] = detail_totals['so_tien_hien_tai']
+            item['so_tien_chenh_lech'] = detail_totals['chenh_lech']
+        elif not item.get('chi_tiet') and (fallback_value or fallback_current or fallback_diff):
+            item['so_tien_chenh_lech'] = _parse_bigint(item.get('so_tien_chenh_lech'), fallback_diff)
+        item['chi_tiet'] = detail_rows
+        item['ghi_chu'] = item.get('ghi_chu') or ''
+        item['thoi_gian'] = item.get('thoi_gian') or ''
+        last_known = item['so_tien_dau_ngay']
+
+        if item != original or detail_changed:
+            changed = True
+        normalized_entries.append(item)
+    return normalized_entries, changed
+
+
+def _sync_thu_ngan_so_quy_from_history(obj):
+    entries, history_changed = _normalize_thu_ngan_so_quy_history_entries(
+        obj.lich_su_chot or [],
+        fallback_so_tien_dau_ngay=obj.so_tien_dau_ngay or 0,
+        fallback_so_tien_hien_tai=obj.so_tien_hien_tai or 0,
+        fallback_chenh_lech=(obj.so_tien_hien_tai or 0) - (obj.so_tien_dau_ngay or 0),
+    )
+    changed = history_changed
+    if history_changed:
+        obj.lich_su_chot = entries
+        flag_modified(obj, 'lich_su_chot')
+    if entries:
+        latest = entries[0]
+        latest_so_tien_dau_ngay = _parse_bigint(latest.get('so_tien_dau_ngay'), 0)
+        latest_so_tien = _parse_bigint(latest.get('so_tien'), 0)
+        latest_chi_tiet, _ = _normalize_thu_ngan_so_quy_detail_rows(
+            latest.get('chi_tiet') or [],
+            fallback_so_tien_dau_ngay=latest_so_tien_dau_ngay,
+            fallback_so_tien_hien_tai=latest_so_tien,
+            fallback_chenh_lech=latest.get('so_tien_chenh_lech'),
+        )
+        latest_ghi_chu = latest.get('ghi_chu') or ''
+        latest_cap_nhat_luc = latest.get('thoi_gian') or now_str()
+        if int(obj.so_tien_dau_ngay or 0) != latest_so_tien_dau_ngay:
+            obj.so_tien_dau_ngay = latest_so_tien_dau_ngay
+            changed = True
+        if int(obj.so_tien_hien_tai or 0) != latest_so_tien:
+            obj.so_tien_hien_tai = latest_so_tien
+            changed = True
+        if (obj.chi_tiet or []) != latest_chi_tiet:
+            obj.chi_tiet = latest_chi_tiet
+            flag_modified(obj, 'chi_tiet')
+            changed = True
+        if (obj.ghi_chu or '') != latest_ghi_chu:
+            obj.ghi_chu = latest_ghi_chu
+            changed = True
+        if (obj.cap_nhat_luc or '') != latest_cap_nhat_luc:
+            obj.cap_nhat_luc = latest_cap_nhat_luc
+            changed = True
+        return changed
+    if int(obj.so_tien_dau_ngay or 0) != 0:
+        obj.so_tien_dau_ngay = 0
+        changed = True
+    if int(obj.so_tien_hien_tai or 0) != 0:
+        obj.so_tien_hien_tai = 0
+        changed = True
+    if obj.chi_tiet:
+        obj.chi_tiet = []
+        flag_modified(obj, 'chi_tiet')
+        changed = True
+    if obj.ghi_chu:
+        obj.ghi_chu = ''
+        changed = True
+    obj.cap_nhat_luc = now_str()
+    return True
+
+
+def _find_thu_ngan_history_index(entries, entry_id='', thoi_gian='', so_tien_dau_ngay=0, so_tien=0, ghi_chu=''):
+    normalized_entry_id = _clean_text(entry_id)
+    for index, entry in enumerate(entries):
+        if normalized_entry_id and _clean_text(entry.get('entry_id')) == normalized_entry_id:
+            return index
+        if (
+            _clean_text(entry.get('thoi_gian')) == _clean_text(thoi_gian)
+            and int(entry.get('so_tien_dau_ngay') or 0) == int(so_tien_dau_ngay or 0)
+            and int(entry.get('so_tien') or 0) == int(so_tien or 0)
+            and _clean_text(entry.get('ghi_chu')) == _clean_text(ghi_chu)
+        ):
+            return index
+    return -1
+
+
+def _build_thu_ngan_so_quy_payload(ngay):
+    cashiers = _load_thu_ngan_rows()
+    record_map = {
+        row.thu_ngan_id: row
+        for row in ThuNganSoQuyTheoNguoi.query.filter_by(ngay=ngay).all()
+    }
+    payload_changed = False
+    rows = []
+    for cashier in cashiers:
+        record = record_map.get(cashier['id'])
+        if record:
+            if record.lich_su_chot:
+                payload_changed = _sync_thu_ngan_so_quy_from_history(record) or payload_changed
+            else:
+                payload_changed = _sync_thu_ngan_so_quy_detail_totals(record) or payload_changed
+        rows.append(thu_ngan_so_quy_row_json(cashier, record, ngay=ngay))
+
+    history = []
+    for row in rows:
+        for entry in row.get('lich_su_chot', []):
+            history.append({
+                'entry_id': entry.get('entry_id') or '',
+                'thu_ngan_id': row['thu_ngan_id'],
+                'ten_thu_ngan': row['ten_thu_ngan'],
+                'ten_kho': row['ten_kho'],
+                'thoi_gian': entry.get('thoi_gian', ''),
+                'so_tien_dau_ngay': _format_thu_ngan_amount_output(entry.get('so_tien_dau_ngay', 0)),
+                'so_tien': _format_thu_ngan_amount_output(entry.get('so_tien', 0)),
+                'so_tien_chenh_lech': _format_thu_ngan_amount_output(entry.get('so_tien_chenh_lech', 0)),
+                'so_dong_chi_tiet': len(entry.get('chi_tiet') or []),
+                'ghi_chu': entry.get('ghi_chu', ''),
+            })
+    history.sort(key=lambda item: _parse_vi_datetime(item.get('thoi_gian')), reverse=True)
+    if payload_changed:
+        db.session.commit()
+    return {'ngay': ngay, 'rows': rows, 'history': history}
+
+
+@app.route('/api/thu_ngan_so_quy', methods=['GET'])
+def get_thu_ngan_so_quy():
+    ngay = (request.args.get('ngay') or '').strip() or today_iso()
+    return jsonify(_build_thu_ngan_so_quy_payload(ngay))
+
+
+@app.route('/api/thu_ngan_so_quy', methods=['PUT'])
+def save_thu_ngan_so_quy():
+    d = request.json or {}
+    ngay = str(d.get('ngay') or '').strip() or today_iso()
+    thu_ngan_id = _parse_int_id(d.get('thu_ngan_id'))
+    if thu_ngan_id is None:
+        return jsonify({'error': 'Thiếu thu ngân cần lưu.'}), 400
+    if not ThuNgan.query.get(thu_ngan_id):
+        return jsonify({'error': 'Thu ngân không tồn tại.'}), 404
+    obj = _get_or_create_thu_ngan_so_quy_row(ngay, thu_ngan_id)
+    if 'chi_tiet' in d:
+        obj.chi_tiet, _ = _normalize_thu_ngan_so_quy_detail_rows(d.get('chi_tiet') or [], input_mode=True)
+        flag_modified(obj, 'chi_tiet')
+        detail_totals = _sum_thu_ngan_so_quy_detail_rows(obj.chi_tiet or [])
+        obj.so_tien_dau_ngay = detail_totals['so_tien_dau_ngay']
+        obj.so_tien_hien_tai = detail_totals['so_tien_hien_tai']
+    else:
+        if 'so_tien_dau_ngay' in d:
+            obj.so_tien_dau_ngay = _parse_thu_ngan_amount_input(d.get('so_tien_dau_ngay'), 0)
+        if 'so_tien_hien_tai' in d:
+            obj.so_tien_hien_tai = _parse_thu_ngan_amount_input(d.get('so_tien_hien_tai'), 0)
+        _sync_thu_ngan_so_quy_detail_totals(obj)
+    if 'ghi_chu' in d:
+        obj.ghi_chu = d.get('ghi_chu') or ''
+    obj.cap_nhat_luc = now_str()
+    db.session.commit()
+    return jsonify(_build_thu_ngan_so_quy_payload(ngay))
+
+
+@app.route('/api/thu_ngan_so_quy/chot', methods=['POST'])
+def chot_thu_ngan_so_quy():
+    d = request.json or {}
+    ngay = str(d.get('ngay') or '').strip() or today_iso()
+    thu_ngan_id = _parse_int_id(d.get('thu_ngan_id'))
+    if thu_ngan_id is None:
+        return jsonify({'error': 'Thiếu thu ngân cần chốt.'}), 400
+    if not ThuNgan.query.get(thu_ngan_id):
+        return jsonify({'error': 'Thu ngân không tồn tại.'}), 404
+
+    obj = _get_or_create_thu_ngan_so_quy_row(ngay, thu_ngan_id)
+    chi_tiet_source = d.get('chi_tiet') if 'chi_tiet' in d else (obj.chi_tiet or [])
+    chi_tiet, _ = _normalize_thu_ngan_so_quy_detail_rows(chi_tiet_source or [], input_mode=('chi_tiet' in d))
+    detail_totals = _sum_thu_ngan_so_quy_detail_rows(chi_tiet)
+    so_tien_dau_ngay = detail_totals['so_tien_dau_ngay'] if 'chi_tiet' in d else _parse_thu_ngan_amount_input(d.get('so_tien_dau_ngay'), 0)
+    so_tien_hien_tai = detail_totals['so_tien_hien_tai'] if 'chi_tiet' in d else _parse_thu_ngan_amount_input(d.get('so_tien_hien_tai'), 0)
+    so_tien_chenh_lech = detail_totals['chenh_lech'] if 'chi_tiet' in d else (so_tien_hien_tai - so_tien_dau_ngay)
+    ghi_chu = d.get('ghi_chu') or ''
+
+    obj.so_tien_dau_ngay = so_tien_dau_ngay
+    obj.so_tien_hien_tai = so_tien_hien_tai
+    obj.chi_tiet = chi_tiet
+    obj.ghi_chu = ghi_chu
+    flag_modified(obj, 'chi_tiet')
+    if not obj.lich_su_chot:
+        obj.lich_su_chot = []
+    obj.lich_su_chot.insert(0, {
+        'entry_id': uuid.uuid4().hex,
+        'thoi_gian': now_str(),
+        'so_tien_dau_ngay': so_tien_dau_ngay,
+        'so_tien': so_tien_hien_tai,
+        'so_tien_chenh_lech': so_tien_chenh_lech,
+        'chi_tiet': chi_tiet,
+        'ghi_chu': ghi_chu,
+    })
+    flag_modified(obj, 'lich_su_chot')
+    obj.cap_nhat_luc = now_str()
+    db.session.commit()
+    return jsonify(_build_thu_ngan_so_quy_payload(ngay))
+
+
+@app.route('/api/thu_ngan_so_quy/history/delete', methods=['POST'])
+def delete_thu_ngan_so_quy_history():
+    d = request.json or {}
+    ngay = str(d.get('ngay') or '').strip() or today_iso()
+    thu_ngan_id = _parse_int_id(d.get('thu_ngan_id'))
+    if thu_ngan_id is None:
+        return jsonify({'error': 'Thiếu thu ngân cần xóa lịch sử.'}), 400
+
+    obj = ThuNganSoQuyTheoNguoi.query.filter_by(ngay=ngay, thu_ngan_id=thu_ngan_id).first()
+    if not obj:
+        return jsonify({'error': 'Không tìm thấy bản ghi thu ngân trong ngày này.'}), 404
+
+    entries = list(obj.lich_su_chot or [])
+    target_index = _find_thu_ngan_history_index(
+        entries,
+        entry_id=d.get('entry_id') or '',
+        thoi_gian=d.get('thoi_gian') or '',
+        so_tien_dau_ngay=_parse_thu_ngan_amount_input(d.get('so_tien_dau_ngay'), 0),
+        so_tien=_parse_thu_ngan_amount_input(d.get('so_tien'), 0),
+        ghi_chu=d.get('ghi_chu') or '',
+    )
+    if target_index < 0:
+        return jsonify({'error': 'Không tìm thấy dòng lịch sử cần xóa.'}), 404
+
+    entries.pop(target_index)
+    obj.lich_su_chot = entries
+    flag_modified(obj, 'lich_su_chot')
+    _sync_thu_ngan_so_quy_from_history(obj)
+    db.session.commit()
+    return jsonify(_build_thu_ngan_so_quy_payload(ngay))
+
+
+@app.route('/api/thu_ngan_so_quy/reset_all', methods=['POST'])
+def reset_all_thu_ngan_so_quy():
+    d = request.json or {}
+    ngay = str(d.get('ngay') or '').strip() or today_iso()
+    rows = ThuNganSoQuyTheoNguoi.query.filter_by(ngay=ngay).all()
+    for obj in rows:
+        db.session.delete(obj)
+    db.session.commit()
+    return jsonify(_build_thu_ngan_so_quy_payload(ngay))
 
 # ─── CHỨNG TỪ CRUD ────────────────────────────────────────────────────────────
 
@@ -1764,6 +2695,59 @@ def tuoi_vang_json(t):
         'lich_su': t.lich_su or [],
     }
 
+
+TRAO_DOI_TUOI_VANG_CONFIG_KEY = 'trao_doi_tuoi_vang_v2'
+
+
+def _normalize_trao_doi_tuoi_vang_matrix(value):
+    normalized = {}
+    if not isinstance(value, dict):
+        return normalized
+    for raw_key, raw_cell in value.items():
+        key = _clean_text(raw_key)
+        if not key:
+            continue
+        cell = raw_cell if isinstance(raw_cell, dict) else {}
+        plus = _clean_text(cell.get('plus'))
+        minus = _clean_text(cell.get('minus'))
+        if not plus and not minus:
+            continue
+        normalized[key] = {
+            'plus': plus,
+            'minus': minus,
+        }
+    return normalized
+
+
+def _get_or_create_he_thong_cau_hinh(config_key, default_data=None, ghi_chu=''):
+    obj = HeThongCauHinh.query.filter_by(config_key=config_key).first()
+    if obj:
+        if obj.data is None:
+            obj.data = default_data or {}
+        if ghi_chu and not obj.ghi_chu:
+            obj.ghi_chu = ghi_chu
+        return obj
+    now = now_str()
+    obj = HeThongCauHinh(
+        config_key=config_key,
+        data=default_data or {},
+        ghi_chu=ghi_chu,
+        ngay_tao=now,
+        cap_nhat_luc=now,
+    )
+    db.session.add(obj)
+    db.session.flush()
+    return obj
+
+
+def trao_doi_tuoi_vang_config_json(obj):
+    data = obj.data or {}
+    return {
+        'matrix': _normalize_trao_doi_tuoi_vang_matrix(data.get('matrix') or {}),
+        'ngay_tao': obj.ngay_tao or '',
+        'cap_nhat_luc': obj.cap_nhat_luc or '',
+    }
+
 @app.route('/api/tuoi_vang', methods=['GET'])
 def get_tuoi_vang():
     return jsonify([tuoi_vang_json(t) for t in TuoiVang.query.order_by(TuoiVang.ten_tuoi, TuoiVang.id).all()])
@@ -1832,7 +2816,171 @@ def update_tuoi_vang(tid):
     _sync_loai_vang_from_tuoi_vang_record(obj, old_ten_tuoi=old_ten_tuoi, record_history=True)
     db.session.commit(); return jsonify({'msg':'Updated'})
 
+
+@app.route('/api/cau_hinh/trao_doi_tuoi_vang', methods=['GET', 'PUT'])
+def cau_hinh_trao_doi_tuoi_vang():
+    obj = _get_or_create_he_thong_cau_hinh(
+        TRAO_DOI_TUOI_VANG_CONFIG_KEY,
+        default_data={'matrix': {}},
+        ghi_chu='Bang trao doi theo tuoi vang',
+    )
+    if request.method == 'GET':
+        return jsonify(trao_doi_tuoi_vang_config_json(obj))
+
+    d = request.json or {}
+    normalized_matrix = _normalize_trao_doi_tuoi_vang_matrix(d.get('matrix') or {})
+    obj.data = {'matrix': normalized_matrix}
+    obj.cap_nhat_luc = now_str()
+    if not obj.ngay_tao:
+        obj.ngay_tao = obj.cap_nhat_luc
+    db.session.commit()
+    return jsonify(trao_doi_tuoi_vang_config_json(obj))
+
 # ─── KHOẢN VAY (LOAN MANAGEMENT) ───────────────────────────────────────────
+
+@app.route('/api/nhap_vang_lists', methods=['GET'])
+def get_nhap_vang_lists():
+    active_only = _clean_text(request.args.get('active_only')).lower()
+    query = NhapVangList.query
+    if active_only in {'1', 'true', 'yes'}:
+        query = query.filter(NhapVangList.trang_thai != 'hoan_thanh')
+    rows = query.order_by(NhapVangList.id.desc()).all()
+    return jsonify([nhap_vang_list_json(row) for row in rows])
+
+
+@app.route('/api/nhap_vang_lists', methods=['POST'])
+def add_nhap_vang_list():
+    d = request.json or {}
+    ten_danh_sach = _clean_text(d.get('ten_danh_sach'))
+    if not ten_danh_sach:
+        return jsonify({'error': 'Ten danh sach khong hop le'}), 400
+
+    now = now_str()
+    obj = NhapVangList(
+        ten_danh_sach=ten_danh_sach,
+        ghi_chu=d.get('ghi_chu', ''),
+        trang_thai=_clean_text(d.get('trang_thai')) or 'dang_mo',
+        nguoi_tao=_clean_text(d.get('nguoi_tao')) or 'Admin',
+        ngay_tao=now,
+        ngay_cap_nhat=now,
+    )
+    db.session.add(obj)
+    db.session.commit()
+    return jsonify(nhap_vang_list_json(obj)), 201
+
+
+@app.route('/api/nhap_vang_lists/<int:list_id>', methods=['GET', 'PUT', 'DELETE'])
+def nhap_vang_list_detail(list_id):
+    obj = NhapVangList.query.get_or_404(list_id)
+    if request.method == 'GET':
+        return jsonify(nhap_vang_list_json(obj))
+    if request.method == 'DELETE':
+        db.session.delete(obj)
+        db.session.commit()
+        return jsonify({'msg': 'Deleted'})
+
+    d = request.json or {}
+    ten_danh_sach = _clean_text(d.get('ten_danh_sach', obj.ten_danh_sach))
+    if not ten_danh_sach:
+        return jsonify({'error': 'Ten danh sach khong hop le'}), 400
+    obj.ten_danh_sach = ten_danh_sach
+    if 'ghi_chu' in d:
+        obj.ghi_chu = d.get('ghi_chu', '')
+    if 'trang_thai' in d:
+        obj.trang_thai = _clean_text(d.get('trang_thai')) or obj.trang_thai
+    _touch_nhap_vang_list(obj)
+    db.session.commit()
+    return jsonify(nhap_vang_list_json(obj))
+
+
+@app.route('/api/nhap_vang_lists/<int:list_id>/items', methods=['POST'])
+def add_nhap_vang_item(list_id):
+    obj = NhapVangList.query.get_or_404(list_id)
+    d = request.json or {}
+    ten_hang = _clean_text(d.get('ten_hang'))
+    if not ten_hang:
+        return jsonify({'error': 'Ten hang khong hop le'}), 400
+
+    now = now_str()
+    required_qty, imported_qty = _normalize_nhap_vang_qty(
+        d.get('so_luong_yeu_cau') or 0,
+        d.get('so_luong_da_nhap') or 0
+    )
+    item = NhapVangItem(
+        list_id=obj.id,
+        ten_hang=ten_hang,
+        nhom_hang=_clean_text(d.get('nhom_hang')),
+        tuoi_vang=_clean_text(d.get('tuoi_vang')),
+        trong_luong=_clean_text(d.get('trong_luong')),
+        so_luong_yeu_cau=required_qty,
+        so_luong_da_nhap=imported_qty,
+        ghi_chu=d.get('ghi_chu', ''),
+        thu_tu=int(d.get('thu_tu') or 0),
+        ngay_tao=now,
+        ngay_cap_nhat=now,
+    )
+    db.session.add(item)
+    _touch_nhap_vang_list(obj)
+    db.session.commit()
+    return jsonify(nhap_vang_item_json(item)), 201
+
+
+@app.route('/api/nhap_vang_items/<int:item_id>', methods=['PUT', 'DELETE'])
+def nhap_vang_item_detail(item_id):
+    item = NhapVangItem.query.get_or_404(item_id)
+    parent = item.danh_sach
+    if request.method == 'DELETE':
+        db.session.delete(item)
+        if parent:
+            _touch_nhap_vang_list(parent)
+        db.session.commit()
+        return jsonify({'msg': 'Deleted'})
+
+    d = request.json or {}
+    ten_hang = _clean_text(d.get('ten_hang', item.ten_hang))
+    if not ten_hang:
+        return jsonify({'error': 'Ten hang khong hop le'}), 400
+    item.ten_hang = ten_hang
+    if 'nhom_hang' in d:
+        item.nhom_hang = _clean_text(d.get('nhom_hang'))
+    if 'tuoi_vang' in d:
+        item.tuoi_vang = _clean_text(d.get('tuoi_vang'))
+    if 'trong_luong' in d:
+        item.trong_luong = _clean_text(d.get('trong_luong'))
+    if 'so_luong_yeu_cau' in d:
+        item.so_luong_yeu_cau = max(0, int(d.get('so_luong_yeu_cau') or 0))
+    if 'so_luong_da_nhap' in d:
+        item.so_luong_da_nhap = max(0, int(d.get('so_luong_da_nhap') or 0))
+    item.so_luong_yeu_cau, item.so_luong_da_nhap = _normalize_nhap_vang_qty(
+        item.so_luong_yeu_cau,
+        item.so_luong_da_nhap
+    )
+    if 'ghi_chu' in d:
+        item.ghi_chu = d.get('ghi_chu', '')
+    if 'thu_tu' in d:
+        item.thu_tu = int(d.get('thu_tu') or 0)
+    item.ngay_cap_nhat = now_str()
+    if parent:
+        _touch_nhap_vang_list(parent)
+    db.session.commit()
+    return jsonify(nhap_vang_item_json(item))
+
+
+@app.route('/api/nhap_vang_items/<int:item_id>/progress', methods=['POST'])
+def nhap_vang_item_progress(item_id):
+    item = NhapVangItem.query.get_or_404(item_id)
+    d = request.json or {}
+    if 'so_luong_da_nhap' in d:
+        imported_qty = int(d.get('so_luong_da_nhap') or 0)
+    else:
+        imported_qty = int(item.so_luong_da_nhap or 0) + int(d.get('delta') or 0)
+    _, item.so_luong_da_nhap = _normalize_nhap_vang_qty(item.so_luong_yeu_cau, imported_qty)
+    item.ngay_cap_nhat = now_str()
+    if item.danh_sach:
+        _touch_nhap_vang_list(item.danh_sach)
+    db.session.commit()
+    return jsonify(nhap_vang_item_json(item))
+
 
 @app.route('/api/scale/agents', methods=['GET'])
 def get_scale_agents():
@@ -1929,6 +3077,19 @@ def queue_scale_read(agent_id):
     agent.updated_at = now_str()
     db.session.commit()
     return jsonify(scale_command_json(cmd)), 201
+
+
+@app.route('/api/scale/agent/script', methods=['GET'])
+def get_scale_agent_script():
+    script_dir = os.path.dirname(__file__)
+    download = _clean_text(request.args.get('download')).lower() in {'1', 'true', 'yes'}
+    return send_from_directory(
+        script_dir,
+        'scale_agent_gp20k.py',
+        as_attachment=download,
+        download_name='scale_agent_gp20k.py',
+        mimetype='text/x-python',
+    )
 
 
 @app.route('/api/scale/readings', methods=['GET'])

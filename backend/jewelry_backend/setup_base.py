@@ -341,4 +341,39 @@ def _format_thu_ngan_amount_output(value):
     return float((Decimal(scaled) / THU_NGAN_AMOUNT_SCALE_DECIMAL).quantize(THU_NGAN_AMOUNT_QUANT))
 
 
+
+def _ensure_search_indexes():
+    """Tao cac index cho cac cot thuong xuyen query neu chua ton tai.
+    An toan voi ca SQLite va PostgreSQL vi dung CREATE INDEX IF NOT EXISTS.
+    """
+    inspector = inspect(db.engine)
+    dialect = db.engine.dialect.name  # 'sqlite' hoac 'postgresql'
+
+    index_specs = [
+        # (table_name, index_name, column_name)
+        ('item',       'ix_item_ma_hang',           'ma_hang'),
+        ('item',       'ix_item_status',             'status'),
+        ('khach_hang', 'ix_khach_hang_cccd',         'cccd'),
+        ('khach_hang', 'ix_khach_hang_ten',          'ten'),
+        ('khach_hang', 'ix_khach_hang_so_dien_thoai','so_dien_thoai'),
+        ('khach_hang', 'ix_khach_hang_yeu_thich',    'yeu_thich'),
+    ]
+
+    existing_tables = set(inspector.get_table_names())
+    for table_name, index_name, column_name in index_specs:
+        if table_name not in existing_tables:
+            continue
+        # Kiem tra index da ton tai chua
+        existing_indexes = {idx['name'] for idx in inspector.get_indexes(table_name)}
+        if index_name in existing_indexes:
+            continue
+        try:
+            db.session.execute(
+                text(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})')
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
 __all__ = [name for name in globals() if not name.startswith('__')]

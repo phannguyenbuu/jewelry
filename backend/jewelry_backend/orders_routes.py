@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from flask import jsonify, request, send_from_directory
+from sqlalchemy import func, or_
 
 from . import easyinvoice_client
 from .state import app, db
@@ -21,10 +22,10 @@ from .utils import *
 
 EASYINVOICE_DEFAULTS = {
     'api_url': 'https://api.easyinvoice.vn',
-    'username': 'API',
-    'password': 'dTFVLQq8nzBF',
-    'tax_code': '5800884170',
-    'pattern': '2C26MYY',
+    'username': '',   # set qua EASYINVOICE_USERNAME (env var) hoac DB config
+    'password': '',   # set qua EASYINVOICE_PASSWORD (env var) hoac DB config
+    'tax_code': '',   # set qua EASYINVOICE_TAX_CODE (env var) hoac DB config
+    'pattern': '',    # set qua EASYINVOICE_PATTERN (env var) hoac DB config
     'serial': '',
     'book_code': '',
 }
@@ -129,11 +130,26 @@ def _find_customer_duplicates(raw_id, ten, cccd, so_dien_thoai):
     expected_name = _match_customer_value(ten)
     expected_cccd = _match_customer_value(cccd)
     expected_phone = _match_customer_value(so_dien_thoai)
-    matches = []
 
-    for row in KhachHang.query.order_by(KhachHang.id.desc()).all():
-        if target_id is not None and row.id == target_id:
-            continue
+    if not expected_name and not expected_cccd and not expected_phone:
+        return []
+
+    # Pre-filter bang SQL de tranh full-table scan
+    sql_filters = []
+    if expected_cccd:
+        sql_filters.append(func.lower(KhachHang.cccd) == expected_cccd)
+    if expected_phone:
+        sql_filters.append(func.lower(KhachHang.so_dien_thoai) == expected_phone)
+    if expected_name:
+        sql_filters.append(func.lower(KhachHang.ten) == expected_name)
+
+    query = KhachHang.query.filter(or_(*sql_filters)).order_by(KhachHang.id.desc())
+    if target_id is not None:
+        query = query.filter(KhachHang.id != target_id)
+    rows = query.all()
+
+    matches = []
+    for row in rows:
         matched_fields = []
         if expected_name and _match_customer_value(row.ten) == expected_name:
             matched_fields.append('ten')
@@ -565,7 +581,93 @@ def _easyinvoice_status_text(status_value):
         return _clean_text(status_value)
 
 
+def _easyinvoice_call_and_lookup(config, xml_data, issue_now):
+    """Goi API EasyInvoice va lookup ket qua.
+    Tra ve (result, extracted, lookup_invoice, lookup_payload, state_payload).
+    Raise EasyInvoiceApiError neu API that bai.
+    """
+    if issue_now:
+        result = easyinvoice_client.issue_invoice(config, xml_data, timeout=60)
+    else:
+        result = easyinvoice_client.import_invoice(config, xml_data, timeout=60)
+
+    extracted = easyinvoice_client.extract_links(result)
+    lookup_payload = {}
+    lookup_invoice = {}
+    state_payload = {}
+    if extracted.get('ikey'):
+        try:
+            lookup_payload = easyinvoice_client.get_invoices_by_ikeys(config, [extracted['ikey']], timeout=60)
+            lookup_invoice = easyinvoice_client.first_invoice_from_lookup(lookup_payload)
+        except easyinvoice_client.EasyInvoiceApiError:
+            lookup_payload = {}
+            lookup_invoice = {}
+        try:
+            state_payload = easyinvoice_client.check_invoice_state(config, [extracted['ikey']], timeout=60)
+        except easyinvoice_client.EasyInvoiceApiError:
+            state_payload = {}
+
+    if lookup_invoice:
+        lookup_links = easyinvoice_client.extract_links(lookup_invoice)
+        extracted = {
+            'link_view': lookup_links.get('link_view') or extracted.get('link_view', ''),
+            'lookup_code': lookup_links.get('lookup_code') or extracted.get('lookup_code', ''),
+            'invoice_no': lookup_links.get('invoice_no') or extracted.get('invoice_no', ''),
+            'ikey': lookup_links.get('ikey') or extracted.get('ikey', ''),
+        }
+    return result, extracted, lookup_invoice, lookup_payload, state_payload
+
+
+def _easyinvoice_upsert_chung_tu(order_id, customer, invoice, config,
+                                   extracted, result, lookup_invoice,
+                                   lookup_payload, state_payload, issue_now):
+    """Tao hoac cap nhat buc ghi ChungTu cho hoa don EasyInvoice. Commit DB."""
+    invoice_amount = int(invoice.get('amount') or 0)
+    invoice_status = lookup_invoice.get('InvoiceStatus') if isinstance(lookup_invoice, dict) else None
+    record_code = f"EI-{order_id or datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
+
+    doc = ChungTu.query.filter_by(ma_ct=record_code).first()
+    created = doc is None
+    if created:
+        doc = ChungTu(ma_ct=record_code, ngay_tao=now_str())
+        db.session.add(doc)
+
+    doc.loai_ct = 'Hoa don do EasyInvoice'
+    doc.ngay_lap = datetime.date.today().strftime('%d/%m/%Y')
+    doc.ngay_hach_toan = doc.ngay_lap
+    doc.doi_tuong = _clean_text(customer.get('name') or customer.get('buyer')) or 'Khach le'
+    doc.mo_ta = f'EasyInvoice {order_id or record_code}'
+    doc.so_tien = invoice_amount
+    doc.thue_suat = float(_easyinvoice_safe_vat_rate(invoice.get('vatRate')))
+    doc.trang_thai = (
+        f"Da phat hanh {_easyinvoice_status_text(invoice_status) or 'EasyInvoice'}"
+        if issue_now else 'Da tao unsigned'
+    )
+    doc.nguoi_lap = 'POS Mobile'
+    doc.file_dinh_kem = [{
+        'source': 'easyinvoice',
+        'order_id': order_id,
+        'link_view': extracted['link_view'],
+        'lookup_code': extracted['lookup_code'],
+        'invoice_no': extracted['invoice_no'],
+        'ikey': extracted['ikey'],
+        'request': {
+            'pattern': config['pattern'],
+            'serial': config.get('serial', ''),
+            'book_code': config.get('book_code', ''),
+        },
+        'response': result,
+        'lookup': lookup_payload,
+        'invoice': lookup_invoice,
+        'state': state_payload,
+        'issued_at': now_str(),
+    }]
+    db.session.commit()
+    return doc, created, invoice_status
+
+
 def _submit_easyinvoice(issue_now=False):
+    """Orchestrator: parse -> validate -> build XML -> call API -> save -> respond."""
     d = request.json or {}
     invoice_data = d.get('invoice_data') if isinstance(d.get('invoice_data'), dict) else {}
     order_id = _clean_text(d.get('order_id') or invoice_data.get('orderId'))
@@ -587,71 +689,19 @@ def _submit_easyinvoice(issue_now=False):
         xml_data = _easyinvoice_invoice_xml(invoice_data)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+
     try:
-        result = easyinvoice_client.issue_invoice(config, xml_data, timeout=60) if issue_now else easyinvoice_client.import_invoice(config, xml_data, timeout=60)
+        result, extracted, lookup_invoice, lookup_payload, state_payload = (
+            _easyinvoice_call_and_lookup(config, xml_data, issue_now)
+        )
     except easyinvoice_client.EasyInvoiceApiError as exc:
         return jsonify({'error': exc.message, 'detail': exc.payload}), exc.status_code
 
-    extracted = easyinvoice_client.extract_links(result)
-    lookup_payload = {}
-    lookup_invoice = {}
-    state_payload = {}
-    if extracted.get('ikey'):
-        try:
-            lookup_payload = easyinvoice_client.get_invoices_by_ikeys(config, [extracted['ikey']], timeout=60)
-            lookup_invoice = easyinvoice_client.first_invoice_from_lookup(lookup_payload)
-        except easyinvoice_client.EasyInvoiceApiError:
-            lookup_payload = {}
-            lookup_invoice = {}
-        try:
-            state_payload = easyinvoice_client.check_invoice_state(config, [extracted['ikey']], timeout=60)
-        except easyinvoice_client.EasyInvoiceApiError:
-            state_payload = {}
-    if lookup_invoice:
-        lookup_links = easyinvoice_client.extract_links(lookup_invoice)
-        extracted = {
-            'link_view': lookup_links.get('link_view') or extracted.get('link_view', ''),
-            'lookup_code': lookup_links.get('lookup_code') or extracted.get('lookup_code', ''),
-            'invoice_no': lookup_links.get('invoice_no') or extracted.get('invoice_no', ''),
-            'ikey': lookup_links.get('ikey') or extracted.get('ikey', ''),
-        }
-    invoice_status = lookup_invoice.get('InvoiceStatus') if isinstance(lookup_invoice, dict) else None
-    record_code = f"EI-{order_id or datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
-    doc = ChungTu.query.filter_by(ma_ct=record_code).first()
-    created = doc is None
-    if created:
-        doc = ChungTu(ma_ct=record_code, ngay_tao=now_str())
-        db.session.add(doc)
-
     customer = invoice_data.get('customer') if isinstance(invoice_data.get('customer'), dict) else {}
-    doc.loai_ct = 'Hoa don do EasyInvoice'
-    doc.ngay_lap = datetime.date.today().strftime('%d/%m/%Y')
-    doc.ngay_hach_toan = doc.ngay_lap
-    doc.doi_tuong = _clean_text(customer.get('name') or customer.get('buyer')) or 'Khach le'
-    doc.mo_ta = f'EasyInvoice {order_id or record_code}'
-    doc.so_tien = invoice_amount
-    doc.thue_suat = float(_easyinvoice_safe_vat_rate(invoice.get('vatRate')))
-    doc.trang_thai = f"Da phat hanh {_easyinvoice_status_text(invoice_status) or 'EasyInvoice'}" if issue_now else 'Da tao unsigned'
-    doc.nguoi_lap = 'POS Mobile'
-    doc.file_dinh_kem = [{
-        'source': 'easyinvoice',
-        'order_id': order_id,
-        'link_view': extracted['link_view'],
-        'lookup_code': extracted['lookup_code'],
-        'invoice_no': extracted['invoice_no'],
-        'ikey': extracted['ikey'],
-        'request': {
-            'pattern': config['pattern'],
-            'serial': config.get('serial', ''),
-            'book_code': config.get('book_code', ''),
-        },
-        'response': result,
-        'lookup': lookup_payload,
-        'invoice': lookup_invoice,
-        'state': state_payload,
-        'issued_at': now_str(),
-    }]
-    db.session.commit()
+    doc, created, invoice_status = _easyinvoice_upsert_chung_tu(
+        order_id, customer, invoice, config,
+        extracted, result, lookup_invoice, lookup_payload, state_payload, issue_now,
+    )
 
     return jsonify({
         'msg': 'Da phat hanh EasyInvoice thanh cong.' if issue_now else 'Da tao EasyInvoice thanh cong.',
@@ -669,7 +719,10 @@ def _submit_easyinvoice(issue_now=False):
         'ikey': extracted['ikey'],
         'pattern': config['pattern'],
         'serial': config.get('serial', ''),
-        'buyer': _clean_text(lookup_invoice.get('Buyer') or lookup_invoice.get('CustomerName') or customer.get('name') or customer.get('buyer')),
+        'buyer': _clean_text(
+            lookup_invoice.get('Buyer') or lookup_invoice.get('CustomerName')
+            or customer.get('name') or customer.get('buyer')
+        ),
         'amount': lookup_invoice.get('Amount') or invoice_amount,
         'invoice_status': invoice_status,
         'status_text': _easyinvoice_status_text(invoice_status),
@@ -677,6 +730,7 @@ def _submit_easyinvoice(issue_now=False):
         'state': state_payload,
         'raw': result,
     })
+
 
 
 @app.route('/api/easyinvoice/export', methods=['POST'])
@@ -939,24 +993,34 @@ def add_don_hang():
 @app.route('/api/don_hang/<int:did>', methods=['GET','PUT','DELETE'])
 def update_don_hang(did):
     obj = DonHang.query.get_or_404(did)
-    if request.method == 'GET': return jsonify(don_json(obj))
+    if request.method == 'GET':
+        return jsonify(don_json(obj))
     if request.method == 'DELETE':
-        db.session.delete(obj); db.session.commit(); return jsonify({'msg':'Deleted'})
+        db.session.delete(obj)
+        db.session.commit()
+        return jsonify({'msg': 'Deleted'})
     d = request.json or {}
-    for f in ['khach_hang','so_dien_thoai','dia_chi',
-               'ngay_dat','ngay_giao','trang_thai','ghi_chu','nguoi_tao']:
-        if f in d: setattr(obj, f, d[f])
-    if 'items'    in d: obj.items    = d['items']
-    if 'tong_tien' in d: obj.tong_tien = int(d['tong_tien'] or 0)
-    if 'dat_coc'   in d: obj.dat_coc   = int(d['dat_coc'] or 0)
-    db.session.commit(); return jsonify({'msg':'Updated'})
+    for f in ['khach_hang', 'so_dien_thoai', 'dia_chi',
+               'ngay_dat', 'ngay_giao', 'trang_thai', 'ghi_chu', 'nguoi_tao']:
+        if f in d:
+            setattr(obj, f, d[f])
+    if 'items' in d:
+        obj.items = d['items']
+    if 'tong_tien' in d:
+        obj.tong_tien = int(d['tong_tien'] or 0)
+    if 'dat_coc' in d:
+        obj.dat_coc = int(d['dat_coc'] or 0)
+    db.session.commit()
+    return jsonify({'msg': 'Updated'})
 
 
 def nv_json(n):
-    return {'id':n.id,'ma_nv':n.ma_nv,'ho_ten':n.ho_ten,'chuc_vu':n.chuc_vu,
-            'phong_ban':n.phong_ban,'so_dien_thoai':n.so_dien_thoai,'email':n.email,
-            'dia_chi':n.dia_chi,'ngay_vao':n.ngay_vao,'luong_co_ban':n.luong_co_ban,
-            'trang_thai':n.trang_thai,'ghi_chu':n.ghi_chu,'ngay_tao':n.ngay_tao}
+    return {
+        'id': n.id, 'ma_nv': n.ma_nv, 'ho_ten': n.ho_ten, 'chuc_vu': n.chuc_vu,
+        'phong_ban': n.phong_ban, 'so_dien_thoai': n.so_dien_thoai, 'email': n.email,
+        'dia_chi': n.dia_chi, 'ngay_vao': n.ngay_vao, 'luong_co_ban': n.luong_co_ban,
+        'trang_thai': n.trang_thai, 'ghi_chu': n.ghi_chu, 'ngay_tao': n.ngay_tao,
+    }
 
 
 @app.route('/api/nhan_vien', methods=['GET'])
@@ -973,28 +1037,37 @@ def add_nhan_vien():
                    email=d.get('email',''), dia_chi=d.get('dia_chi',''),
                    ngay_vao=d.get('ngay_vao',''), luong_co_ban=int(d.get('luong_co_ban') or 0),
                    trang_thai=d.get('trang_thai','Đang làm'), ghi_chu=d.get('ghi_chu',''), ngay_tao=now_str())
-    db.session.add(obj); db.session.commit()
-    return jsonify({'msg':'Created','id':obj.id}), 201
+    db.session.add(obj)
+    db.session.commit()
+    return jsonify({'msg': 'Created', 'id': obj.id}), 201
 
 
 @app.route('/api/nhan_vien/<int:nid>', methods=['GET','PUT','DELETE'])
 def update_nhan_vien(nid):
     obj = NhanVien.query.get_or_404(nid)
-    if request.method == 'GET': return jsonify(nv_json(obj))
+    if request.method == 'GET':
+        return jsonify(nv_json(obj))
     if request.method == 'DELETE':
         ThuNgan.query.filter_by(nhan_vien_id=obj.id).update({'nhan_vien_id': None}, synchronize_session=False)
-        db.session.delete(obj); db.session.commit(); return jsonify({'msg':'Deleted'})
+        db.session.delete(obj)
+        db.session.commit()
+        return jsonify({'msg': 'Deleted'})
     d = request.json or {}
-    for f in ['ho_ten','chuc_vu','phong_ban','so_dien_thoai','email','dia_chi','ngay_vao','trang_thai','ghi_chu']:
-        if f in d: setattr(obj, f, d[f])
-    if 'luong_co_ban' in d: obj.luong_co_ban = int(d['luong_co_ban'] or 0)
-    db.session.commit(); return jsonify({'msg':'Updated'})
+    for f in ['ho_ten', 'chuc_vu', 'phong_ban', 'so_dien_thoai', 'email', 'dia_chi', 'ngay_vao', 'trang_thai', 'ghi_chu']:
+        if f in d:
+            setattr(obj, f, d[f])
+    if 'luong_co_ban' in d:
+        obj.luong_co_ban = int(d['luong_co_ban'] or 0)
+    db.session.commit()
+    return jsonify({'msg': 'Updated'})
 
 
 def tc_json(t):
-    return {'id':t.id,'loai':t.loai,'danh_muc':t.danh_muc,'so_tien':t.so_tien,
-            'ngay':t.ngay,'mo_ta':t.mo_ta,'doi_tuong':t.doi_tuong,
-            'phuong_thuc':t.phuong_thuc,'ngay_tao':t.ngay_tao}
+    return {
+        'id': t.id, 'loai': t.loai, 'danh_muc': t.danh_muc, 'so_tien': t.so_tien,
+        'ngay': t.ngay, 'mo_ta': t.mo_ta, 'doi_tuong': t.doi_tuong,
+        'phuong_thuc': t.phuong_thuc, 'ngay_tao': t.ngay_tao,
+    }
 
 
 @app.route('/api/thu_chi', methods=['GET'])
@@ -1017,9 +1090,14 @@ def add_thu_chi():
 def update_thu_chi(tid):
     obj = ThuChi.query.get_or_404(tid)
     if request.method == 'DELETE':
-        db.session.delete(obj); db.session.commit(); return jsonify({'msg':'Deleted'})
+        db.session.delete(obj)
+        db.session.commit()
+        return jsonify({'msg': 'Deleted'})
     d = request.json or {}
-    for f in ['loai','danh_muc','ngay','mo_ta','doi_tuong','phuong_thuc']:
-        if f in d: setattr(obj, f, d[f])
-    if 'so_tien' in d: obj.so_tien = int(d['so_tien'] or 0)
-    db.session.commit(); return jsonify({'msg':'Updated'})
+    for f in ['loai', 'danh_muc', 'ngay', 'mo_ta', 'doi_tuong', 'phuong_thuc']:
+        if f in d:
+            setattr(obj, f, d[f])
+    if 'so_tien' in d:
+        obj.so_tien = int(d['so_tien'] or 0)
+    db.session.commit()
+    return jsonify({'msg': 'Updated'})

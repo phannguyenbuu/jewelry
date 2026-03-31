@@ -3,7 +3,7 @@ from .state import db
 
 class Item(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
-    ma_hang      = db.Column(db.String(50),  nullable=False)
+    ma_hang      = db.Column(db.String(50),  nullable=False, index=True)
     ncc          = db.Column(db.String(200))
     nhom_hang    = db.Column(db.String(100))
     quay_nho     = db.Column(db.String(150))
@@ -14,7 +14,7 @@ class Item(db.Model):
     tl_vang      = db.Column(db.String(50))
     loai_vang    = db.Column(db.String(50))
     tuoi_vang    = db.Column(db.String(100))
-    status       = db.Column(db.String(50),  default='Tồn kho')
+    status       = db.Column(db.String(50),  default='Tồn kho', index=True)
     images       = db.Column(db.JSON, default=list)
     certificates = db.Column(db.JSON, default=list)
     history      = db.Column(db.JSON, default=list)
@@ -86,8 +86,8 @@ class DonHang(db.Model):
 class KhachHang(db.Model):
     __tablename__  = 'khach_hang'
     id             = db.Column(db.Integer, primary_key=True)
-    ten            = db.Column(db.String(200), default='')
-    cccd           = db.Column(db.String(50), default='')
+    ten            = db.Column(db.String(200), default='', index=True)
+    cccd           = db.Column(db.String(50), default='', index=True)
     cmnd_cu        = db.Column(db.String(50), default='')
     ngay_sinh      = db.Column(db.String(30), default='')
     gioi_tinh      = db.Column(db.String(20), default='')
@@ -95,11 +95,11 @@ class KhachHang(db.Model):
     que_quan       = db.Column(db.Text)
     noi_thuong_tru = db.Column(db.Text)
     dia_chi        = db.Column(db.Text)
-    so_dien_thoai  = db.Column(db.String(30), default='')
+    so_dien_thoai  = db.Column(db.String(30), default='', index=True)
     ngay_cap_cccd  = db.Column(db.String(30), default='')
     han_the        = db.Column(db.String(30), default='')
     sao            = db.Column(db.Integer, default=0)
-    yeu_thich      = db.Column(db.Integer, default=0)
+    yeu_thich      = db.Column(db.Integer, default=0, index=True)
     ocr_mat_sau    = db.Column(db.Text)
     anh_mat_truoc  = db.Column(db.Text)
     anh_mat_sau    = db.Column(db.Text)

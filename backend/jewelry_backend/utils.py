@@ -22,8 +22,11 @@ IMPORT_HEADER_ALIASES = {
 }
 
 
+_VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
+
+
 def now_str():
-    return datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    return datetime.datetime.now(_VN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
 
 def today_iso():
@@ -84,7 +87,7 @@ def _parse_local_datetime(value):
         return None
 
 
-def _scale_agent_is_online(agent, timeout_seconds=45):
+def _agent_is_online(agent, timeout_seconds=45):
     if not agent or not agent.last_seen:
         return False
     seen_at = _parse_local_datetime(agent.last_seen)
@@ -93,13 +96,9 @@ def _scale_agent_is_online(agent, timeout_seconds=45):
     return (datetime.datetime.now() - seen_at).total_seconds() <= timeout_seconds
 
 
-def _print_agent_is_online(agent, timeout_seconds=45):
-    if not agent or not agent.last_seen:
-        return False
-    seen_at = _parse_local_datetime(agent.last_seen)
-    if seen_at is None:
-        return False
-    return (datetime.datetime.now() - seen_at).total_seconds() <= timeout_seconds
+# Alias cho từng loại agent — cùng logic, tách tên để gọi code rõ hơn
+_scale_agent_is_online = _agent_is_online
+_print_agent_is_online = _agent_is_online
 
 
 def _normalize_scale_settings(value):
@@ -530,8 +529,10 @@ def _parse_inventory_xls(file_bytes, filename=''):
 
 def _item_json(it):
     tl = 0.0
-    try: tl = float(it.tl_vang or 0)
-    except: pass
+    try:
+        tl = float(it.tl_vang or 0)
+    except (ValueError, TypeError):
+        pass
     gv  = it.gia_vang_mua or 0
     gh  = it.gia_hat or 0
     gnc = it.gia_nhan_cong or 0

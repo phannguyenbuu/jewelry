@@ -1,20 +1,49 @@
+# Python
 __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secrets & environment
+.env
+.env.*
+!.env.example
+
+# Database & logs
 *.db
 *.sqlite
 *.sqlite3
 *.log
 agent/*.log
-agent/__pycache__/
 
+# Backend runtime
 instance/
 backend/instance/
 backend/uploads/
 
+# Frontend build
 frontend/node_modules/
 frontend/dist/
-temp_script.bat
+frontend/.vite/
 
+# Temp / script files
+temp_script.bat
+tmp_easyinvoice_*.html
+*.tmp
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Review / generated docs (optional: bỏ dòng này nếu muốn track)
+REVIEW.md

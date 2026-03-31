@@ -1,9 +1,15 @@
 # Git metadata
 .git/
 
+# Secrets & environment
+.env
+.env.*
+!.env.example
+
 # Frontend build/runtime
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 
 # Backend runtime/generated data
 backend/uploads/
@@ -16,9 +22,28 @@ backend/__pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
 
 # Local databases and logs
 *.db
 *.sqlite
 *.sqlite3
 *.log
+
+# Temp / generated files
+tmp_easyinvoice_*.html
+*.tmp
+temp_script.bat
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Review docs (auto-generated)
+REVIEW.md

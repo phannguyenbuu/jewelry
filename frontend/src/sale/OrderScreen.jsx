@@ -831,10 +831,7 @@ export default function OrderScreen({
                             </div>
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setCustomerOcrSide('front');
-                                    openCustomerCapture('photo');
-                                }}
+                                onClick={() => openCustomerCapture('photo')}
                                 disabled={cccdQrLoading || cccdOcrLoading}
                                 style={{
                                     ...S.pillBtn('linear-gradient(135deg,#0f766e,#14b8a6)'),

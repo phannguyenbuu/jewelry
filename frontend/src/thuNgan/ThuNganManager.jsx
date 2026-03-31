@@ -11,11 +11,22 @@ const badge = (bg, color) => ({
   fontWeight: 700,
 });
 
+// Lấy ngày hiện tại dạng YYYY-MM-DD
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseMoney(val) {
+  const n = parseFloat(String(val || '').replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
 export default function ThuNganManager({ onCashiersChanged }) {
   const [khos, setKhos] = useState([]);
   const [thuNgans, setThuNgans] = useState([]);
   const [quays, setQuays] = useState([]);
   const [nhanViens, setNhanViens] = useState([]);
+  const [tuoiVangs, setTuoiVangs] = useState([]);
   const [cashierModal, setCashierModal] = useState(null);
   const [cashierConfirm, setCashierConfirm] = useState(null);
   const [cashierForm, setCashierForm] = useState({});
@@ -25,23 +36,26 @@ export default function ThuNganManager({ onCashiersChanged }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [khoRes, thuNganRes, quayRes, nhanVienRes] = await Promise.all([
+      const [khoRes, thuNganRes, quayRes, nhanVienRes, tuoiVangRes] = await Promise.all([
         fetch(`${API}/api/kho`),
         fetch(`${API}/api/thu_ngan`),
         fetch(`${API}/api/quay_nho`),
         fetch(`${API}/api/nhan_vien`),
+        fetch(`${API}/api/tuoi_vang`),
       ]);
-      const [khoData, thuNganData, quayData, nhanVienData] = await Promise.all([
+      const [khoData, thuNganData, quayData, nhanVienData, tuoiVangData] = await Promise.all([
         readJsonSafe(khoRes, []),
         readJsonSafe(thuNganRes, []),
         readJsonSafe(quayRes, []),
         readJsonSafe(nhanVienRes, []),
+        readJsonSafe(tuoiVangRes, []),
       ]);
       setCashierApiReady(thuNganRes.ok);
       setKhos(Array.isArray(khoData) ? khoData : []);
       setThuNgans(Array.isArray(thuNganData) ? thuNganData : []);
       setQuays(Array.isArray(quayData) ? quayData : []);
       setNhanViens(Array.isArray(nhanVienData) ? nhanVienData : []);
+      setTuoiVangs(Array.isArray(tuoiVangData) ? tuoiVangData : []);
     } finally {
       setLoading(false);
     }
@@ -58,6 +72,7 @@ export default function ThuNganManager({ onCashiersChanged }) {
     }
   }, [load, onCashiersChanged]);
 
+  // Khi mở modal add/edit: load chi_tiet tồn đầu kỳ của thu ngân từ API (nếu edit)
   const openAddCashier = useCallback((kho) => {
     setCashierForm({
       ten_thu_ngan: '',
@@ -66,16 +81,40 @@ export default function ThuNganManager({ onCashiersChanged }) {
       nhan_vien_id: '',
       ghi_chu: '',
       quay_ids: [],
+      ton_dau_ky_tien_mat: '',
+      ton_dau_ky_map: {},  // { ten_tuoi: value }
     });
     setCashierModal('add');
   }, []);
 
-  const openEditCashier = useCallback((cashier) => {
+  const openEditCashier = useCallback(async (cashier) => {
+    // Load tồn đầu kỳ hiện tại của ngày hôm nay cho thu ngân này
+    let tonDauKyMap = {};
+    let tonDauKyTienMat = '';
+    try {
+      const res = await fetch(`${API}/api/thu_ngan_so_quy?ngay=${todayIso()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const row = (data.rows || []).find((r) => r.thu_ngan_id === cashier.id);
+        if (row) {
+          tonDauKyTienMat = (row.so_tien_dau_ngay || 0).toString();
+          // Parse chi_tiet -> map tuoi_vang => ton_dau_ky
+          for (const item of row.chi_tiet || []) {
+            if (item.tuoi_vang) {
+              tonDauKyMap[item.tuoi_vang] = (item.ton_dau_ky || 0).toString();
+            }
+          }
+        }
+      }
+    } catch (_) { /* bỏ qua lỗi mạng */ }
+
     setCashierForm({
       ...cashier,
       kho_ten: cashier.ten_kho,
       nhan_vien_id: cashier.nhan_vien_id || '',
       quay_ids: cashier.quay_ids || cashier.quays?.map((q) => q.id) || [],
+      ton_dau_ky_tien_mat: tonDauKyTienMat,
+      ton_dau_ky_map: tonDauKyMap,
     });
     setCashierModal(cashier);
   }, []);
@@ -91,10 +130,48 @@ export default function ThuNganManager({ onCashiersChanged }) {
         ghi_chu: cashierForm.ghi_chu || '',
         quay_ids: cashierForm.quay_ids || [],
       };
-      await readResponse(await fetch(
+      const savedRes = await readResponse(await fetch(
         isEdit ? `${API}/api/thu_ngan/${cashierModal.id}` : `${API}/api/thu_ngan`,
         { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
       ));
+
+      // Lưu tồn đầu kỳ vào sổ quỹ ngày hôm nay
+      const thuNganId = isEdit ? cashierModal.id : (savedRes?.id);
+      if (thuNganId) {
+        const tonMap = cashierForm.ton_dau_ky_map || {};
+        const chiTiet = tuoiVangs
+          .filter((tv) => tonMap[tv.ten_tuoi] !== undefined && parseMoney(tonMap[tv.ten_tuoi]) !== 0)
+          .map((tv) => ({
+            tuoi_vang: tv.ten_tuoi,
+            ton_dau_ky: parseMoney(tonMap[tv.ten_tuoi]),
+            so_du_hien_tai: parseMoney(tonMap[tv.ten_tuoi]),
+            gia_tri_lech: 0,
+          }));
+        // Nếu có tiền mặt, thêm vào
+        const tienMat = parseMoney(cashierForm.ton_dau_ky_tien_mat);
+        if (tienMat !== 0) {
+          chiTiet.unshift({
+            tuoi_vang: 'Tiền mặt',
+            ton_dau_ky: tienMat,
+            so_du_hien_tai: tienMat,
+            gia_tri_lech: 0,
+          });
+        }
+        if (chiTiet.length > 0) {
+          try {
+            await fetch(`${API}/api/thu_ngan_so_quy`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ngay: todayIso(),
+                thu_ngan_id: thuNganId,
+                chi_tiet: chiTiet,
+              }),
+            });
+          } catch (_) { /* bỏ qua lỗi sổ quỹ */ }
+        }
+      }
+
       setCashierModal(null);
       await notifyChanged();
     } catch (err) {
@@ -118,6 +195,7 @@ export default function ThuNganManager({ onCashiersChanged }) {
   const quaysById = useMemo(() => Object.fromEntries(quays.map((q) => [q.id, q])), [quays]);
   const sortedNhanViens = useMemo(() => [...nhanViens].sort(byName('ho_ten')), [nhanViens]);
   const sortedKhos = useMemo(() => [...khos].sort(byName('ten_kho')), [khos]);
+  const sortedTuoiVangs = useMemo(() => [...tuoiVangs].sort(byName('ten_tuoi')), [tuoiVangs]);
   const modalQuays = useMemo(() => (
     [...quays]
       .filter((q) => q.kho_id === cashierForm.kho_id)
@@ -144,6 +222,15 @@ export default function ThuNganManager({ onCashiersChanged }) {
       ten_thu_ngan: prev.ten_thu_ngan || selectedStaff?.ho_ten || '',
     }));
   };
+
+  const setTonDauKy = (key, val) => {
+    setCashierForm((prev) => ({
+      ...prev,
+      ton_dau_ky_map: { ...(prev.ton_dau_ky_map || {}), [key]: val },
+    }));
+  };
+
+  const inpSmall = { ...inp, padding: '5px 8px', fontSize: 12 };
 
   return (
     <>
@@ -224,19 +311,17 @@ export default function ThuNganManager({ onCashiersChanged }) {
                               </div>
                             </div>
 
+                            {/* Quầy nhỏ phụ trách — 3 cột */}
                             <div style={{ marginTop: 10 }}>
                               <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Quầy nhỏ phụ trách</div>
                               {assignedQuays.length === 0 ? (
                                 <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Chưa được gán quầy nhỏ.</div>
                               ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
                                   {assignedQuays.map((quay) => (
-                                    <div key={quay.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                                      <div>
-                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
-                                        {quay.ghi_chu && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{quay.ghi_chu}</div>}
-                                      </div>
-                                      {quay.nguoi_phu_trach && <div style={{ fontSize: 10, color: '#64748b', whiteSpace: 'nowrap' }}>👤 {quay.nguoi_phu_trach}</div>}
+                                    <div key={quay.id} style={{ padding: '6px 8px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
+                                      {quay.ghi_chu && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{quay.ghi_chu}</div>}
                                     </div>
                                   ))}
                                 </div>
@@ -267,7 +352,7 @@ export default function ThuNganManager({ onCashiersChanged }) {
         )}
       </div>
 
-      <Modal open={!!cashierModal} onClose={() => setCashierModal(null)} title={cashierModal === 'add' ? '+ Thêm thu ngân' : 'Sửa thu ngân'} maxWidth={640}>
+      <Modal open={!!cashierModal} onClose={() => setCashierModal(null)} title={cashierModal === 'add' ? '+ Thêm thu ngân' : 'Sửa thu ngân'} maxWidth={680}>
         <form onSubmit={saveCashier}>
           <Field label="Tên thu ngân *">
             <input required style={inp} value={cashierForm.ten_thu_ngan || ''} onChange={(e) => setCashierForm({ ...cashierForm, ten_thu_ngan: e.target.value })} />
@@ -284,6 +369,8 @@ export default function ThuNganManager({ onCashiersChanged }) {
               {sortedNhanViens.map((nv) => <option key={nv.id} value={nv.id}>{nv.ho_ten}{nv.chuc_vu ? ` - ${nv.chuc_vu}` : ''}</option>)}
             </select>
           </Field>
+
+          {/* Quầy nhỏ — 3 cột trong modal */}
           <Field label="Quầy nhỏ phụ trách">
             {cashierForm.kho_id ? (
               modalQuays.length === 0 ? (
@@ -295,22 +382,23 @@ export default function ThuNganManager({ onCashiersChanged }) {
                   <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
                     Chọn được nhiều quầy nhỏ. Mỗi quầy nhỏ chỉ được gán cho đúng 1 thu ngân.
                   </div>
-                  {modalQuays.map((quay) => {
-                    const checked = (cashierForm.quay_ids || []).includes(quay.id);
-                    const lockedByOther = !!quay.thu_ngan_id && quay.thu_ngan_id !== currentCashierId;
-                    return (
-                      <label key={quay.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 9, border: `1px solid ${lockedByOther ? '#fecaca' : checked ? '#bfdbfe' : '#e2e8f0'}`, background: lockedByOther ? '#fff1f2' : checked ? '#eff6ff' : 'white', cursor: lockedByOther ? 'not-allowed' : 'pointer', opacity: lockedByOther ? 0.75 : 1 }}>
-                        <input type="checkbox" checked={checked} disabled={lockedByOther} onChange={() => toggleQuay(quay.id)} style={{ marginTop: 2 }} />
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
-                          <div style={{ fontSize: 10, color: lockedByOther ? '#dc2626' : '#64748b', marginTop: 3 }}>
-                            {lockedByOther ? `Đang thuộc ${quay.ten_thu_ngan}` : checked ? 'Đang gán cho thu ngân này' : 'Chưa gán thu ngân'}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
+                    {modalQuays.map((quay) => {
+                      const checked = (cashierForm.quay_ids || []).includes(quay.id);
+                      const lockedByOther = !!quay.thu_ngan_id && quay.thu_ngan_id !== currentCashierId;
+                      return (
+                        <label key={quay.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', borderRadius: 8, border: `1px solid ${lockedByOther ? '#fecaca' : checked ? '#bfdbfe' : '#e2e8f0'}`, background: lockedByOther ? '#fff1f2' : checked ? '#eff6ff' : 'white', cursor: lockedByOther ? 'not-allowed' : 'pointer', opacity: lockedByOther ? 0.75 : 1 }}>
+                          <input type="checkbox" checked={checked} disabled={lockedByOther} onChange={() => toggleQuay(quay.id)} style={{ marginTop: 2, flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
+                            <div style={{ fontSize: 10, color: lockedByOther ? '#dc2626' : '#64748b', marginTop: 2 }}>
+                              {lockedByOther ? `Thuộc ${quay.ten_thu_ngan}` : checked ? 'Đang gán' : 'Chưa gán'}
+                            </div>
                           </div>
-                          {quay.nguoi_phu_trach && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Nhân sự quầy: {quay.nguoi_phu_trach}</div>}
-                        </div>
-                      </label>
-                    );
-                  })}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )
             ) : (
@@ -319,6 +407,54 @@ export default function ThuNganManager({ onCashiersChanged }) {
               </div>
             )}
           </Field>
+
+          {/* Tồn đầu kỳ */}
+          <Field label="Tồn đầu kỳ hôm nay">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                Nhập số dư đầu kỳ cho ngày hôm nay ({todayIso()}). Giá trị tính bằng <b>triệu đồng</b>.
+              </div>
+              {/* Tiền mặt */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 9, background: '#fefce8', border: '1px solid #fde68a' }}>
+                <span style={{ fontSize: 16 }}>💵</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 3 }}>Tiền mặt</div>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    style={{ ...inpSmall, width: '100%', boxSizing: 'border-box' }}
+                    value={cashierForm.ton_dau_ky_tien_mat || ''}
+                    onChange={(e) => setCashierForm((prev) => ({ ...prev, ton_dau_ky_tien_mat: e.target.value }))}
+                  />
+                </div>
+              </div>
+              {/* Theo tuổi vàng */}
+              {sortedTuoiVangs.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 7 }}>
+                  {sortedTuoiVangs.map((tv) => (
+                    <div key={tv.id} style={{ padding: '8px 10px', borderRadius: 9, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>🥇 {tv.ten_tuoi}</div>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="0"
+                        style={{ ...inpSmall, width: '100%', boxSizing: 'border-box' }}
+                        value={(cashierForm.ton_dau_ky_map || {})[tv.ten_tuoi] || ''}
+                        onChange={(e) => setTonDauKy(tv.ten_tuoi, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {sortedTuoiVangs.length === 0 && (
+                <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                  Chưa có tuổi vàng nào. Hãy thêm trong tab Cài Đặt → Tuổi vàng.
+                </div>
+              )}
+            </div>
+          </Field>
+
           <Field label="Ghi chú">
             <textarea style={{ ...inp, height: 72, resize: 'vertical' }} value={cashierForm.ghi_chu || ''} onChange={(e) => setCashierForm({ ...cashierForm, ghi_chu: e.target.value })} />
           </Field>

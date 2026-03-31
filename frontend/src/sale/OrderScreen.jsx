@@ -29,6 +29,27 @@ const parseImageDataUrl = (value) => {
     if (!matched) return null;
     return { mimeType: matched[1] || 'image/jpeg', imageBase64: matched[2] || '' };
 };
+/** Tao thumbnail nho (maxW x maxH) tu base64, tra ve data URL JPEG. */
+function generateThumbnail(base64, mimeType = 'image/jpeg', maxW = 320, maxH = 200) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+                const w = Math.round(img.width * scale);
+                const h = Math.round(img.height * scale);
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.55));
+            } catch {
+                resolve(`data:${mimeType};base64,${base64}`);
+            }
+        };
+        img.onerror = () => resolve(`data:${mimeType};base64,${base64}`);
+        img.src = `data:${mimeType};base64,${base64}`;
+    });
+}
 const RECEIPT_PRINT_TARGETS = {
     5: {
         machineName: 'MAY05',
@@ -138,25 +159,28 @@ export default function OrderScreen({
         if (!imageBase64) return;
         const dataUrl = `data:${mimeType};base64,${imageBase64}`;
         let nextMessage = 'Đã thêm ảnh vào bộ sưu tập khách hàng.';
-        setCustomerInfo(prev => {
-            const hasFrontImage = trimCustomerText(prev?.frontImage);
-            const hasBackImage = trimCustomerText(prev?.backImage);
-            const nextGallery = buildCustomerPhotoGallery({
-                ...prev,
-                photoGallery: [...(Array.isArray(prev?.photoGallery) ? prev.photoGallery : []), dataUrl],
+        // Generate thumbnail async then update gallery thumbs
+        generateThumbnail(imageBase64, mimeType).then(thumbUrl => {
+            setCustomerInfo(prev => {
+                const hasFrontImage = trimCustomerText(prev?.frontImage);
+                const hasBackImage  = trimCustomerText(prev?.backImage);
+                const nextGallery = buildCustomerPhotoGallery({
+                    ...prev,
+                    photoGallery: [...(Array.isArray(prev?.photoGallery) ? prev.photoGallery : []), dataUrl],
+                });
+                if (!hasFrontImage) {
+                    nextMessage = 'Đã thêm ảnh và gán vào mặt trước.';
+                    return { ...prev, frontImage: dataUrl, frontThumb: thumbUrl, photoGallery: nextGallery };
+                }
+                if (!hasBackImage) {
+                    nextMessage = 'Đã thêm ảnh và gán vào mặt sau.';
+                    return { ...prev, backImage: dataUrl, backThumb: thumbUrl, photoGallery: nextGallery };
+                }
+                return { ...prev, photoGallery: nextGallery };
             });
-            if (!hasFrontImage) {
-                nextMessage = 'Đã thêm ảnh và gán vào mặt trước.';
-                return { ...prev, frontImage: dataUrl, photoGallery: nextGallery };
-            }
-            if (!hasBackImage) {
-                nextMessage = 'Đã thêm ảnh và gán vào mặt sau.';
-                return { ...prev, backImage: dataUrl, photoGallery: nextGallery };
-            }
-            return { ...prev, photoGallery: nextGallery };
+            setCustomerInfoOpen(true);
+            setCccdOcrMessage(nextMessage);
         });
-        setCustomerInfoOpen(true);
-        setCccdOcrMessage(nextMessage);
     };
     const uploadCustomerIdentityImage = async ({ imageBase64, mimeType = 'image/jpeg', fileName = 'cccd.jpg', side = 'front' }) => {
         if (!imageBase64) throw new Error('Chưa có ảnh CCCD để lưu lên server.');
@@ -391,6 +415,11 @@ export default function OrderScreen({
         if (!imageBase64) return;
         setCccdOcrLoading(true);
         setCccdOcrMessage('Đang lưu ảnh CCCD lên server...');
+        // Generate thumbnail client-side truoc khi upload (hien thi nhanh, khong can doi server)
+        const thumbKey = side === 'back' ? 'backThumb' : 'frontThumb';
+        generateThumbnail(imageBase64, mimeType).then(thumbUrl => {
+            setCustomerInfo(prev => ({ ...prev, [thumbKey]: thumbUrl }));
+        });
         try {
             const storedImageUrl = await uploadCustomerIdentityImage({ imageBase64, mimeType, fileName, side });
             setCustomerInfo(prev => ({
@@ -1059,17 +1088,20 @@ export default function OrderScreen({
                                 {/* CCCD image slots - luon hien thi, click slot trong de mo camera */}
                                 <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2 }}>
                                     {[
-                                        { key: 'frontImage', tabKey: 'ocr_front', label: 'CCCD mặt trước' },
-                                        { key: 'backImage',  tabKey: 'ocr_back',  label: 'CCCD mặt sau' },
-                                    ].map(({ key, tabKey, label }) => {
-                                        const url = customerInfo?.[key];
+                                        { imgKey: 'frontImage', thumbKey: 'frontThumb', tabKey: 'ocr_front', label: 'CCCD mặt trước' },
+                                        { imgKey: 'backImage',  thumbKey: 'backThumb',  tabKey: 'ocr_back',  label: 'CCCD mặt sau' },
+                                    ].map(({ imgKey, thumbKey, tabKey, label }) => {
+                                        const fullUrl  = customerInfo?.[imgKey];
+                                        const thumbUrl = customerInfo?.[thumbKey];
                                         return (
-                                            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                            <div key={imgKey} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                                 <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</span>
-                                                {url ? (
-                                                    <a href={url} target="_blank" rel="noreferrer"
+                                                {fullUrl ? (
+                                                    <a href={fullUrl} target="_blank" rel="noreferrer"
+                                                        title="Click để xem ảnh đầy đủ"
                                                         style={{ display: 'block', borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '16/9', boxShadow: '0 2px 8px rgba(15,23,42,.06)' }}>
-                                                        <img src={url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                        <img src={thumbUrl || fullUrl} alt={label} loading="lazy"
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                                     </a>
                                                 ) : (
                                                     <button
@@ -1095,7 +1127,7 @@ export default function OrderScreen({
                                         );
                                     })}
                                 </div>
-                                {/* Extra gallery photos */}
+                                {/* Extra gallery photos - scroll strip */}
                                 {(() => {
                                     const front = customerInfo?.frontImage;
                                     const back  = customerInfo?.backImage;
@@ -1103,12 +1135,12 @@ export default function OrderScreen({
                                         .filter(u => u && u !== front && u !== back);
                                     if (!extra.length) return null;
                                     return (
-                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin' }}>
                                             {extra.map((url, idx) => (
                                                 <a key={idx} href={url} target="_blank" rel="noreferrer"
                                                     style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
                                                     <div style={{ width: 56, height: 56, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9' }}>
-                                                        <img src={url} alt={`Ảnh ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                        <img src={url} alt={`Ảnh ${idx + 1}`} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                                     </div>
                                                     <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>Ảnh {idx + 1}</span>
                                                 </a>

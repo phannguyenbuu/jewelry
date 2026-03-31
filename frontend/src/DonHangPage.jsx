@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import SalePosMobile from './SalePosMobile';
 import ImageOcrUpload from './components/ImageOcrUpload';
 import { API_BASE } from './lib/api';
@@ -59,6 +59,21 @@ function Field({ label, children, required }) {
     );
 }
 
+function StatusBadge({ s }) {
+    const cfg = STATUS_CFG[s] || { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' };
+    return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: cfg.bg, color: cfg.text, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, display: 'inline-block' }} />
+            {s}
+        </span>
+    );
+}
+
+function LoaiBadge({ l }) {
+    const cfg = LOAI_DON.find(x => x.key === l) || LOAI_DON[0];
+    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: cfg.bg, color: cfg.color, borderRadius: 20, padding: '3px 9px', fontSize: 11, fontWeight: 700 }}>{cfg.icon} {l}</span>;
+}
+
 /* ─── Main Page ──────────────────────────────────────────────────────── */
 export default function DonHangPage() {
     const [list, setList] = useState([]);
@@ -71,12 +86,23 @@ export default function DonHangPage() {
     const [confirmDel, setConfirmDel] = useState(null);
     const [posOpen, setPosOpen] = useState(false);
 
-    const load = useCallback(async () => {
+    const load = async () => {
         const r = await fetch(`${API}/api/don_hang`);
         setList(await r.json());
-    }, []);
+    };
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        let cancelled = false;
+        const fetchList = async () => {
+            const r = await fetch(`${API}/api/don_hang`);
+            const data = await r.json();
+            if (!cancelled) setList(data);
+        };
+        fetchList().catch(() => { });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const openAdd = () => { setForm({ ...EMPTY_FORM }); setModal('add'); };
     const openEdit = d => { setForm({ ...EMPTY_FORM, ...d, chung_tu: d.chung_tu || [] }); setModal(d); };
@@ -114,28 +140,13 @@ export default function DonHangPage() {
         tongTien: list.filter(d => d.trang_thai !== 'Hủy').reduce((s, d) => s + (d.tong_tien || 0), 0),
     };
 
-    const StatusBadge = ({ s }) => {
-        const cfg = STATUS_CFG[s] || { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' };
-        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: cfg.bg, color: cfg.text, borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, display: 'inline-block' }} />{s}
-        </span>;
-    };
-
-    const LoaiBadge = ({ l }) => {
-        const cfg = LOAI_DON.find(x => x.key === l) || LOAI_DON[0];
-        return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: cfg.bg, color: cfg.color, borderRadius: 20, padding: '3px 9px', fontSize: 11, fontWeight: 700 }}>{cfg.icon} {l}</span>;
-    };
-
     const isTD = form.loai_don === 'Trao đổi';
 
     // Thêm ảnh chứng từ vào list
-    const addChungTu = (url, name) => {
-        setForm(f => ({ ...f, chung_tu: [...(f.chung_tu || []), { url, name }] }));
-    };
     const removeChungTu = idx => setForm(f => ({ ...f, chung_tu: f.chung_tu.filter((_, i) => i !== idx) }));
 
     return (
-        <React.Fragment>
+        <>
             <div>
                 {/* Stats */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 12, marginBottom: 20 }}>
@@ -450,6 +461,6 @@ export default function DonHangPage() {
                 )}
             </div>
             {posOpen && <SalePosMobile onClose={() => { setPosOpen(false); load(); }} />}
-        </React.Fragment>
+        </>
     );
 }

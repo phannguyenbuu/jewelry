@@ -1,0 +1,22 @@
+{
+  "server_url": "https://jewelry.n-lux.com",
+  "agent_key": "scale_xxxxxxxxxxxxxxxxxxxxxxxx",
+  "device_name": "May can vang",
+  "model": "Weight Indicator Bundle",
+  "location": "Quay vang 1",
+  "poll_interval_seconds": 3,
+  "heartbeat_interval_seconds": 15,
+  "serial": {
+    "port": "COM3",
+    "baudrate": 2400,
+    "bytesize": 7,
+    "parity": "E",
+    "stopbits": 1,
+    "timeout_seconds": 2.5,
+    "listen_seconds": 3.0,
+    "encoding": "ascii",
+    "command": "Q",
+    "line_ending": "\\r",
+    "data_format": "AUTO"
+  }
+}

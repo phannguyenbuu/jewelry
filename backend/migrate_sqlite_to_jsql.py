@@ -65,7 +65,7 @@ def ensure_schema():
     os.environ['DATABASE_URL'] = PG_DSN
     sys.path.insert(0, BASE_DIR)
     import app_jewelry  # noqa: F401
-    print('SQLAlchemy schema sync completed')
+    print('PostgreSQL schema sync completed')
 
 
 def sqlite_tables(cur):

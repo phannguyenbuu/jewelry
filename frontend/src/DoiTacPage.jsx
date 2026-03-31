@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { API_BASE } from './lib/api';
 
 const API = API_BASE;
@@ -79,16 +79,13 @@ const EMPTY_FORM = {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function DoiTacPage() {
-    const [list, setList] = useState([]);
+    const [list, setList] = useState(loadKH);
     const [modal, setModal] = useState(null); // null | 'add' | kh object
     const [detailModal, setDetailModal] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
     const [search, setSearch] = useState('');
     const [filterSao, setFilterSao] = useState('');
     const [confirmDel, setConfirmDel] = useState(null);
-
-    // load from localStorage
-    useEffect(() => { setList(loadKH()); }, []);
 
     const save = (e) => {
         e.preventDefault();

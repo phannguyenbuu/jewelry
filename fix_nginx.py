@@ -1,10 +1,27 @@
+import os
 import paramiko
 
-HOST = '31.97.76.62'
-USER = 'root'
-PASS = '@baoLong0511'
+HOST = os.environ.get('JEWELRY_VPS_HOST')
+USER = os.environ.get('JEWELRY_VPS_USER')
+PASS = os.environ.get('JEWELRY_VPS_PASS')
+
+
+def require_vps_env():
+    missing = [
+        name
+        for name, value in (
+            ('JEWELRY_VPS_HOST', HOST),
+            ('JEWELRY_VPS_USER', USER),
+            ('JEWELRY_VPS_PASS', PASS),
+        )
+        if not value
+    ]
+    if missing:
+        names = ', '.join(missing)
+        raise RuntimeError(f'Missing VPS environment variables: {names}')
 
 def main():
+    require_vps_env()
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(HOST, username=USER, password=PASS)

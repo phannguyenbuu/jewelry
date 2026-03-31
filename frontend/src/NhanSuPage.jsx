@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { API_BASE } from './lib/api';
 
 const API = API_BASE;
@@ -41,10 +41,22 @@ export default function NhanSuPage() {
     const [filterPhong, setFilterPhong] = useState('');
     const [confirmDel, setConfirmDel] = useState(null);
 
-    const load = useCallback(async () => {
-        const r = await fetch(`${API}/api/nhan_vien`); setList(await r.json());
+    const load = async () => {
+        const r = await fetch(`${API}/api/nhan_vien`);
+        setList(await r.json());
+    };
+    useEffect(() => {
+        let cancelled = false;
+        const fetchList = async () => {
+            const r = await fetch(`${API}/api/nhan_vien`);
+            const data = await r.json();
+            if (!cancelled) setList(data);
+        };
+        fetchList().catch(() => { });
+        return () => {
+            cancelled = true;
+        };
     }, []);
-    useEffect(() => { load(); }, [load]);
 
     const save = async e => {
         e.preventDefault();

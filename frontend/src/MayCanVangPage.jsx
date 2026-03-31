@@ -1,167 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { API_BASE } from './lib/api';
-
-const API = API_BASE;
-const API_ROOT = API || (typeof window !== 'undefined' ? window.location.origin : '');
-
-const inputStyle = {
-  width: '100%',
-  padding: '10px 12px',
-  borderRadius: 10,
-  border: '1.5px solid #dbe3ef',
-  fontSize: 13,
-  boxSizing: 'border-box',
-  background: 'white',
-};
-
-const labelStyle = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: '#64748b',
-  display: 'block',
-  marginBottom: 6,
-  textTransform: 'uppercase',
-  letterSpacing: 0.4,
-};
-
-const cardStyle = {
-  background: 'white',
-  borderRadius: 18,
-  border: '1px solid #e2e8f0',
-  boxShadow: '0 10px 30px rgba(15,23,42,.05)',
-};
-
-const buttonStyle = (bg, color = 'white') => ({
-  padding: '9px 16px',
-  borderRadius: 10,
-  border: 'none',
-  background: bg,
-  color,
-  fontWeight: 700,
-  cursor: 'pointer',
-  fontSize: 13,
-});
-
-const defaultForm = () => ({
-  id: null,
-  device_name: 'Máy cân vàng',
-  model: 'AND GP-20K',
-  location: '',
-  serial_port: 'COM3',
-  baudrate: '2400',
-  bytesize: '7',
-  parity: 'E',
-  stopbits: '1',
-  timeout_seconds: '2.5',
-  command: 'Q',
-  line_ending: '\\r\\n',
-  data_format: 'A&D',
-});
-
-const formatDate = (value) => value ? value : '—';
-const formatWeight = (agent) => {
-  if (!agent?.last_weight_text) return '—';
-  return `${agent.last_weight_text}${agent.last_unit ? ` ${agent.last_unit}` : ''}`;
-};
-
-function AgentModal({ open, onClose, form, setForm, onSubmit, saving }) {
-  if (!open) return null;
-
-  return (
-    <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.48)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div style={{ ...cardStyle, width: '100%', maxWidth: 860, maxHeight: '92vh', overflow: 'auto' }}>
-        <div style={{ padding: '18px 22px', borderBottom: '1px solid #eef2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: '#0f172a' }}>{form.id ? 'Cập nhật agent cân' : 'Tạo agent cân mới'}</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Thiết lập thông số server phát lệnh và cấu hình RS-232C mặc định cho GP-20K.</div>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' }}>×</button>
-        </div>
-
-        <form onSubmit={onSubmit} style={{ padding: 22 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-            <div>
-              <label style={labelStyle}>Tên thiết bị</label>
-              <input style={inputStyle} value={form.device_name} onChange={(e) => setForm({ ...form, device_name: e.target.value })} required />
-            </div>
-            <div>
-              <label style={labelStyle}>Model</label>
-              <input style={inputStyle} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} required />
-            </div>
-            <div>
-              <label style={labelStyle}>Vị trí</label>
-              <input style={inputStyle} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Quầy 1 / Phòng cân" />
-            </div>
-            <div>
-              <label style={labelStyle}>Cổng COM mặc định</label>
-              <input style={inputStyle} value={form.serial_port} onChange={(e) => setForm({ ...form, serial_port: e.target.value })} placeholder="COM3" />
-            </div>
-            <div>
-              <label style={labelStyle}>Baudrate</label>
-              <input style={inputStyle} type="number" value={form.baudrate} onChange={(e) => setForm({ ...form, baudrate: e.target.value })} />
-            </div>
-            <div>
-              <label style={labelStyle}>Data bits</label>
-              <select style={inputStyle} value={form.bytesize} onChange={(e) => setForm({ ...form, bytesize: e.target.value })}>
-                <option value="7">7</option>
-                <option value="8">8</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Parity</label>
-              <select style={inputStyle} value={form.parity} onChange={(e) => setForm({ ...form, parity: e.target.value })}>
-                <option value="E">Even (E)</option>
-                <option value="N">None (N)</option>
-                <option value="O">Odd (O)</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Stop bits</label>
-              <select style={inputStyle} value={form.stopbits} onChange={(e) => setForm({ ...form, stopbits: e.target.value })}>
-                <option value="1">1</option>
-                <option value="2">2</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Timeout đọc (giây)</label>
-              <input style={inputStyle} type="number" step="0.1" value={form.timeout_seconds} onChange={(e) => setForm({ ...form, timeout_seconds: e.target.value })} />
-            </div>
-            <div>
-              <label style={labelStyle}>Lệnh serial mặc định</label>
-              <select style={inputStyle} value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })}>
-                <option value="Q">Q - Đọc ngay</option>
-                <option value="S">S - Đợi ổn định</option>
-                <option value="SI">SI - Đọc ngay (serial)</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Line ending</label>
-              <input style={inputStyle} value={form.line_ending} onChange={(e) => setForm({ ...form, line_ending: e.target.value })} placeholder="\\r\\n" />
-            </div>
-            <div>
-              <label style={labelStyle}>Data format</label>
-              <input style={inputStyle} value={form.data_format} onChange={(e) => setForm({ ...form, data_format: e.target.value })} placeholder="A&D" />
-            </div>
-          </div>
-
-          <div style={{ marginTop: 18, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 14px', fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
-            Mặc định theo manual A&D GP series: `2400 bps`, `7 bit`, `Even parity`, `CRLF`, `A&D standard format`.
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
-            <button type="button" onClick={onClose} style={buttonStyle('#e2e8f0', '#334155')}>Hủy</button>
-            <button type="submit" disabled={saving} style={buttonStyle('#0f766e')}>
-              {saving ? 'Đang lưu...' : (form.id ? 'Lưu thay đổi' : 'Tạo agent')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+import { useEffect, useState } from 'react';
+import AgentModal from './mayCanVang/AgentModal';
+import { API, buttonStyle, cardStyle, defaultForm, formatDate, formatWeight } from './mayCanVang/shared';
 
 export default function MayCanVangPage() {
   const [agents, setAgents] = useState([]);
@@ -173,8 +12,6 @@ export default function MayCanVangPage() {
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [notice, setNotice] = useState('');
-  const [agentScript, setAgentScript] = useState('');
-  const [scriptLoading, setScriptLoading] = useState(false);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) || agents[0] || null;
 
@@ -210,28 +47,6 @@ export default function MayCanVangPage() {
         console.error(error);
       } finally {
         if (!stopped) setLoading(false);
-      }
-    };
-
-    run();
-    return () => { stopped = true; };
-  }, []);
-
-  useEffect(() => {
-    let stopped = false;
-
-    const run = async () => {
-      try {
-        setScriptLoading(true);
-        const response = await fetch(`${API}/api/scale/agent/script`);
-        if (!response.ok) throw new Error('Khong tai duoc script agent.');
-        const text = await response.text();
-        if (!stopped) setAgentScript(text);
-      } catch (error) {
-        console.error(error);
-        if (!stopped) setAgentScript('# Khong tai duoc script agent Python.');
-      } finally {
-        if (!stopped) setScriptLoading(false);
       }
     };
 
@@ -308,7 +123,7 @@ export default function MayCanVangPage() {
       if (!response.ok) throw new Error(data.error || 'Không lưu được agent.');
 
       setModalOpen(false);
-      setNotice(form.id ? 'Đã cập nhật agent cân.' : 'Đã tạo agent cân mới.');
+      setNotice(form.id ? 'Đã cập nhật agent.' : 'Đã tạo agent mới.');
       await loadAgents();
       setSelectedAgentId(data.id || data.agent?.id || data?.command?.agent_id || data?.id || selectedAgentId);
     } catch (error) {
@@ -344,7 +159,7 @@ export default function MayCanVangPage() {
     try {
       const response = await fetch(`${API}/api/scale/agents/${agent.id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Không xóa được agent.');
-      setNotice('Đã xóa agent cân.');
+      setNotice('Đã xóa agent.');
       await loadAgents();
     } catch (error) {
       console.error(error);
@@ -352,50 +167,14 @@ export default function MayCanVangPage() {
     }
   };
 
-  const copyConfig = async () => {
-    if (!selectedAgent) return;
-    const payload = {
-      server_url: API_ROOT,
-      agent_key: selectedAgent.agent_key,
-      device_name: selectedAgent.device_name,
-      location: selectedAgent.location || '',
-      poll_interval_seconds: 3,
-      heartbeat_interval_seconds: 15,
-      serial: {
-        port: selectedAgent.serial_port || 'COM3',
-        ...(selectedAgent.desired_settings || {}),
-      },
-    };
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setNotice('Đã copy cấu hình agent vào clipboard.');
-    } catch (error) {
-      console.error(error);
-      window.alert('Không copy được cấu hình.');
-    }
-  };
-
-  const downloadScript = () => {
+  const downloadAgentPy = () => {
     const link = document.createElement('a');
-    link.href = `${API}/api/scale/agent/script?download=1`;
-    link.download = 'scale_agent_gp20k.py';
+    link.href = `${API}/api/device-agent/script?download=1`;
+    link.download = 'device_agent.py';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
-
-  const agentConfigText = selectedAgent ? JSON.stringify({
-    server_url: API_ROOT,
-    agent_key: selectedAgent.agent_key,
-    device_name: selectedAgent.device_name,
-    location: selectedAgent.location || '',
-    poll_interval_seconds: 3,
-    heartbeat_interval_seconds: 15,
-    serial: {
-      port: selectedAgent.serial_port || 'COM3',
-      ...(selectedAgent.desired_settings || {}),
-    },
-  }, null, 2) : '';
 
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const pendingCount = agents.reduce((sum, agent) => sum + (agent.pending_commands || 0), 0);
@@ -419,9 +198,9 @@ export default function MayCanVangPage() {
 
       <div style={{ ...cardStyle, padding: '16px 18px', marginBottom: 18, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Máy cân vàng</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Agent</div>
           <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
-            Agent Python sẽ chạy tại máy cắm cân, nhận lệnh từ server và trả dữ liệu cân về web admin.
+            Agent quản lý máy in, nhận lệnh in từ server, lấy dữ liệu từ máy cân vàng và gửi về server.
           </div>
         </div>
         {notice && <div style={{ fontSize: 12, color: '#0f766e', fontWeight: 700 }}>{notice}</div>}
@@ -436,7 +215,7 @@ export default function MayCanVangPage() {
             {loading && agents.length === 0 ? (
               <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>Đang tải dữ liệu...</div>
             ) : agents.length === 0 ? (
-              <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>Chưa có agent nào. Tạo agent trước rồi cài script Python lên máy cân.</div>
+              <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8' }}>Chưa có agent nào. Tạo agent trước rồi tải file Python về máy đang quản lý máy in và máy cân.</div>
             ) : (
               <div style={{ display: 'grid', gap: 12 }}>
                 {agents.map((agent) => {
@@ -507,7 +286,7 @@ export default function MayCanVangPage() {
           </div>
 
           <div style={{ ...cardStyle, padding: 16 }}>
-            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>Log dữ liệu cân{selectedAgent ? ` · ${selectedAgent.device_name}` : ''}</div>
+            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>Log dữ liệu cân gửi về server{selectedAgent ? ` · ${selectedAgent.device_name}` : ''}</div>
             {selectedAgent ? (
               readings.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>Chưa có lần đọc nào từ agent này.</div>
@@ -544,49 +323,13 @@ export default function MayCanVangPage() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div style={{ ...cardStyle, padding: 16 }}>
-            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>Cấu hình cài trên máy cân</div>
+            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>Tải agent</div>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-              Cài agent Python lên máy Windows đang nối RS-232C / USB-COM với GP-20K, sau đó dùng cấu hình bên dưới.
+              Tải file `device_agent.py` về máy Windows chạy agent để quản lý máy in, nhận lệnh in từ server và gửi dữ liệu cân về server.
             </div>
-            <textarea
-              readOnly
-              value={agentConfigText}
-              style={{ ...inputStyle, minHeight: 300, fontFamily: "Consolas, 'Courier New', monospace", fontSize: 12, lineHeight: 1.6, resize: 'vertical' }}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-              <button type="button" disabled={!selectedAgent} onClick={copyConfig} style={buttonStyle('#0f766e')}>Copy cấu hình</button>
-              {selectedAgent && (
-                <button type="button" onClick={() => requestRead(selectedAgent.id, 'immediate')} style={buttonStyle('#1d4ed8')}>Đọc agent đang chọn</button>
-              )}
-            </div>
-          </div>
-
-          <div style={{ ...cardStyle, padding: 16 }}>
-            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>Quy trình triển khai</div>
-            <div style={{ display: 'grid', gap: 10, fontSize: 13, color: '#475569', lineHeight: 1.6 }}>
-              <div>1. Tạo agent trong tab này để lấy `agent_key`.</div>
-              <div>2. Cắm cân A&D GP-20K vào máy Windows qua RS-232C hoặc bộ chuyển USB-COM.</div>
-              <div>3. Cài `pyserial` và `requests`, chạy script agent Python với file config vừa copy.</div>
-              <div>4. Khi agent online, bấm `Đọc ngay` hoặc `Đọc ổn định` từ server để lấy dữ liệu.</div>
-            </div>
-          </div>
-          <div style={{ ...cardStyle, padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontWeight: 800, color: '#0f172a' }}>Script agent Python</div>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                  Xem nhanh nội dung script và tải file `.py` về máy đang kết nối máy cân.
-                </div>
-              </div>
-              <button type="button" onClick={downloadScript} style={buttonStyle('#1d4ed8')}>
-                Download script .py
-              </button>
-            </div>
-            <div style={{ border: '1px solid #dbe3ef', borderRadius: 12, background: '#0f172a', color: '#e2e8f0', maxHeight: 420, overflowY: 'auto', overflowX: 'auto', padding: 14 }}>
-              <pre style={{ margin: 0, fontFamily: "Consolas, 'Courier New', monospace", fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre' }}>
-                {scriptLoading ? '# Dang tai script...' : agentScript}
-              </pre>
-            </div>
+            <button type="button" onClick={downloadAgentPy} style={buttonStyle('#1d4ed8')}>
+              Download agent .py
+            </button>
           </div>
         </div>
       </div>

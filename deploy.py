@@ -1,11 +1,26 @@
-import paramiko
 import os
+import paramiko
 
-HOST = '31.97.76.62'
-USER = 'root'
-PASS = '@baoLong0511'
+HOST = os.environ.get('JEWELRY_VPS_HOST')
+USER = os.environ.get('JEWELRY_VPS_USER')
+PASS = os.environ.get('JEWELRY_VPS_PASS')
 LOCAL_DIR = 'd:/Dropbox/_Documents/_Vlance_2026/jewelry/frontend/dist'
 REMOTE_DIR = '/var/www/jewelry/dist'
+
+
+def require_vps_env():
+    missing = [
+        name
+        for name, value in (
+            ('JEWELRY_VPS_HOST', HOST),
+            ('JEWELRY_VPS_USER', USER),
+            ('JEWELRY_VPS_PASS', PASS),
+        )
+        if not value
+    ]
+    if missing:
+        names = ', '.join(missing)
+        raise RuntimeError(f'Missing VPS environment variables: {names}')
 
 def create_remote_dir(sftp, remote_directory):
     if remote_directory == '/':
@@ -42,6 +57,7 @@ def put_dir(sftp, local_dir, remote_dir):
             sftp.put(local_file, remote_file)
 
 def main():
+    require_vps_env()
     print('Connecting to VPS...')
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())

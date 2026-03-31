@@ -439,13 +439,14 @@ export default function OrderScreen({
                 };
             });
             setCustomerInfoOpen(true);
-            setCccdOcrMessage(
-                side === 'back'
-                    ? (rawText ? 'Đã điền ghi chú nhanh từ mặt sau.' : 'Đã OCR mặt sau, bạn kiểm tra lại ghi chú nhanh.')
-                    : parsed.appliedFields.length
+            const ocrMsg = side === 'back'
+                ? (rawText ? 'Đã điền ghi chú nhanh từ mặt sau.' : 'Đã OCR mặt sau, bạn kiểm tra lại ghi chú nhanh.')
+                : parsed.appliedFields.length
                     ? `OCR CCCD xong: ${parsed.appliedFields.join(', ')}.`
-                    : 'OCR xong, bạn kiểm tra lại thông tin để chỉnh tay nếu cần.'
-            );
+                    : 'OCR xong, bạn kiểm tra lại thông tin nếu cần.';
+            setCccdOcrMessage(ocrMsg);
+            // Hien thong bao 2s roi tu dong quay ve tab Chup hinh
+            setTimeout(() => setCustomerCaptureTab('photo'), 2000);
         } catch (error) {
             setCccdOcrMessage(error.message || 'Không OCR được CCCD.');
         } finally {
@@ -489,6 +490,8 @@ export default function OrderScreen({
             }));
             setCustomerInfoOpen(true);
             setCccdOcrMessage(`QR CCCD xong: ${parsed.appliedFields.join(', ')}.`);
+            // Hien thong bao 2s roi tu dong quay ve tab Chup hinh
+            setTimeout(() => setCustomerCaptureTab('photo'), 2000);
         } catch (error) {
             setCccdOcrMessage(error.message || 'Không đọc được QR CCCD.');
         } finally {

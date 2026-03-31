@@ -1056,6 +1056,31 @@ export default function OrderScreen({
                                         {cccdOcrMessage}
                                     </div>
                                 )}
+                                {(() => {
+                                    const front = customerInfo?.frontImage;
+                                    const back  = customerInfo?.backImage;
+                                    const extra = (Array.isArray(customerInfo?.photoGallery) ? customerInfo.photoGallery : [])
+                                        .filter(u => u && u !== front && u !== back);
+                                    const items = [
+                                        front && { url: front, label: 'Mặt trước' },
+                                        back  && { url: back,  label: 'Mặt sau' },
+                                        ...extra.map((u, i) => ({ url: u, label: `Ảnh ${i + 1}` })),
+                                    ].filter(Boolean);
+                                    if (!items.length) return null;
+                                    return (
+                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2, marginTop: 2 }}>
+                                            {items.map((img, idx) => (
+                                                <a key={idx} href={img.url} target="_blank" rel="noreferrer"
+                                                    style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                                                    <div style={{ width: 72, height: 44, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', boxShadow: '0 2px 6px rgba(15,23,42,.06)' }}>
+                                                        <img src={img.url} alt={img.label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                    </div>
+                                                    <span style={{ fontSize: 8, color: '#64748b', whiteSpace: 'nowrap', fontWeight: 600 }}>{img.label}</span>
+                                                </a>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         )}
                     </div>

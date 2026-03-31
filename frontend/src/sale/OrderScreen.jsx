@@ -1056,26 +1056,61 @@ export default function OrderScreen({
                                         {cccdOcrMessage}
                                     </div>
                                 )}
+                                {/* CCCD image slots - luon hien thi, click slot trong de mo camera */}
+                                <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2 }}>
+                                    {[
+                                        { key: 'frontImage', tabKey: 'ocr_front', label: 'CCCD mặt trước' },
+                                        { key: 'backImage',  tabKey: 'ocr_back',  label: 'CCCD mặt sau' },
+                                    ].map(({ key, tabKey, label }) => {
+                                        const url = customerInfo?.[key];
+                                        return (
+                                            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                                <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</span>
+                                                {url ? (
+                                                    <a href={url} target="_blank" rel="noreferrer"
+                                                        style={{ display: 'block', borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '16/9', boxShadow: '0 2px 8px rgba(15,23,42,.06)' }}>
+                                                        <img src={url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                    </a>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openCustomerCapture(tabKey)}
+                                                        style={{
+                                                            width: '100%', aspectRatio: '16/9',
+                                                            borderRadius: 12,
+                                                            border: '1.5px dashed #cbd5e1',
+                                                            background: 'rgba(248,250,252,.85)',
+                                                            color: '#94a3b8', fontSize: 9,
+                                                            cursor: 'pointer',
+                                                            display: 'flex', flexDirection: 'column',
+                                                            alignItems: 'center', justifyContent: 'center', gap: 5,
+                                                            transition: 'border-color .15s, background .15s',
+                                                        }}
+                                                    >
+                                                        <IoCameraOutline style={{ fontSize: 20, color: '#b0bec5' }} />
+                                                        <span style={{ fontWeight: 600 }}>Chụp / Chọn ảnh</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                {/* Extra gallery photos */}
                                 {(() => {
                                     const front = customerInfo?.frontImage;
                                     const back  = customerInfo?.backImage;
                                     const extra = (Array.isArray(customerInfo?.photoGallery) ? customerInfo.photoGallery : [])
                                         .filter(u => u && u !== front && u !== back);
-                                    const items = [
-                                        front && { url: front, label: 'Mặt trước' },
-                                        back  && { url: back,  label: 'Mặt sau' },
-                                        ...extra.map((u, i) => ({ url: u, label: `Ảnh ${i + 1}` })),
-                                    ].filter(Boolean);
-                                    if (!items.length) return null;
+                                    if (!extra.length) return null;
                                     return (
-                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2, marginTop: 2 }}>
-                                            {items.map((img, idx) => (
-                                                <a key={idx} href={img.url} target="_blank" rel="noreferrer"
+                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                                            {extra.map((url, idx) => (
+                                                <a key={idx} href={url} target="_blank" rel="noreferrer"
                                                     style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                                                    <div style={{ width: 72, height: 44, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', boxShadow: '0 2px 6px rgba(15,23,42,.06)' }}>
-                                                        <img src={img.url} alt={img.label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                    <div style={{ width: 56, height: 56, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9' }}>
+                                                        <img src={url} alt={`Ảnh ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                                     </div>
-                                                    <span style={{ fontSize: 8, color: '#64748b', whiteSpace: 'nowrap', fontWeight: 600 }}>{img.label}</span>
+                                                    <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>Ảnh {idx + 1}</span>
                                                 </a>
                                             ))}
                                         </div>

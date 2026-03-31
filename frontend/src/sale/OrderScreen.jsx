@@ -439,7 +439,6 @@ export default function OrderScreen({
                 };
             });
             setCustomerInfoOpen(true);
-            setCustomerCaptureOpen(false);
             setCccdOcrMessage(
                 side === 'back'
                     ? (rawText ? 'Đã điền ghi chú nhanh từ mặt sau.' : 'Đã OCR mặt sau, bạn kiểm tra lại ghi chú nhanh.')
@@ -489,7 +488,6 @@ export default function OrderScreen({
                 issueDate: parsed.issueDate || prev.issueDate,
             }));
             setCustomerInfoOpen(true);
-            setCustomerCaptureOpen(false);
             setCccdOcrMessage(`QR CCCD xong: ${parsed.appliedFields.join(', ')}.`);
         } catch (error) {
             setCccdOcrMessage(error.message || 'Không đọc được QR CCCD.');
@@ -1000,13 +998,13 @@ export default function OrderScreen({
                                         />
                                         <div style={{ position: 'absolute', left: 10, right: 10, bottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                                                <StarRating value={Number(customerInfo?.sao || 0)} onChange={(value) => updateCustomerInfo('sao', value)} size={40} />
+                                                <StarRating value={Number(customerInfo?.sao || 0)} onChange={(value) => updateCustomerInfo('sao', value)} size={30} />
                                                 <button
                                                     type="button"
                                                     onClick={() => updateCustomerInfo('favorite', !customerInfo?.favorite)}
                                                     style={{
-                                                        width: 40,
-                                                        height: 40,
+                                                        width: 30,
+                                                        height: 30,
                                                         borderRadius: '50%',
                                                         border: customerInfo?.favorite ? 'none' : '1px solid #dbe4ee',
                                                         background: customerInfo?.favorite ? 'linear-gradient(135deg,#ef4444,#f97316)' : 'rgba(255,255,255,.96)',
@@ -1021,7 +1019,7 @@ export default function OrderScreen({
                                                     title="Favourite"
                                                     aria-label="Favourite"
                                                 >
-                                                    {customerInfo?.favorite ? <IoHeart style={{ fontSize: 20 }} /> : <IoHeartOutline style={{ fontSize: 20 }} />}
+                                                    {customerInfo?.favorite ? <IoHeart style={{ fontSize: 15 }} /> : <IoHeartOutline style={{ fontSize: 15 }} />}
                                                 </button>
                                             </div>
                                         </div>

@@ -4,17 +4,20 @@ import { S } from './shared';
 
 const PHOTO_TAB = 'photo';
 const QR_TAB = 'qr';
-const OCR_TAB = 'ocr';
+const OCR_FRONT_TAB = 'ocr_front';
+const OCR_BACK_TAB = 'ocr_back';
 
 const TAB_OPTIONS = [
-    { key: PHOTO_TAB, label: 'Chụp hình', icon: IoCameraOutline },
-    { key: QR_TAB, label: 'QR', icon: IoQrCodeOutline },
-    { key: OCR_TAB, label: 'OCR', icon: IoDocumentTextOutline },
+    { key: PHOTO_TAB,     label: 'Chụp hình',       icon: IoCameraOutline },
+    { key: QR_TAB,        label: 'QR',               icon: IoQrCodeOutline },
+    { key: OCR_FRONT_TAB, label: 'CCCD mặt trước',   icon: IoDocumentTextOutline },
+    { key: OCR_BACK_TAB,  label: 'CCCD mặt sau',     icon: IoDocumentTextOutline },
 ];
 
-const PHOTO_HELPER_TEXT = 'Chụp nhiều ảnh nếu cần. Tất cả ảnh sẽ được giữ lại trong hồ sơ khách hàng.';
-const QR_HELPER_TEXT = 'Đưa mã QR vào giữa khung, hệ thống sẽ quét liên tục cho tới khi nhận được dữ liệu.';
-const OCR_HELPER_TEXT = 'Chụp CCCD trong khung rồi đọc OCR theo logic cũ để tự điền dữ liệu khách hàng.';
+const PHOTO_HELPER_TEXT    = 'Chụp nhiều ảnh nếu cần. Tất cả ảnh sẽ được giữ lại trong hồ sơ khách hàng.';
+const QR_HELPER_TEXT       = 'Đưa mã QR vào giữa khung, hệ thống sẽ quét liên tục cho tới khi nhận được dữ liệu.';
+const OCR_FRONT_HELPER_TEXT = 'Chụp mặt trước CCCD trong khung — OCR sẽ tự điền tên, ngày sinh, địa chỉ.';
+const OCR_BACK_HELPER_TEXT  = 'Chụp mặt sau CCCD trong khung — OCR sẽ bổ sung thông tin nơi thường trú.';
 
 function captureVideoFrame(video, { aspectRatio = null } = {}) {
     if (!video?.videoWidth || !video?.videoHeight) return null;
@@ -91,8 +94,6 @@ export default function CustomerCaptureModal({
     message,
     qrLoading,
     ocrLoading,
-    side,
-    onSideChange,
     onClose,
     onQrDetected,
     onQrPickFile,
@@ -223,11 +224,19 @@ export default function CustomerCaptureModal({
     if (!open) return null;
 
     const currentTab = TAB_OPTIONS.some((option) => option.key === activeTab) ? activeTab : PHOTO_TAB;
-    const previewAspect = currentTab === QR_TAB ? '1 / 1' : currentTab === OCR_TAB ? '16 / 9' : '4 / 3';
-    const loading = currentTab === QR_TAB ? qrLoading : currentTab === OCR_TAB ? ocrLoading : false;
+    const isOcrTab = currentTab === OCR_FRONT_TAB || currentTab === OCR_BACK_TAB;
+    const derivedSide = currentTab === OCR_FRONT_TAB ? 'front' : 'back';
+    const previewAspect = currentTab === QR_TAB ? '1 / 1' : isOcrTab ? '16 / 9' : '4 / 3';
+    const loading = currentTab === QR_TAB ? qrLoading : isOcrTab ? ocrLoading : false;
     const helperMessage = loading
         ? currentTab === QR_TAB ? 'Đang parse QR...' : 'Đang đọc CCCD...'
-        : message || (currentTab === PHOTO_TAB ? PHOTO_HELPER_TEXT : currentTab === QR_TAB ? QR_HELPER_TEXT : OCR_HELPER_TEXT);
+        : message || (currentTab === PHOTO_TAB
+            ? PHOTO_HELPER_TEXT
+            : currentTab === QR_TAB
+                ? QR_HELPER_TEXT
+                : currentTab === OCR_FRONT_TAB
+                    ? OCR_FRONT_HELPER_TEXT
+                    : OCR_BACK_HELPER_TEXT);
     const helperColor = resolveHelperColor(message, loading);
 
     const handlePhotoCapture = async () => {
@@ -262,7 +271,7 @@ export default function CustomerCaptureModal({
             imageBase64: payload.imageBase64,
             mimeType: payload.mimeType,
             fileName: 'cccd-camera.jpg',
-            side,
+            side: derivedSide,
         });
     };
 
@@ -286,7 +295,7 @@ export default function CustomerCaptureModal({
                 </div>
 
                 <div style={{ padding: '0 16px 16px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 12 }}>
                         {TAB_OPTIONS.map((option) => {
                             const Icon = option.icon;
                             const active = option.key === currentTab;
@@ -298,52 +307,27 @@ export default function CustomerCaptureModal({
                                     style={{
                                         border: 'none',
                                         borderRadius: 16,
-                                        minHeight: 44,
+                                        minHeight: 52,
                                         background: active ? 'linear-gradient(135deg,#0f766e,#14b8a6)' : 'rgba(255,255,255,.08)',
                                         color: 'white',
                                         fontSize: 11,
                                         fontWeight: 800,
                                         cursor: 'pointer',
-                                        display: 'inline-flex',
+                                        display: 'flex',
+                                        flexDirection: 'column',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        gap: 6,
+                                        gap: 4,
+                                        padding: '8px 6px',
                                         boxShadow: active ? '0 10px 22px rgba(20,184,166,.20)' : 'none',
                                     }}
                                 >
-                                    <Icon style={{ fontSize: 16 }} />
-                                    <span>{option.label}</span>
+                                    <Icon style={{ fontSize: 18, flexShrink: 0 }} />
+                                    <span style={{ lineHeight: 1.3, textAlign: 'center' }}>{option.label}</span>
                                 </button>
                             );
                         })}
                     </div>
-
-                    {currentTab === OCR_TAB ? (
-                        <div style={{ display: 'inline-flex', borderRadius: 999, padding: 4, gap: 4, background: 'rgba(255,255,255,.08)', marginBottom: 12 }}>
-                            {[
-                                { key: 'front', label: 'Mặt trước' },
-                                { key: 'back', label: 'Mặt sau' },
-                            ].map((option) => (
-                                <button
-                                    key={option.key}
-                                    type="button"
-                                    onClick={() => onSideChange?.(option.key)}
-                                    style={{
-                                        border: 'none',
-                                        borderRadius: 999,
-                                        padding: '8px 12px',
-                                        background: side === option.key ? 'linear-gradient(135deg,#0f766e,#14b8a6)' : 'transparent',
-                                        color: 'white',
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
-                        </div>
-                    ) : null}
 
                     <div style={{ position: 'relative', borderRadius: 24, overflow: 'hidden', background: '#020617', aspectRatio: previewAspect }}>
                         <video
@@ -373,9 +357,9 @@ export default function CustomerCaptureModal({
                             <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16, padding: '10px 12px', borderRadius: 16, background: 'rgba(15,23,42,.58)', color: '#f8fafc', fontSize: 11, lineHeight: 1.45, textAlign: 'center', backdropFilter: 'blur(10px)' }}>
                                 {currentTab === PHOTO_TAB
                                     ? 'Chụp nhiều ảnh liên tiếp nếu cần. Mọi ảnh chụp sẽ được giữ lại trong hồ sơ khách.'
-                                    : side === 'back'
-                                        ? 'Giữ mặt sau CCCD thẳng khung rồi bấm `Đọc ngay` để OCR nội dung.'
-                                        : 'Giữ mặt trước CCCD thẳng khung rồi bấm `Đọc ngay` để OCR và điền thông tin.'}
+                                    : currentTab === OCR_BACK_TAB
+                                        ? 'Giữ mặt sau CCCD thẳng khung rồi bấm “Đọc ngay” để OCR nội dung.'
+                                        : 'Giữ mặt trước CCCD thẳng khung rồi bấm “Đọc ngay” để OCR và điền thông tin.'}
                             </div>
                         )}
 
@@ -511,7 +495,7 @@ export default function CustomerCaptureModal({
                         onChange={(event) => {
                             const file = event.target.files?.[0];
                             event.target.value = '';
-                            if (file) onOcrPickFile?.(file, side);
+                            if (file) onOcrPickFile?.(file, derivedSide);
                         }}
                     />
                 </div>

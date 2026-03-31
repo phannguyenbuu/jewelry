@@ -45,6 +45,7 @@ const genRepairId = () => {
 };
 const SAVED_SALE_KEY = 'sale_pos_saved_transactions_v1';
 const createEmptyCustomerInfo = () => ({
+    id: '',
     name: '',
     cccd: '',
     oldId: '',
@@ -57,17 +58,24 @@ const createEmptyCustomerInfo = () => ({
     issueDate: '',
     address: '',
     phone: '',
+    bankCode: '',
+    bankName: '',
+    bankNo: '',
     sao: 0,
+    favorite: false,
+    photoGallery: [],
     backText: '',
     frontImage: '',
     backImage: '',
 });
 const hasCustomerInfo = (info) => Object.entries(info || {}).some(([key, value]) => {
     if (key === 'sao') return Number(value || 0) > 0;
+    if (key === 'favorite') return Boolean(value);
+    if (key === 'photoGallery') return Array.isArray(value) && value.length > 0;
     return String(value || '').trim();
 });
 
-/* â”€â”€ default rate data (fallback khi API chÆ°a cÃ³) â”€â”€ */
+/* Default rate data (fallback khi API chưa có) */
 const DEFAULT_RATES = {
     gold: { 'SJC': [85500000, 83000000], '1c': [8550000, 8300000], '0.5c': [4275000, 4150000] },
     money: { 'USD': [25400, 25000], 'EUR': [27500, 27000] },

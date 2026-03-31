@@ -449,7 +449,9 @@ def bootstrap_database():
     _ensure_quay_nho_thu_ngan_column()
     _ensure_thu_ngan_so_quy_detail_columns()
     _ensure_khach_hang_sao_column()
+    _ensure_khach_hang_favorite_column()
     _ensure_khach_hang_cccd_image_columns()
+    _ensure_khach_hang_photo_gallery_column()
     _migrate_thu_ngan_so_quy_amount_scale()
     if Kho.query.count() == 0:
         for k in SEED_KHO:

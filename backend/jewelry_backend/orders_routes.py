@@ -40,6 +40,7 @@ def don_json(d):
 
 
 def khach_hang_json(obj):
+    photo_gallery = obj.anh_bo_suu_tap if isinstance(obj.anh_bo_suu_tap, list) else []
     return {
         'id': obj.id,
         'ten': obj.ten or '',
@@ -55,9 +56,14 @@ def khach_hang_json(obj):
         'ngay_cap_cccd': obj.ngay_cap_cccd or '',
         'han_the': obj.han_the or '',
         'sao': obj.sao or 0,
+        'yeu_thich': bool(obj.yeu_thich or 0),
+        'favorite': bool(obj.yeu_thich or 0),
         'ocr_mat_sau': obj.ocr_mat_sau or '',
         'anh_mat_truoc': obj.anh_mat_truoc or '',
         'anh_mat_sau': obj.anh_mat_sau or '',
+        'anh_bo_suu_tap': photo_gallery,
+        'photo_gallery': photo_gallery,
+        'photoGallery': photo_gallery,
         'nguoi_tao': obj.nguoi_tao or '',
         'ngay_tao': obj.ngay_tao or '',
         'cap_nhat_luc': obj.cap_nhat_luc or '',
@@ -80,6 +86,36 @@ def _parse_customer_rating(value):
     except (TypeError, ValueError):
         return 0
     return max(0, min(5, parsed))
+
+
+def _parse_customer_favorite(value):
+    if isinstance(value, bool):
+        return 1 if value else 0
+    return 1 if str(value or '').strip().lower() in {'1', 'true', 'yes', 'y', 'on'} else 0
+
+
+def _parse_customer_photo_gallery(value):
+    raw_items = value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raw_items = []
+        else:
+            try:
+                raw_items = json.loads(stripped)
+            except ValueError:
+                raw_items = [value]
+    if not isinstance(raw_items, list):
+        raw_items = [raw_items]
+    cleaned = []
+    seen = set()
+    for item in raw_items:
+        text = _clean_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned[:24]
 
 
 def _find_customer_duplicates(raw_id, ten, cccd, so_dien_thoai):
@@ -124,7 +160,7 @@ def _duplicate_match_priority(match):
 
 @app.route('/api/khach_hang', methods=['GET'])
 def get_khach_hang():
-    rows = KhachHang.query.order_by(KhachHang.id.desc()).all()
+    rows = KhachHang.query.order_by(KhachHang.yeu_thich.desc(), KhachHang.id.desc()).all()
     query = _ascii_fold(request.args.get('q'))
     if query:
         rows = [
@@ -191,11 +227,18 @@ def save_khach_hang():
     obj.ngay_cap_cccd = _clean_text(d.get('ngay_cap_cccd') or d.get('issue_date'))
     obj.han_the = _clean_text(d.get('han_the') or d.get('expiry'))
     obj.sao = _parse_customer_rating(d.get('sao'))
+    obj.yeu_thich = _parse_customer_favorite(d.get('yeu_thich') if 'yeu_thich' in d else d.get('favorite') if 'favorite' in d else d.get('favourite'))
     obj.ocr_mat_sau = _clean_text(d.get('ocr_mat_sau') or d.get('back_text'))
     if any(key in d for key in ('anh_mat_truoc', 'front_image', 'frontImage')):
         obj.anh_mat_truoc = _clean_text(d.get('anh_mat_truoc') or d.get('front_image') or d.get('frontImage'))
     if any(key in d for key in ('anh_mat_sau', 'back_image', 'backImage')):
         obj.anh_mat_sau = _clean_text(d.get('anh_mat_sau') or d.get('back_image') or d.get('backImage'))
+    if any(key in d for key in ('anh_bo_suu_tap', 'photo_gallery', 'photoGallery')):
+        obj.anh_bo_suu_tap = _parse_customer_photo_gallery(
+            d.get('anh_bo_suu_tap')
+            if 'anh_bo_suu_tap' in d else d.get('photo_gallery')
+            if 'photo_gallery' in d else d.get('photoGallery')
+        )
     obj.nguoi_tao = _clean_text(d.get('nguoi_tao')) or obj.nguoi_tao or 'POS Mobile'
     obj.cap_nhat_luc = timestamp
 

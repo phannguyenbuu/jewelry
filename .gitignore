@@ -6,6 +6,8 @@ __pycache__/
 *.sqlite
 *.sqlite3
 *.log
+agent/*.log
+agent/__pycache__/
 
 instance/
 backend/instance/
@@ -13,5 +15,6 @@ backend/uploads/
 
 frontend/node_modules/
 frontend/dist/
+temp_script.bat
 
 .DS_Store

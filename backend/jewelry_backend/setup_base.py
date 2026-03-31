@@ -243,6 +243,18 @@ def _ensure_khach_hang_sao_column():
     db.session.commit()
 
 
+def _ensure_khach_hang_favorite_column():
+    table_name = KhachHang.__table__.name
+    inspector = inspect(db.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    column_names = {col['name'] for col in inspector.get_columns(table_name)}
+    if 'yeu_thich' in column_names:
+        return
+    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN yeu_thich INTEGER DEFAULT 0'))
+    db.session.commit()
+
+
 def _ensure_khach_hang_cccd_image_columns():
     table_name = KhachHang.__table__.name
     inspector = inspect(db.engine)
@@ -258,6 +270,18 @@ def _ensure_khach_hang_cccd_image_columns():
         db.session.execute(text(sql))
     if alter_statements:
         db.session.commit()
+
+
+def _ensure_khach_hang_photo_gallery_column():
+    table_name = KhachHang.__table__.name
+    inspector = inspect(db.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    column_names = {col['name'] for col in inspector.get_columns(table_name)}
+    if 'anh_bo_suu_tap' in column_names:
+        return
+    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN anh_bo_suu_tap JSON'))
+    db.session.commit()
 
 
 def _parse_int_id(value):

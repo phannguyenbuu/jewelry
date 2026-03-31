@@ -350,7 +350,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                 </button>
             )}
 
-            {/* Loáº¡i giao dá»‹ch */}
+            {/* Loại giao dịch */}
             <div style={S.toggleRow}>
                 {txOptions.map(t => (
                     <button key={t.key} style={S.toggleOpt(line.tx === t.key, t.color)}
@@ -390,7 +390,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-                {/* Danh má»¥c */}
+                {/* Danh mục */}
                 {!isTrade && (
                     <div>
                         <span style={S.label}>Phân loại</span>

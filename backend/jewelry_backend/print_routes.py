@@ -18,6 +18,28 @@ def _print_device_identity(data):
     return f'name:{printer_name.lower()}|share:{share_name}|system:{system_name}'
 
 
+def _print_agent_matches(agent, machine_name='', device_name=''):
+    machine_key = _clean_text(machine_name).lower()
+    device_key = _clean_text(device_name).lower()
+    if machine_key and _clean_text(agent.machine_name).lower() == machine_key:
+        return True
+    if device_key and _clean_text(agent.device_name).lower() == device_key:
+        return True
+    return False
+
+
+def _print_device_matches(device, printer_name='', unc_path=''):
+    printer_key = _clean_text(printer_name).lower()
+    unc_key = _clean_text(unc_path).lower()
+    device_keys = {
+        _clean_text(device.printer_name).lower(),
+        _clean_text(device.share_name).lower(),
+        _clean_text(device.system_name).lower(),
+        _clean_text(device.unc_path).lower(),
+    }
+    return (printer_key and printer_key in device_keys) or (unc_key and unc_key in device_keys)
+
+
 def _apply_print_device(agent, row, timestamp, existing=None):
     device = existing or PrintDevice(agent_id=agent.id)
     device.printer_name = _clean_text(row.get('printer_name'))
@@ -64,6 +86,7 @@ def _ensure_print_agent(d, auto_create=False):
 
 def _resolve_print_agent_and_printer(d):
     agent = None
+    all_agents = PrintAgent.query.order_by(PrintAgent.id.desc()).all()
     agent_id = d.get('agent_id')
     if agent_id not in (None, ''):
         try:
@@ -75,16 +98,26 @@ def _resolve_print_agent_and_printer(d):
         if agent_key:
             agent = PrintAgent.query.filter_by(agent_key=agent_key).first()
     if agent is None:
-        all_agents = PrintAgent.query.order_by(PrintAgent.id.desc()).all()
+        matched_agents = [
+            row for row in all_agents
+            if _print_agent_matches(
+                row,
+                machine_name=d.get('machine_name') or d.get('host_name'),
+                device_name=d.get('device_name'),
+            )
+        ]
+        agent = next((row for row in matched_agents if _print_agent_is_online(row)), None) or (matched_agents[0] if matched_agents else None)
+    if agent is None:
         agent = next((row for row in all_agents if _print_agent_is_online(row)), None) or (all_agents[0] if all_agents else None)
     if agent is None:
         return None, None, jsonify({'error': 'Chua co print agent nao san sang'}), 404
 
     printer_name = _clean_text(d.get('printer_name'))
+    unc_path = _clean_text(d.get('unc_path'))
     devices = PrintDevice.query.filter_by(agent_id=agent.id).order_by(PrintDevice.is_default.desc(), PrintDevice.printer_name.asc(), PrintDevice.id.asc()).all()
     printer = None
-    if printer_name:
-        printer = next((device for device in devices if _clean_text(device.printer_name) == printer_name), None)
+    if printer_name or unc_path:
+        printer = next((device for device in devices if _print_device_matches(device, printer_name=printer_name, unc_path=unc_path)), None)
     if printer is None and devices:
         printer = devices[0]
     if printer is None:

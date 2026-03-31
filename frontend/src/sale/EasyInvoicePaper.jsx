@@ -130,60 +130,60 @@ export default function EasyInvoicePaper({
                             <div style={{ fontSize: 11, marginTop: 4 }}>5800884170</div>
                         </div>
                         <div style={{ textAlign: 'center' }}>
-                            <div style={{ fontSize: 28, fontWeight: 900, textTransform: 'uppercase' }}>Hoa don ban hang</div>
-                            <div style={{ marginTop: 2, fontSize: 16, fontWeight: 700 }}>(KHOI TAO TU MAY TINH TIEN)</div>
-                            <div style={{ marginTop: 6, fontSize: 14, fontStyle: 'italic', color: '#475569' }}>(Ban the hien cua hoa don dien tu)</div>
+                            <div style={{ fontSize: 28, fontWeight: 900, textTransform: 'uppercase' }}>Hóa đơn bán hàng</div>
+                            <div style={{ marginTop: 2, fontSize: 16, fontWeight: 700 }}>(KHỞI TẠO TỪ MÁY TÍNH TIỀN)</div>
+                            <div style={{ marginTop: 6, fontSize: 14, fontStyle: 'italic', color: '#475569' }}>(Bản thể hiện của hóa đơn điện tử)</div>
                             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap', fontSize: 15 }}>
-                                <span>Ngay</span>
+                                <span>Ngày</span>
                                 <div style={{ ...UI.fieldBox, minWidth: 40, justifyContent: 'center' }}>
                                     <input style={{ ...UI.fieldInput, textAlign: 'center' }} type="text" value={issueDay} onChange={(event) => onInvoiceFieldChange('arisingDate', `${event.target.value}/${issueMonth}/${issueYear}`)} />
                                 </div>
-                                <span>thang</span>
+                                <span>tháng</span>
                                 <div style={{ ...UI.fieldBox, minWidth: 40, justifyContent: 'center' }}>
                                     <input style={{ ...UI.fieldInput, textAlign: 'center' }} type="text" value={issueMonth} onChange={(event) => onInvoiceFieldChange('arisingDate', `${issueDay}/${event.target.value}/${issueYear}`)} />
                                 </div>
-                                <span>nam</span>
+                                <span>năm</span>
                                 <div style={{ ...UI.fieldBox, minWidth: 64, justifyContent: 'center' }}>
                                     <input style={{ ...UI.fieldInput, textAlign: 'center' }} type="text" value={issueYear} onChange={(event) => onInvoiceFieldChange('arisingDate', `${issueDay}/${issueMonth}/${event.target.value}`)} />
                                 </div>
                             </div>
                         </div>
                         <div style={{ borderRadius: 18, border: '1px solid rgba(120,53,15,.22)', background: 'rgba(255,255,255,.7)', padding: 12, display: 'grid', gap: 8 }}>
-                            <div style={{ fontSize: 14 }}><span style={{ fontWeight: 700 }}>Ky hieu</span><span style={UI.subEn}>(Serial)</span>: <b>{invoice.serial || SELLER.serial}</b></div>
-                            <div style={{ fontSize: 14 }}><span style={{ fontWeight: 700 }}>So</span><span style={UI.subEn}>(No.)</span>: <b>{invoice.number || 'Se sinh khi phat hanh'}</b></div>
-                            <div style={{ fontSize: 12, lineHeight: 1.5, color: '#64748b' }}>Mau nay chi de sua va kiem truoc khi goi API phat hanh.</div>
+                            <div style={{ fontSize: 14 }}><span style={{ fontWeight: 700 }}>Ký hiệu</span><span style={UI.subEn}>(Serial)</span>: <b>{invoice.serial || SELLER.serial}</b></div>
+                            <div style={{ fontSize: 14 }}><span style={{ fontWeight: 700 }}>Số</span><span style={UI.subEn}>(No.)</span>: <b>{invoice.number || 'Sẽ sinh khi phát hành'}</b></div>
+                            <div style={{ fontSize: 12, lineHeight: 1.5, color: '#64748b' }}>Mẫu này chỉ để sửa và kiểm trước khi gọi API phát hành.</div>
                         </div>
                     </div>
 
                     <div style={UI.divider} />
                     <div style={{ display: 'grid', gap: 6, fontSize: 15 }}>
-                        <div><span>Don vi ban hang</span><span style={UI.subEn}>(Seller)</span>: <b>{SELLER.name}</b></div>
-                        <div><span>Ma so thue</span><span style={UI.subEn}>(Tax code)</span>: <b style={{ letterSpacing: 2 }}>{SELLER.taxCode}</b></div>
-                        <div><span>Dia chi</span><span style={UI.subEn}>(Address)</span>: <b>{SELLER.address}</b></div>
+                        <div><span>Đơn vị bán hàng</span><span style={UI.subEn}>(Seller)</span>: <b>{SELLER.name}</b></div>
+                        <div><span>Mã số thuế</span><span style={UI.subEn}>(Tax code)</span>: <b style={{ letterSpacing: 2 }}>{SELLER.taxCode}</b></div>
+                        <div><span>Địa chỉ</span><span style={UI.subEn}>(Address)</span>: <b>{SELLER.address}</b></div>
                     </div>
 
                     <div style={UI.divider} />
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1.1fr .9fr', gap: 12 }}>
-                        <PaperField label="Ho ten nguoi mua hang" en="Buyer" value={customer.name || ''} onChange={(event) => onCustomerFieldChange('name', event.target.value)} />
-                        <PaperField label="Ten don vi" en="Company" value={customer.company || ''} onChange={(event) => onCustomerFieldChange('company', event.target.value)} />
+                        <PaperField label="Họ tên người mua hàng" en="Buyer" value={customer.name || ''} onChange={(event) => onCustomerFieldChange('name', event.target.value)} />
+                        <PaperField label="Tên đơn vị" en="Company" value={customer.company || ''} onChange={(event) => onCustomerFieldChange('company', event.target.value)} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                        <PaperField label="Ma so thue" en="Tax code" value={customer.taxCode || ''} onChange={(event) => onCustomerFieldChange('taxCode', event.target.value)} />
-                        <PaperField label="Dien thoai" en="Tel" value={customer.phone || ''} onChange={(event) => onCustomerFieldChange('phone', event.target.value)} />
+                        <PaperField label="Mã số thuế" en="Tax code" value={customer.taxCode || ''} onChange={(event) => onCustomerFieldChange('taxCode', event.target.value)} />
+                        <PaperField label="Điện thoại" en="Tel" value={customer.phone || ''} onChange={(event) => onCustomerFieldChange('phone', event.target.value)} />
                         <div style={compact ? undefined : { gridColumn: '1 / -1' }}>
-                            <PaperField label="Dia chi" en="Address" value={customer.address || ''} onChange={(event) => onCustomerFieldChange('address', event.target.value)} />
+                            <PaperField label="Địa chỉ" en="Address" value={customer.address || ''} onChange={(event) => onCustomerFieldChange('address', event.target.value)} />
                         </div>
-                        <PaperField label="Can cuoc cong dan" en="Citizen ID" value={customer.cccd || ''} onChange={(event) => onCustomerFieldChange('cccd', event.target.value)} />
-                        <PaperField label="Ma khach" en="Code" value={customer.code || ''} onChange={(event) => onCustomerFieldChange('code', event.target.value)} />
-                        <PaperField label="Hinh thuc thanh toan" en="Payment method" value={invoice.paymentMethod || ''} onChange={(event) => onInvoiceFieldChange('paymentMethod', event.target.value)} />
-                        <PaperField label="Don vi tien te" en="Currency" value={invoice.currencyUnit || 'VND'} onChange={(event) => onInvoiceFieldChange('currencyUnit', event.target.value)} />
+                        <PaperField label="Căn cước công dân" en="Citizen ID" value={customer.cccd || ''} onChange={(event) => onCustomerFieldChange('cccd', event.target.value)} />
+                        <PaperField label="Mã khách" en="Code" value={customer.code || ''} onChange={(event) => onCustomerFieldChange('code', event.target.value)} />
+                        <PaperField label="Hình thức thanh toán" en="Payment method" value={invoice.paymentMethod || ''} onChange={(event) => onInvoiceFieldChange('paymentMethod', event.target.value)} />
+                        <PaperField label="Đơn vị tiền tệ" en="Currency" value={invoice.currencyUnit || 'VND'} onChange={(event) => onInvoiceFieldChange('currencyUnit', event.target.value)} />
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: 13, color: '#7c2d12', fontWeight: 700 }}>Cac input da duoc dua len truc tiep tren mau hoa don.</div>
+                        <div style={{ fontSize: 13, color: '#7c2d12', fontWeight: 700 }}>Các input đã được đưa lên trực tiếp trên mẫu hóa đơn.</div>
                         <button type="button" onClick={onAddManualItem} style={{ ...S.pillBtn('linear-gradient(135deg,#b45309,#c2410c)', '#ffffff'), minHeight: 36, height: 36, padding: '0 14px', boxShadow: '0 8px 18px rgba(120,53,15,.18)' }}>
                             <IoAddOutline />
-                            <span>Them dong</span>
+                            <span>Thêm dòng</span>
                         </button>
                     </div>
 
@@ -208,11 +208,11 @@ export default function EasyInvoicePaper({
                             <thead>
                                 <tr style={{ background: 'rgba(120,53,15,.08)' }}>
                                     <th style={{ ...UI.th, width: '7%' }}>STT<br /><i style={UI.subEn}>(No.)</i></th>
-                                    <th style={{ ...UI.th, width: '39%' }}>Ten hang hoa, dich vu<br /><i style={UI.subEn}>(Name)</i></th>
-                                    <th style={{ ...UI.th, width: '12%' }}>Don vi tinh<br /><i style={UI.subEn}>(Unit)</i></th>
-                                    <th style={{ ...UI.th, width: '12%' }}>So luong<br /><i style={UI.subEn}>(Qty)</i></th>
-                                    <th style={{ ...UI.th, width: '14%' }}>Don gia / Cong<br /><i style={UI.subEn}>(Price / Labor)</i></th>
-                                    <th style={{ ...UI.th, width: '16%' }}>Thanh tien<br /><i style={UI.subEn}>(Amount)</i></th>
+                                    <th style={{ ...UI.th, width: '39%' }}>Tên hàng hóa, dịch vụ<br /><i style={UI.subEn}>(Name)</i></th>
+                                    <th style={{ ...UI.th, width: '12%' }}>Đơn vị tính<br /><i style={UI.subEn}>(Unit)</i></th>
+                                    <th style={{ ...UI.th, width: '12%' }}>Số lượng<br /><i style={UI.subEn}>(Qty)</i></th>
+                                    <th style={{ ...UI.th, width: '14%' }}>Đơn giá / Công<br /><i style={UI.subEn}>(Price / Labor)</i></th>
+                                    <th style={{ ...UI.th, width: '16%' }}>Thành tiền<br /><i style={UI.subEn}>(Amount)</i></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -230,34 +230,34 @@ export default function EasyInvoicePaper({
                                                 </div>
                                             ) : <div style={{ minHeight: 92 }} />}
                                         </td>
-                                        <td style={UI.td}>{item ? <div style={{ display: 'grid', gap: 8 }}><CellField label="Ma hang" value={item.code || ''} onChange={(event) => onItemFieldChange(item.key, 'code', event.target.value)} /><CellField label="Ten hang" value={item.name || ''} onChange={(event) => onItemFieldChange(item.key, 'name', event.target.value)} /></div> : <div style={{ minHeight: 92 }} />}</td>
-                                        <td style={UI.td}>{item ? <CellField label="Don vi" value={item.unit || 'chi'} onChange={(event) => onItemFieldChange(item.key, 'unit', event.target.value)} align="center" /> : <div style={{ minHeight: 92 }} />}</td>
-                                        <td style={UI.td}>{item ? <CellField label="So luong" value={item.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" /> : <div style={{ minHeight: 92 }} />}</td>
-                                        <td style={UI.td}>{item ? <div style={{ display: 'grid', gap: 8 }}><CellField label="Gia thanh phan" value={item.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" /><CellField label="Tien cong" value={item.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" /></div> : <div style={{ minHeight: 92 }} />}</td>
-                                        <td style={UI.td}>{item ? <div><span style={UI.cellLabel}>Thanh tien</span><input style={{ ...UI.cellInput, textAlign: 'right', background: '#f8fafc', color: '#166534', fontWeight: 800 }} type="text" value={fmtMoney(item.total || 0)} readOnly /></div> : <div style={{ minHeight: 92 }} />}</td>
+                                        <td style={UI.td}>{item ? <div style={{ display: 'grid', gap: 8 }}><CellField label="Mã hàng" value={item.code || ''} onChange={(event) => onItemFieldChange(item.key, 'code', event.target.value)} /><CellField label="Tên hàng" value={item.name || ''} onChange={(event) => onItemFieldChange(item.key, 'name', event.target.value)} /></div> : <div style={{ minHeight: 92 }} />}</td>
+                                        <td style={UI.td}>{item ? <CellField label="Đơn vị" value={item.unit || 'chi'} onChange={(event) => onItemFieldChange(item.key, 'unit', event.target.value)} align="center" /> : <div style={{ minHeight: 92 }} />}</td>
+                                        <td style={UI.td}>{item ? <CellField label="Số lượng" value={item.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" /> : <div style={{ minHeight: 92 }} />}</td>
+                                        <td style={UI.td}>{item ? <div style={{ display: 'grid', gap: 8 }}><CellField label="Giá thành phần" value={item.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" /><CellField label="Tiền công" value={item.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" /></div> : <div style={{ minHeight: 92 }} />}</td>
+                                        <td style={UI.td}>{item ? <div><span style={UI.cellLabel}>Thành tiền</span><input style={{ ...UI.cellInput, textAlign: 'right', background: '#f8fafc', color: '#166534', fontWeight: 800 }} type="text" value={fmtMoney(item.total || 0)} readOnly /></div> : <div style={{ minHeight: 92 }} />}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
 
-                    <PaperField label="Ghi chu" en="Note" value={invoice.note || ''} onChange={(event) => onInvoiceFieldChange('note', event.target.value)} />
+                    <PaperField label="Ghi chú" en="Note" value={invoice.note || ''} onChange={(event) => onInvoiceFieldChange('note', event.target.value)} />
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 220px', gap: 12, alignItems: 'center' }}>
-                        <div style={{ fontSize: 15, lineHeight: 1.6 }}><span style={{ fontWeight: 700 }}>So tien viet bang chu</span><span style={UI.subEn}>(Amount in words)</span>: <b>{moneyToWords(total)}</b></div>
+                        <div style={{ fontSize: 15, lineHeight: 1.6 }}><span style={{ fontWeight: 700 }}>Số tiền viết bằng chữ</span><span style={UI.subEn}>(Amount in words)</span>: <b>{moneyToWords(total)}</b></div>
                         <div style={{ borderRadius: 16, border: '1px solid rgba(22,163,74,.22)', background: 'rgba(240,253,244,.85)', padding: '12px 14px', textAlign: 'right' }}>
-                            <div style={{ fontSize: 11, color: '#166534', textTransform: 'uppercase', fontWeight: 800 }}>Tong thanh toan</div>
+                            <div style={{ fontSize: 11, color: '#166534', textTransform: 'uppercase', fontWeight: 800 }}>Tổng thanh toán</div>
                             <div data-sale-amount="true" style={{ marginTop: 4, fontSize: 28, lineHeight: 1, fontWeight: 900, color: '#166534' }}>{fmtMoney(total)}</div>
                         </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 1fr', gap: 24, paddingTop: 10 }}>
-                        <div style={{ textAlign: 'center' }}><div style={{ fontSize: 15, fontWeight: 700 }}>Nguoi mua hang <span style={UI.subEn}>(Buyer)</span></div><div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>(Ky, ghi ro ho ten)</div><div style={{ minHeight: 92 }} /></div>
-                        <div style={{ textAlign: 'center' }}><div style={{ fontSize: 15, fontWeight: 700 }}>Nguoi ban hang <span style={UI.subEn}>(Seller)</span></div><div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>(Ky, ghi ro ho ten)</div><div style={{ minHeight: 92 }} /></div>
+                        <div style={{ textAlign: 'center' }}><div style={{ fontSize: 15, fontWeight: 700 }}>Người mua hàng <span style={UI.subEn}>(Buyer)</span></div><div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>(Ký, ghi rõ họ tên)</div><div style={{ minHeight: 92 }} /></div>
+                        <div style={{ textAlign: 'center' }}><div style={{ fontSize: 15, fontWeight: 700 }}>Người bán hàng <span style={UI.subEn}>(Seller)</span></div><div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>(Ký, ghi rõ họ tên)</div><div style={{ minHeight: 92 }} /></div>
                     </div>
 
                     <div style={{ display: 'grid', gap: 6, paddingTop: 6, borderTop: '1px solid rgba(120,53,15,.18)' }}>
-                        <div style={{ fontSize: 13 }}><span style={{ fontWeight: 700 }}>Ma cua co quan thue</span><span style={UI.subEn}>(Tax authority code)</span>: <b>Se co sau khi phat hanh</b></div>
-                        <div style={{ fontSize: 13 }}><span style={{ fontWeight: 700 }}>Trang tra cuu</span><span style={UI.subEn}>(Portal)</span>: <u style={{ color: '#2563eb' }}>http://5800884170hd.easyinvoice.com.vn</u></div>
+                        <div style={{ fontSize: 13 }}><span style={{ fontWeight: 700 }}>Mã của cơ quan thuế</span><span style={UI.subEn}>(Tax authority code)</span>: <b>Sẽ có sau khi phát hành</b></div>
+                        <div style={{ fontSize: 13 }}><span style={{ fontWeight: 700 }}>Trang tra cứu</span><span style={UI.subEn}>(Portal)</span>: <u style={{ color: '#2563eb' }}>http://5800884170hd.easyinvoice.com.vn</u></div>
                     </div>
                 </div>
             </div>

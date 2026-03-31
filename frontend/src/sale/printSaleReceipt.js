@@ -422,26 +422,10 @@ const getLineMetrics = (line, rates) => {
     };
 };
 
-const buildRowFormulaLine = (row) => {
-    const parts = [];
-    if (row.qty && row.price) {
-        parts.push(row.qty, '*', row.price);
-    }
-    if (row.labor) {
-        if (parts.length) parts.push('+');
-        parts.push(row.labor);
-    }
-    const expression = parts.join('');
-    if (!expression) {
-        return `${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`;
-    }
-    return `${expression}=${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`;
-};
-
-const buildFormulaLines = (rows) => rows.map(buildRowFormulaLine);
-
 const buildReceiptRows = (lines, rates) => {
     const rows = [];
+    const oldRows = [];
+    const newRows = [];
     const summary = {
         newGold: 0,
         oldGold: 0,
@@ -449,10 +433,11 @@ const buildReceiptRows = (lines, rates) => {
         rowCount: 0,
     };
     const txSet = new Set();
+    let hasTrade = false;
 
-    const pushRow = ({ key, code, qtyValue, laborValue, priceValue, amountValue, tx }) => {
+    const pushRow = ({ key, code, qtyValue, laborValue, priceValue, amountValue, tx, section }) => {
         const normalizedQty = Math.max(0, Number(qtyValue || 0));
-        rows.push({
+        const row = {
             key,
             code: safeText(code),
             qtyValue: normalizedQty,
@@ -461,7 +446,14 @@ const buildReceiptRows = (lines, rates) => {
             price: priceValue > 0 ? moneyText(priceValue) : '',
             amount: Math.round(amountValue || 0),
             tx,
-        });
+            section,
+        };
+        rows.push(row);
+        if (section === 'old') {
+            oldRows.push(row);
+        } else {
+            newRows.push(row);
+        }
         if (normalizedQty > 0) summary.totalWeight += normalizedQty;
         summary.rowCount += 1;
     };
@@ -483,6 +475,7 @@ const buildReceiptRows = (lines, rates) => {
                 priceValue: metrics.sellRate,
                 amountValue: metrics.goldAmount,
                 tx: 'sell',
+                section: 'new',
             });
             return;
         }
@@ -498,11 +491,13 @@ const buildReceiptRows = (lines, rates) => {
                 priceValue: metrics.buyRate,
                 amountValue: -metrics.buyAmount,
                 tx: 'buy',
+                section: 'old',
             });
             return;
         }
 
         if (line.tx === 'trade') {
+            hasTrade = true;
             if (metrics.goldAmount > 0) {
                 summary.newGold += metrics.goldAmount;
                 pushRow({
@@ -513,6 +508,7 @@ const buildReceiptRows = (lines, rates) => {
                     priceValue: metrics.tradeRate,
                     amountValue: metrics.goldAmount,
                     tx: 'trade',
+                    section: 'new',
                 });
             }
             if (metrics.tradeCustomerAmount > 0) {
@@ -525,6 +521,7 @@ const buildReceiptRows = (lines, rates) => {
                     priceValue: metrics.customerRate,
                     amountValue: -metrics.tradeCustomerAmount,
                     tx: 'trade',
+                    section: 'old',
                 });
             }
         }
@@ -532,13 +529,18 @@ const buildReceiptRows = (lines, rates) => {
 
     return {
         rows,
+        sections: [
+            { key: 'old', title: 'Dẻ', rows: oldRows },
+            { key: 'new', title: 'Vàng mới', rows: newRows },
+        ].filter((section) => section.rows.length > 0),
         summary,
         txDisplay: resolveTxDisplay(txSet),
+        hasTrade,
     };
 };
 
 const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
-    const { rows, summary, txDisplay } = buildReceiptRows(lines, rates);
+    const { rows, sections, summary, txDisplay, hasTrade } = buildReceiptRows(lines, rates);
     if (!rows.length) {
         throw new Error('Chưa có nội dung giao dịch để in.');
     }
@@ -561,12 +563,11 @@ const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
     return {
         orderId: orderCode,
         headerLines,
-        rows,
-        formulaLines: buildFormulaLines(rows),
+        sections,
         summaryRows: [
-            { label: 'Tiền vàng :', value: summary.newGold, bold: true },
-            { label: 'Tiền vàng cũ:', value: summary.oldGold, bold: false },
-            { label: 'Tiền bớt:', value: adjustmentAmount, bold: false },
+            { label: 'Dẻ:', value: summary.oldGold, bold: false },
+            { label: 'Vàng mới:', value: summary.newGold, bold: true },
+            { label: hasTrade ? 'Tiền bù:' : 'Tiền bớt:', value: adjustmentAmount, bold: false },
             { label: 'Tổng cộng:', value: paymentAmount, bold: true },
         ],
         footerLines: FOOTER_LINES,
@@ -594,6 +595,46 @@ const drawCellText = (
     ctx.restore();
 };
 
+const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, rowMinHeight) => {
+    ctx.font = `400 ${px(26)}px ${RECEIPT_FONT}`;
+    const bodyLineHeight = px(28);
+    const labelLines = wrapText(ctx, row.code, colWidths[0] - px(18), 2);
+    const rowHeight = Math.max(rowMinHeight, px(24) + labelLines.length * bodyLineHeight);
+
+    ctx.strokeRect(tableLeft, y, tableWidth, rowHeight);
+    for (let index = 1; index < colXs.length; index += 1) {
+        ctx.beginPath();
+        ctx.moveTo(colXs[index], y);
+        ctx.lineTo(colXs[index], y + rowHeight);
+        ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.font = `400 ${px(28)}px ${RECEIPT_FONT}`;
+    ctx.fillStyle = RECEIPT_TEXT_COLOR;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    labelLines.forEach((line, index) => {
+        ctx.fillText(line, colXs[0] + px(10), y + px(12) + index * bodyLineHeight);
+    });
+    ctx.restore();
+
+    drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
+    drawCellText(ctx, row.labor, colXs[2], y + rowHeight / 2, colWidths[2], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
+    drawCellText(ctx, row.price, colXs[3], y + rowHeight / 2, colWidths[3], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
+    drawCellText(
+        ctx,
+        `${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`,
+        colXs[4] + px(8),
+        y + rowHeight / 2,
+        colWidths[4] - px(16),
+        'right',
+        `500 ${px(34)}px ${RECEIPT_NUMBER_FONT}`
+    );
+
+    return y + rowHeight;
+};
+
 const drawReceiptToCanvas = (ctx, model) => {
     const width = ctx.canvas.width / RECEIPT_SCALE;
     const height = ctx.canvas.height / RECEIPT_SCALE;
@@ -617,6 +658,7 @@ const drawReceiptToCanvas = (ctx, model) => {
     const rowMinHeight = px(78);
     const summaryRowHeight = px(66);
     const summaryLabelWidth = Math.round(tableWidth * 0.37);
+    const sectionTitleHeight = px(52);
 
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
@@ -671,63 +713,29 @@ const drawReceiptToCanvas = (ctx, model) => {
     });
     y += headerHeight;
 
-    ctx.font = `400 ${px(26)}px ${RECEIPT_FONT}`;
-    const bodyLineHeight = px(28);
-    model.rows.forEach((row) => {
-        const labelLines = wrapText(ctx, row.code, colWidths[0] - px(18), 2);
-        const rowHeight = Math.max(rowMinHeight, px(24) + labelLines.length * bodyLineHeight);
-        ctx.strokeRect(tableLeft, y, tableWidth, rowHeight);
-        for (let index = 1; index < colXs.length; index += 1) {
-            ctx.beginPath();
-            ctx.moveTo(colXs[index], y);
-            ctx.lineTo(colXs[index], y + rowHeight);
-            ctx.stroke();
-        }
-
+    model.sections.forEach((section) => {
         ctx.save();
-        ctx.font = `400 ${px(28)}px ${RECEIPT_FONT}`;
-        ctx.fillStyle = RECEIPT_TEXT_COLOR;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        labelLines.forEach((line, index) => {
-            ctx.fillText(line, colXs[0] + px(10), y + px(12) + index * bodyLineHeight);
-        });
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(tableLeft, y, tableWidth, sectionTitleHeight);
         ctx.restore();
 
-        drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
-        drawCellText(ctx, row.labor, colXs[2], y + rowHeight / 2, colWidths[2], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
-        drawCellText(ctx, row.price, colXs[3], y + rowHeight / 2, colWidths[3], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
+        ctx.strokeRect(tableLeft, y, tableWidth, sectionTitleHeight);
         drawCellText(
             ctx,
-            `${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`,
-            colXs[4] + px(8),
-            y + rowHeight / 2,
-            colWidths[4] - px(16),
-            'right',
-            `500 ${px(34)}px ${RECEIPT_NUMBER_FONT}`
+            section.title,
+            tableLeft + px(14),
+            y + sectionTitleHeight / 2,
+            tableWidth - px(28),
+            'left',
+            `700 ${px(30)}px ${RECEIPT_FONT}`,
+            RECEIPT_CODE_COLOR
         );
-        y += rowHeight;
-    });
-    y += px(22);
+        y += sectionTitleHeight;
 
-    if (model.formulaLines.length) {
-        ctx.save();
-        ctx.font = `400 ${px(42)}px ${RECEIPT_NUMBER_FONT}`;
-        ctx.fillStyle = RECEIPT_TEXT_COLOR;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        const formulaWidth = tableWidth - px(8);
-        const formulaLineHeight = px(48);
-
-        model.formulaLines.forEach((entry) => {
-            const wrappedFormulaLines = wrapText(ctx, entry, formulaWidth, 4);
-            wrappedFormulaLines.forEach((line, index) => {
-                ctx.fillText(line, tableLeft + px(4), y + index * formulaLineHeight);
-            });
-            y += wrappedFormulaLines.length * formulaLineHeight + px(10);
+        section.rows.forEach((row) => {
+            y = drawReceiptRow(ctx, row, tableLeft, tableWidth, colWidths, colXs, y, rowMinHeight);
         });
-        ctx.restore();
-    }
+    });
 
     y += px(20);
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IoCameraOutline, IoCloseOutline, IoDocumentTextOutline, IoImagesOutline, IoQrCodeOutline } from 'react-icons/io5';
+import { IoCameraOutline, IoCheckmarkCircle, IoCloseOutline, IoDocumentTextOutline, IoImagesOutline, IoQrCodeOutline } from 'react-icons/io5';
 import { S } from './shared';
 
 const PHOTO_TAB = 'photo';
@@ -101,6 +101,7 @@ export default function CustomerCaptureModal({
     onOcrPickFile,
     onPhotoCapture,
     onPhotoPickFiles,
+    tabsDone = {},
 }) {
     const videoRef = useRef(null);
     const qrFileInputRef = useRef(null);
@@ -299,31 +300,55 @@ export default function CustomerCaptureModal({
                         {TAB_OPTIONS.map((option) => {
                             const Icon = option.icon;
                             const active = option.key === currentTab;
+                            const done = Boolean(tabsDone[option.key]);
                             return (
                                 <button
                                     key={option.key}
                                     type="button"
-                                    onClick={() => onTabChange?.(option.key)}
+                                    disabled={done}
+                                    onClick={() => !done && onTabChange?.(option.key)}
                                     style={{
-                                        border: 'none',
+                                        border: done
+                                            ? '1.5px solid rgba(34,197,94,.45)'
+                                            : 'none',
                                         borderRadius: 16,
                                         minHeight: 52,
-                                        background: active ? 'linear-gradient(135deg,#0f766e,#14b8a6)' : 'rgba(255,255,255,.08)',
-                                        color: 'white',
+                                        background: done
+                                            ? 'rgba(34,197,94,.15)'
+                                            : active
+                                                ? 'linear-gradient(135deg,#0f766e,#14b8a6)'
+                                                : 'rgba(255,255,255,.08)',
+                                        color: done ? '#4ade80' : 'white',
                                         fontSize: 11,
                                         fontWeight: 800,
-                                        cursor: 'pointer',
+                                        cursor: done ? 'not-allowed' : 'pointer',
                                         display: 'flex',
                                         flexDirection: 'column',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        gap: 4,
-                                        padding: '8px 6px',
-                                        boxShadow: active ? '0 10px 22px rgba(20,184,166,.20)' : 'none',
+                                        gap: 3,
+                                        padding: '8px 4px',
+                                        boxShadow: done
+                                            ? '0 0 0 0'
+                                            : active
+                                                ? '0 10px 22px rgba(20,184,166,.20)'
+                                                : 'none',
+                                        opacity: done ? 0.9 : 1,
+                                        position: 'relative',
+                                        transition: 'all .18s ease',
                                     }}
                                 >
-                                    <Icon style={{ fontSize: 18, flexShrink: 0 }} />
-                                    <span style={{ lineHeight: 1.3, textAlign: 'center' }}>{option.label}</span>
+                                    {done ? (
+                                        <>
+                                            <IoCheckmarkCircle style={{ fontSize: 22, color: '#4ade80', flexShrink: 0 }} />
+                                            <span style={{ lineHeight: 1.3, textAlign: 'center', fontSize: 9, color: '#86efac' }}>Xong</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Icon style={{ fontSize: 18, flexShrink: 0 }} />
+                                            <span style={{ lineHeight: 1.3, textAlign: 'center' }}>{option.label}</span>
+                                        </>
+                                    )}
                                 </button>
                             );
                         })}

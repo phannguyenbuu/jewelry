@@ -99,7 +99,7 @@ export default function OrderScreen({
     const totalLabel = total > 0 ? 'KHÁCH TRẢ' : total < 0 ? 'KHÁCH NHẬN' : 'TỔNG TẠM TÍNH';
     const [customerCaptureOpen, setCustomerCaptureOpen] = useState(false);
     const [customerCaptureTab, setCustomerCaptureTab] = useState('photo');
-    const [customerOcrSide, setCustomerOcrSide] = useState('front');
+    const [captureTabsDone, setCaptureTabsDone] = useState({});
     const [cccdOcrLoading, setCccdOcrLoading] = useState(false);
     const [cccdQrLoading, setCccdQrLoading] = useState(false);
     const [customerSaveLoading, setCustomerSaveLoading] = useState(false);
@@ -445,7 +445,8 @@ export default function OrderScreen({
                     ? `OCR CCCD xong: ${parsed.appliedFields.join(', ')}.`
                     : 'OCR xong, bạn kiểm tra lại thông tin nếu cần.';
             setCccdOcrMessage(ocrMsg);
-            // Hien thong bao 2s roi tu dong quay ve tab Chup hinh
+            // Mark tab done + tu dong quay ve tab Chup hinh sau 2s
+            setCaptureTabsDone(prev => ({ ...prev, [`ocr_${side}`]: true }));
             setTimeout(() => setCustomerCaptureTab('photo'), 2000);
         } catch (error) {
             setCccdOcrMessage(error.message || 'Không OCR được CCCD.');
@@ -745,8 +746,7 @@ export default function OrderScreen({
                 message={cccdOcrMessage}
                 qrLoading={cccdQrLoading}
                 ocrLoading={cccdOcrLoading}
-                side={customerOcrSide}
-                onSideChange={setCustomerOcrSide}
+                tabsDone={captureTabsDone}
                 onClose={() => setCustomerCaptureOpen(false)}
                 onQrDetected={applyCustomerQrPayload}
                 onQrPickFile={handleCustomerQrFile}

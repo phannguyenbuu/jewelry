@@ -115,6 +115,7 @@ export default function ThuNganCard({
                                             style={{ ...inputBase, cursor: 'pointer' }}
                                         >
                                             <option value="">-- Chọn tuổi vàng --</option>
+                                            <option value="Tiền mặt">💵 Tiền mặt</option>
                                             {tuoiVangOptions.map(option => (
                                                 <option key={option.id || option.ten_tuoi} value={option.ten_tuoi}>
                                                     {option.ten_tuoi}

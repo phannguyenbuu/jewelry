@@ -1087,7 +1087,7 @@ export default function OrderScreen({
                                     </div>
                                 )}
                                 {/* CCCD image slots - luon hien thi, click slot trong de mo camera */}
-                                <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2 }}>
+                                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, marginTop: 2 }}>
                                     {[
                                         { imgKey: 'frontImage', thumbKey: 'frontThumb', tabKey: 'ocr_front', label: 'CCCD mặt trước' },
                                         { imgKey: 'backImage',  thumbKey: 'backThumb',  tabKey: 'ocr_back',  label: 'CCCD mặt sau' },
@@ -1095,7 +1095,7 @@ export default function OrderScreen({
                                         const fullUrl  = customerInfo?.[imgKey];
                                         const thumbUrl = customerInfo?.[thumbKey];
                                         return (
-                                            <div key={imgKey} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                            <div key={imgKey} style={{ flex: '0 0 auto', width: 80, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                                 <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</span>
                                                 {fullUrl ? (
                                                     <a href={fullUrl} target="_blank" rel="noreferrer"

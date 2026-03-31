@@ -32,6 +32,16 @@ export default function ThuNganManager({ onCashiersChanged }) {
   const [cashierForm, setCashierForm] = useState({});
   const [cashierApiReady, setCashierApiReady] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [expandedCashiers, setExpandedCashiers] = useState({});
+  const [expandedKhos, setExpandedKhos] = useState({});
+
+  const toggleCashierExpand = useCallback((cashierId) => {
+    setExpandedCashiers((prev) => ({ ...prev, [cashierId]: !prev[cashierId] }));
+  }, []);
+
+  const toggleKhoExpand = useCallback((khoId) => {
+    setExpandedKhos((prev) => ({ ...prev, [khoId]: !prev[khoId] }));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -262,25 +272,48 @@ export default function ThuNganManager({ onCashiersChanged }) {
               const khoQuays = [...quays].filter((item) => item.kho_id === kho.id).sort(byName('ten_quay'));
               const unassignedQuays = khoQuays.filter((item) => !item.thu_ngan_id);
 
+              const isKhoExpanded = !!expandedKhos[kho.id];
+
               return (
-                <div key={kho.id} style={{ borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', padding: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14, color: '#0f172a' }}>🏪 {kho.ten_kho}</div>
-                      {kho.dia_chi && <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>📍 {kho.dia_chi}</div>}
-                      {kho.nguoi_phu_trach && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>👤 {kho.nguoi_phu_trach}</div>}
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                <div key={kho.id} style={{ borderRadius: 12, border: '1px solid #e2e8f0', background: '#f8fafc', overflow: 'hidden' }}>
+                  {/* Kho header — click để toggle */}
+                  <div
+                    onClick={() => toggleKhoExpand(kho.id)}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                      <svg
+                        width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8"
+                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        style={{ flexShrink: 0, transition: 'transform 0.2s', transform: isKhoExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                      >
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: '#0f172a' }}>🏪 {kho.ten_kho}</div>
+                        {kho.dia_chi && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>📍 {kho.dia_chi}</div>}
+                        {kho.nguoi_phu_trach && <div style={{ fontSize: 12, color: '#64748b', marginTop: 1 }}>👤 {kho.nguoi_phu_trach}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <span style={badge('#dbeafe', '#1d4ed8')}>{khoThuNgans.length} thu ngân</span>
                         <span style={badge('#ccfbf1', '#0f766e')}>{khoQuays.length} quầy nhỏ</span>
+                        {unassignedQuays.length > 0 && (
+                          <span style={badge('#ffedd5', '#9a3412')}>{unassignedQuays.length} chưa gán</span>
+                        )}
                       </div>
                     </div>
-                    <button type="button" onClick={() => openAddCashier(kho)} style={{ ...saveBtn, padding: '7px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
-                      + Thêm thu ngân
-                    </button>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <button type="button" onClick={() => openAddCashier(kho)} style={{ ...saveBtn, padding: '7px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
+                        + Thêm thu ngân
+                      </button>
+                    </div>
                   </div>
 
+                  {/* Collapsible kho body */}
+                  {isKhoExpanded && (
+                    <div style={{ padding: '0 16px 16px', borderTop: '1px solid #e2e8f0' }}>
                   {khoThuNgans.length === 0 ? (
-                    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'white', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12, fontStyle: 'italic' }}>
+                    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'white', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 12, fontStyle: 'italic', marginTop: 12 }}>
                       Chưa có thu ngân nào trong kho này.
                     </div>
                   ) : (
@@ -289,19 +322,32 @@ export default function ThuNganManager({ onCashiersChanged }) {
                         const assignedQuays = (cashier.quays || [])
                           .map((item) => quaysById[item.id] || item)
                           .sort(byName('ten_quay'));
+                        const isExpanded = !!expandedCashiers[cashier.id];
                         return (
-                          <div key={cashier.id} style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', padding: 12 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                  <span style={{ fontWeight: 800, fontSize: 13, color: '#1e293b' }}>👤 {cashier.ten_thu_ngan}</span>
-                                  {cashier.nguoi_quan_ly && <span style={badge('#eef2ff', '#4338ca')}>Nhân sự: {cashier.nguoi_quan_ly}</span>}
-                                  <span style={badge('#ccfbf1', '#0f766e')}>{assignedQuays.length} quầy nhỏ</span>
-                                </div>
-                                {cashier.ngay_tao && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 5 }}>🕐 {cashier.ngay_tao}</div>}
-                                {cashier.ghi_chu && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>💬 {cashier.ghi_chu}</div>}
+                          <div key={cashier.id} style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                            {/* Header — click để toggle */}
+                            <div
+                              onClick={() => toggleCashierExpand(cashier.id)}
+                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: 12, cursor: 'pointer', userSelect: 'none' }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+                                {/* Chevron icon */}
+                                <svg
+                                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8"
+                                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                  style={{ flexShrink: 0, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                >
+                                  <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                                <span style={{ fontWeight: 800, fontSize: 13, color: '#1e293b' }}>👤 {cashier.ten_thu_ngan}</span>
+                                {cashier.nguoi_quan_ly && <span style={badge('#eef2ff', '#4338ca')}>Nhân sự: {cashier.nguoi_quan_ly}</span>}
+                                <span style={badge('#ccfbf1', '#0f766e')}>{assignedQuays.length} quầy nhỏ</span>
+                                {cashier.ngay_tao && <span style={{ fontSize: 10, color: '#94a3b8' }}>🕐 {cashier.ngay_tao}</span>}
                               </div>
-                              <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                              <div
+                                style={{ display: 'flex', gap: 5, flexShrink: 0 }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 <button type="button" onClick={() => openEditCashier(cashier)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                                 </button>
@@ -311,27 +357,33 @@ export default function ThuNganManager({ onCashiersChanged }) {
                               </div>
                             </div>
 
-                            {/* Quầy nhỏ phụ trách — 3 cột */}
-                            <div style={{ marginTop: 10 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Quầy nhỏ phụ trách</div>
-                              {assignedQuays.length === 0 ? (
-                                <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Chưa được gán quầy nhỏ.</div>
-                              ) : (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
-                                  {assignedQuays.map((quay) => (
-                                    <div key={quay.id} style={{ padding: '6px 8px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
-                                      {quay.ghi_chu && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{quay.ghi_chu}</div>}
+                            {/* Collapsible body */}
+                            {isExpanded && (
+                              <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f1f5f9' }}>
+                                {cashier.ghi_chu && <div style={{ fontSize: 11, color: '#64748b', margin: '8px 0 6px' }}>💬 {cashier.ghi_chu}</div>}
+                                {/* Quầy nhỏ phụ trách — 3 cột */}
+                                <div style={{ marginTop: 10 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Quầy nhỏ phụ trách</div>
+                                  {assignedQuays.length === 0 ? (
+                                    <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Chưa được gán quầy nhỏ.</div>
+                                  ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+                                      {assignedQuays.map((quay) => (
+                                        <div key={quay.id} style={{ padding: '6px 8px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>🗂 {quay.ten_quay}</div>
+                                          {quay.ghi_chu && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{quay.ghi_chu}</div>}
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
-                  )}
+                   )}
 
                   {unassignedQuays.length > 0 && (
                     <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: '#fff7ed', border: '1px solid #fed7aa' }}>
@@ -343,6 +395,8 @@ export default function ThuNganManager({ onCashiersChanged }) {
                           </span>
                         ))}
                       </div>
+                    </div>
+                  )}
                     </div>
                   )}
                 </div>

@@ -29,18 +29,19 @@ const parseImageDataUrl = (value) => {
     if (!matched) return null;
     return { mimeType: matched[1] || 'image/jpeg', imageBase64: matched[2] || '' };
 };
-/** Tao thumbnail nho (maxW x maxH) tu base64, tra ve data URL JPEG. */
-function generateThumbnail(base64, mimeType = 'image/jpeg', maxW = 320, maxH = 200) {
+/** Tao thumbnail vuong, crop trung tam, 160x160 JPEG q=0.55 */
+function generateThumbnail(base64, mimeType = 'image/jpeg') {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
             try {
-                const scale = Math.min(maxW / img.width, maxH / img.height, 1);
-                const w = Math.round(img.width * scale);
-                const h = Math.round(img.height * scale);
+                const size = Math.min(img.width, img.height);   // crop vuong
+                const sx = (img.width  - size) / 2;
+                const sy = (img.height - size) / 2;
+                const OUT = 160;                                  // 160x160 px
                 const canvas = document.createElement('canvas');
-                canvas.width = w; canvas.height = h;
-                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                canvas.width = OUT; canvas.height = OUT;
+                canvas.getContext('2d').drawImage(img, sx, sy, size, size, 0, 0, OUT, OUT);
                 resolve(canvas.toDataURL('image/jpeg', 0.55));
             } catch {
                 resolve(`data:${mimeType};base64,${base64}`);
@@ -1099,7 +1100,7 @@ export default function OrderScreen({
                                                 {fullUrl ? (
                                                     <a href={fullUrl} target="_blank" rel="noreferrer"
                                                         title="Click để xem ảnh đầy đủ"
-                                                        style={{ display: 'block', borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '16/9', boxShadow: '0 2px 8px rgba(15,23,42,.06)' }}>
+                                                        style={{ display: 'block', borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '1/1', boxShadow: '0 2px 8px rgba(15,23,42,.06)' }}>
                                                         <img src={thumbUrl || fullUrl} alt={label} loading="lazy"
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                                     </a>

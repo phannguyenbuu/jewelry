@@ -1096,7 +1096,7 @@ export default function OrderScreen({
                                         const thumbUrl = customerInfo?.[thumbKey];
                                         return (
                                             <div key={imgKey} style={{ flex: '0 0 auto', width: 80, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                                <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</span>
+                                                <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{label}</span>
                                                 {fullUrl ? (
                                                     <a href={fullUrl} target="_blank" rel="noreferrer"
                                                         title="Click để xem ảnh đầy đủ"

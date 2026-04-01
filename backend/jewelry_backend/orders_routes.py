@@ -987,6 +987,63 @@ def add_don_hang():
     obj.ghi_chu = d.get('ghi_chu', '')
     obj.nguoi_tao = d.get('nguoi_tao', '')
     db.session.commit()
+
+    if created:
+        try:
+            cash = int(d.get('cash_payment') or 0)
+            bank = int(d.get('bank_payment') or 0)
+            if cash != 0 or bank != 0:
+                from .models import ThuNgan
+                from .cashier_routes import _get_or_create_thu_ngan_so_quy_row, _sync_thu_ngan_so_quy_detail_totals
+                from sqlalchemy.orm.attributes import flag_modified
+                
+                ngay_hom_nay = today_iso()
+                
+                if cash != 0:
+                    tn1 = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%TN1%')).first()
+                    if tn1:
+                        so_quy_tn1 = _get_or_create_thu_ngan_so_quy_row(ngay_hom_nay, tn1.id)
+                        chi_tiet_tn1 = list(so_quy_tn1.chi_tiet or [])
+                        found = False
+                        for detail in chi_tiet_tn1:
+                            if detail.get('tuoi_vang') == 'Tiền mặt':
+                                current = int(detail.get('so_du_hien_tai') or detail.get('so_tien_hien_tai') or 0)
+                                # "trừ đi trong Số dư hiện tại của TN1"
+                                detail['so_du_hien_tai'] = current - cash
+                                found = True
+                                break
+                        if not found:
+                            from .cashier_routes import _make_thu_ngan_so_quy_detail_row
+                            chi_tiet_tn1.insert(0, _make_thu_ngan_so_quy_detail_row('Tiền mặt', ton_dau_ky=0, so_du_hien_tai=-cash))
+                        so_quy_tn1.chi_tiet = chi_tiet_tn1
+                        flag_modified(so_quy_tn1, 'chi_tiet')
+                        _sync_thu_ngan_so_quy_detail_totals(so_quy_tn1)
+                        db.session.add(so_quy_tn1)
+
+                if bank != 0:
+                    kho_tong = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%Kho Tổng%')).first()
+                    if kho_tong:
+                        so_quy_kho = _get_or_create_thu_ngan_so_quy_row(ngay_hom_nay, kho_tong.id)
+                        chi_tiet_kho = list(so_quy_kho.chi_tiet or [])
+                        found = False
+                        for detail in chi_tiet_kho:
+                            if detail.get('tuoi_vang') == 'Tài Khoản Ngân Hàng':
+                                current = int(detail.get('so_du_hien_tai') or detail.get('so_tien_hien_tai') or 0)
+                                # "cộng thêm trong tài khoản ngân hàng của kho tổng"
+                                detail['so_du_hien_tai'] = current + bank
+                                found = True
+                                break
+                        if not found:
+                            from .cashier_routes import _make_thu_ngan_so_quy_detail_row
+                            chi_tiet_kho.insert(0, _make_thu_ngan_so_quy_detail_row('Tài Khoản Ngân Hàng', ton_dau_ky=0, so_du_hien_tai=bank))
+                        so_quy_kho.chi_tiet = chi_tiet_kho
+                        flag_modified(so_quy_kho, 'chi_tiet')
+                        _sync_thu_ngan_so_quy_detail_totals(so_quy_kho)
+                        db.session.add(so_quy_kho)
+                db.session.commit()
+        except Exception as e:
+            print("Loi cap nhat thu ngan:", e)
+
     return jsonify({'msg': 'Created' if created else 'Updated', 'id': obj.id, 'ma_don': obj.ma_don}), 201 if created else 200
 
 

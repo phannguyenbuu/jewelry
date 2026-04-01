@@ -1,4 +1,4 @@
-import { IoCameraOutline, IoCardOutline, IoListOutline, IoMenuOutline, IoRefreshOutline, IoSaveOutline } from 'react-icons/io5';
+import { IoCameraOutline, IoCardOutline, IoMenuOutline, IoRefreshOutline } from 'react-icons/io5';
 
 import { S, floatingMenuIconStyle, floatingMenuItemStyle } from './shared';
 
@@ -6,7 +6,6 @@ const MENU_ITEMS = [
     { key: 'order', label: 'Bán hàng', icon: <IoCardOutline /> },
     { key: 'repair', label: 'Chuyển hàng', icon: <IoRefreshOutline /> },
     { key: 'inventory', label: 'Nhập hàng', icon: <IoCameraOutline /> },
-    { key: 'list', label: 'Đơn hôm nay', icon: <IoListOutline /> },
 ];
 
 export default function SaleFloatingMenu({
@@ -61,25 +60,9 @@ export default function SaleFloatingMenu({
                                     >
                                         <span style={floatingMenuIconStyle(active)}>{item.icon}</span>
                                         <span style={{ fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap' }}>{item.label}</span>
-                                    </button>
+                                </button>
                                 );
                             })}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSavedModalOpen(true);
-                                    setNavMenuOpen(false);
-                                }}
-                                style={floatingMenuItemStyle(false)}
-                            >
-                                <span style={floatingMenuIconStyle(false)}><IoSaveOutline /></span>
-                                <span style={{ fontSize: 11, fontWeight: 800, flex: 1, whiteSpace: 'nowrap' }}>Giao dịch lưu</span>
-                                {savedDrafts.length > 0 && (
-                                    <span style={{ minWidth: 22, height: 22, padding: '0 6px', borderRadius: 999, background: '#dc2626', color: 'white', fontSize: 10, fontWeight: 900, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        {savedDrafts.length > 99 ? '99+' : savedDrafts.length}
-                                    </span>
-                                )}
-                            </button>
                         </div>
                     </div>
                 )}

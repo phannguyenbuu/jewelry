@@ -164,6 +164,46 @@ const readImageAsBase64 = (file) => new Promise((resolve, reject) => {
     reader.onerror = () => reject(new Error('Không đọc được ảnh OCR.'));
     reader.readAsDataURL(file);
 });
+const readAndCropImageAsBase64 = (file, aspectRatio) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+            if (!aspectRatio) {
+                resolve(String(ev.target.result).split(',')[1] || '');
+                return;
+            }
+            const sourceWidth = img.width;
+            const sourceHeight = img.height;
+            let cropWidth = sourceWidth;
+            let cropHeight = sourceHeight;
+            const sourceAspect = sourceWidth / sourceHeight;
+            if (sourceAspect > aspectRatio) {
+                cropWidth = Math.round(sourceHeight * aspectRatio);
+                cropHeight = sourceHeight;
+            } else {
+                cropWidth = sourceWidth;
+                cropHeight = Math.round(sourceWidth / aspectRatio);
+            }
+            const cropX = Math.max(0, Math.round((sourceWidth - cropWidth) / 2));
+            const cropY = Math.max(0, Math.round((sourceHeight - cropHeight) / 2));
+            const canvas = document.createElement('canvas');
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
+            const context = canvas.getContext('2d');
+            if (context) {
+                context.drawImage(img, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+                resolve(canvas.toDataURL('image/jpeg', 0.95).split(',')[1] || '');
+            } else {
+                resolve(String(ev.target.result).split(',')[1] || '');
+            }
+        };
+        img.onerror = () => reject(new Error('Không mở được ảnh.'));
+        img.src = ev.target.result;
+    };
+    reader.onerror = () => reject(new Error('Không đọc được file.'));
+    reader.readAsDataURL(file);
+});
 const nextMeaningfulLine = (lines, startIndex) => {
     for (let index = startIndex + 1; index < lines.length; index += 1) {
         const candidate = String(lines[index] || '').trim();
@@ -423,6 +463,7 @@ export {
   readSavedSales,
   foldText,
   readImageAsBase64,
+  readAndCropImageAsBase64,
   nextMeaningfulLine,
   extractLabelValue,
   extractJsonishValue,

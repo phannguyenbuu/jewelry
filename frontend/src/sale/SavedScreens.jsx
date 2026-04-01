@@ -39,8 +39,8 @@ function OrderListScreen({ orders, onClose, onSettle, settleLoading }) {
                             {[
                                 ['Customer', o.khach_hang || '-'],
                                 ['Total', `${fmtVN(o.tong_tien)} VND`],
-                                ['Deposit', `${fmtVN(o.dat_coc)} VND`],
-                                ['Balance', `${fmtVN((o.tong_tien || 0) - (o.dat_coc || 0))} VND`],
+                                ['Tiền mặt', `${fmtVN(o.dat_coc)} VND`],
+                                ['Chuyển khoản', `${fmtVN((o.tong_tien || 0) - (o.dat_coc || 0))} VND`],
                             ].map(([k, v]) => (
                                 <div key={k}>
                                     <div style={{ fontSize: 8, color: '#6b7280', fontWeight: 700 }}>{k.toUpperCase()}</div>

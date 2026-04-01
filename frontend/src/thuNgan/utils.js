@@ -74,7 +74,7 @@ const cashierAmountStyle = color => ({
 
 const detailGridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'minmax(122px, 0.8fr) repeat(3, minmax(116px, 1fr)) 34px',
+    gridTemplateColumns: 'minmax(122px, 0.8fr) repeat(3, minmax(116px, 1fr)) 76px',
     gap: 8,
     alignItems: 'center',
     minWidth: 540,
@@ -96,6 +96,25 @@ const emptyDetailRow = () => ({
     gia_tri_lech: formatMoneyInput(0),
 });
 
+const TIEN_MAT_TUOI = 'Tiền mặt';
+
+// Tạo 1 row Tiền mặt mới hoặc kế thừa từ dữ liệu có sẵn
+const tienMatDetailRow = (existing) => ({
+    row_id: existing?.row_id || `tien_mat_fixed`,
+    tuoi_vang: TIEN_MAT_TUOI,
+    ton_dau_ky: formatMoneyInput(existing?.ton_dau_ky ?? 0),
+    so_du_hien_tai: formatMoneyInput(existing?.so_du_hien_tai ?? 0),
+    gia_tri_lech: formatMoneyInput(existing?.gia_tri_lech ?? 0),
+});
+
+// Đảm bảo chi_tiet luôn có row Tiền mặt ở đầu, các row khác giữ nguyên
+const ensureTienMatRow = (chi_tiet) => {
+    const tienMatIdx = (chi_tiet || []).findIndex((r) => r.tuoi_vang === TIEN_MAT_TUOI);
+    const tienMatRow = tienMatDetailRow(tienMatIdx >= 0 ? chi_tiet[tienMatIdx] : null);
+    const rest = (chi_tiet || []).filter((r) => r.tuoi_vang !== TIEN_MAT_TUOI);
+    return [tienMatRow, ...rest];
+};
+
 const toFormDetailRow = row => ({
     row_id: row?.row_id || makeRowId(),
     tuoi_vang: row?.tuoi_vang || '',
@@ -109,7 +128,9 @@ const buildFormMap = rows => Object.fromEntries(
         row.thu_ngan_id,
         {
             ghi_chu: row.ghi_chu || '',
-            chi_tiet: Array.isArray(row.chi_tiet) ? row.chi_tiet.map(toFormDetailRow) : [],
+            chi_tiet: ensureTienMatRow(
+                Array.isArray(row.chi_tiet) ? row.chi_tiet.map(toFormDetailRow) : []
+            ),
         },
     ]),
 );
@@ -169,12 +190,14 @@ const serverEchoesDetailRows = (payload, thuNganId, form) => {
 
 export {
     API,
+    TIEN_MAT_TUOI,
     actionBtn,
     buildFormMap,
     buildPayload,
     cashierAmountStyle,
     detailGridStyle,
     emptyDetailRow,
+    ensureTienMatRow,
     fmt,
     formatMoneyInput,
     inputBase,
@@ -188,3 +211,4 @@ export {
     today,
     totalsFromForm,
 };
+

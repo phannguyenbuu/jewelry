@@ -5,7 +5,7 @@ import { ConfirmDialog } from './Dialogs';
 import CustomerCaptureModal from './CustomerCaptureModal';
 import SaleReceiptPreviewModal from './SaleReceiptPreviewModal';
 import { copySaleReceiptImageToClipboard, createSaleReceiptPreview, downloadSaleReceiptImage, printSaleReceiptImage } from './printSaleReceipt';
-import { API, S, createDefaultLine, createEmptyCustomerInfo, extractCustomerInfoFromOcrText, extractCustomerInfoFromQrPayload, fmtCalc, getDayGreeting, getTxTheme, parseFmt, readImageAsBase64, scanCodeFromFile, today } from './shared';
+import { API, S, createDefaultLine, createEmptyCustomerInfo, extractCustomerInfoFromOcrText, extractCustomerInfoFromQrPayload, fmtCalc, getDayGreeting, getTxTheme, parseFmt, readImageAsBase64, readAndCropImageAsBase64, scanCodeFromFile, today } from './shared';
 
 function dispatchNotif(title, body) {
     window.dispatchEvent(new CustomEvent('jewelry-notification', { detail: { title, body, date: new Date().toISOString() } }));
@@ -487,7 +487,7 @@ export default function OrderScreen({
     const handleCccdOcrFile = async (file, side = 'front') => {
         if (!file) return;
         try {
-            const imageBase64 = await readImageAsBase64(file);
+            const imageBase64 = await readAndCropImageAsBase64(file, 16 / 9);
             await runCustomerOcr({
                 imageBase64,
                 mimeType: file.type || 'image/jpeg',
@@ -535,7 +535,7 @@ export default function OrderScreen({
     const handleCustomerPhotoFiles = async (files) => {
         for (const file of Array.from(files || [])) {
             try {
-                const imageBase64 = await readImageAsBase64(file);
+                const imageBase64 = await readAndCropImageAsBase64(file, 4 / 3);
                 attachCustomerIdentityImage({
                     imageBase64,
                     mimeType: file.type || 'image/jpeg',
@@ -1017,7 +1017,7 @@ export default function OrderScreen({
                                     onChange={e => updateCustomerInfo('address', e.target.value)}
                                     placeholder="Nhập địa chỉ"
                                 />
-                                <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 92px', gap: 10, alignItems: 'stretch' }}>
+                                <div style={{ gridColumn: '1 / -1' }}>
                                     <div style={{ position: 'relative', minWidth: 0 }}>
                                         <textarea
                                             className="sale-pos-catalog-input"
@@ -1054,32 +1054,6 @@ export default function OrderScreen({
                                             </div>
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={saveCustomerToBackend}
-                                        disabled={customerSaveLoading}
-                                        style={{
-                                            ...S.pillBtn('linear-gradient(135deg,#0f766e,#14b8a6)'),
-                                            minHeight: 84,
-                                            height: '100%',
-                                            borderRadius: 22,
-                                            padding: '10px 8px',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: 6,
-                                            fontSize: 10,
-                                            lineHeight: 1.15,
-                                            boxShadow: '0 10px 22px rgba(20,184,166,.22)',
-                                            opacity: customerSaveLoading ? 0.7 : 1,
-                                        }}
-                                        title="Lưu trực tiếp vào backend"
-                                        aria-label="Lưu trực tiếp vào backend"
-                                    >
-                                        <IoSaveOutline style={{ fontSize: 18 }} />
-                                        <span style={{ textAlign: 'center', fontWeight: 800 }}>{customerSaveLoading ? 'Đang lưu' : 'Lưu'}</span>
-                                    </button>
                                 </div>
                                 {cccdOcrMessage && (
                                     <div style={{ gridColumn: '1 / -1', fontSize: 10, color: isCustomerInfoSuccessMessage ? '#0f766e' : '#dc2626', lineHeight: 1.45 }}>

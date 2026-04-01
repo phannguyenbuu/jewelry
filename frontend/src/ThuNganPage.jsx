@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThuNganCard from './thuNgan/ThuNganCard';
+import KhoTongCard from './thuNgan/KhoTongCard';
 import ThuNganHistory from './thuNgan/ThuNganHistory';
 import ThuNganManager from './thuNgan/ThuNganManager';
 import {
   API,
-  actionBtn,
   buildFormMap,
   buildPayload,
   emptyDetailRow,
@@ -30,7 +30,6 @@ export default function ThuNganPage() {
   const [savingMap, setSavingMap] = useState({});
   const [draftStatusMap, setDraftStatusMap] = useState({});
   const [historyDeletingKey, setHistoryDeletingKey] = useState('');
-  const [resettingAll, setResettingAll] = useState(false);
   const [notice, setNotice] = useState('');
   const ngayRef = useRef(ngay);
   const pendingFormsRef = useRef({});
@@ -50,9 +49,24 @@ export default function ThuNganPage() {
   }, [ngay]);
 
   const applyPayload = useCallback((payload, fallbackNgay) => {
+    let rawRows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!rawRows.some(r => r.thu_ngan_id === 'kho_tong')) {
+      rawRows = [{
+          thu_ngan_id: 'kho_tong',
+          ten_thu_ngan: 'Kho Tổng',
+          nguoi_quan_ly: 'Quản trị viên',
+          ten_kho: 'Tổ hợp',
+          quays: [],
+      }, ...rawRows];
+    } else {
+      // Ensure Kho Tong is always at the top
+      const kt = rawRows.find(r => r.thu_ngan_id === 'kho_tong');
+      rawRows = [kt, ...rawRows.filter(r => r.thu_ngan_id !== 'kho_tong')];
+    }
+
     const nextData = {
       ngay: payload.ngay || fallbackNgay,
-      rows: Array.isArray(payload.rows) ? payload.rows : [],
+      rows: rawRows,
       history: Array.isArray(payload.history) ? payload.history : [],
     };
     setData(nextData);
@@ -212,6 +226,53 @@ export default function ThuNganPage() {
     }));
   }, [updateCashierForm]);
 
+  const handleUpsertCategoryField = useCallback((thuNganId, category, key, value) => {
+    updateCashierForm(thuNganId, (current) => {
+        let exists = false;
+        let nextChiTiet = (current.chi_tiet || []).map((row) => {
+            if (row.tuoi_vang !== category) return row;
+            exists = true;
+            const nextRow = { ...row, [key]: value };
+            if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
+                const prevAutoDiff = toNumber(row.so_du_hien_tai) - toNumber(row.ton_dau_ky);
+                const nextDauKy = key === 'ton_dau_ky' ? value : row.ton_dau_ky;
+                const nextHienTai = key === 'so_du_hien_tai' ? value : row.so_du_hien_tai;
+                if (row.gia_tri_lech === '' || sameMoney(row.gia_tri_lech, prevAutoDiff)) {
+                    nextRow.gia_tri_lech = formatMoneyInput(toNumber(nextHienTai) - toNumber(nextDauKy));
+                }
+            }
+            return nextRow;
+        });
+        if (!exists) {
+            const newRow = emptyDetailRow();
+            newRow.tuoi_vang = category;
+            newRow[key] = value;
+            if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
+                newRow.gia_tri_lech = formatMoneyInput(toNumber(newRow.so_du_hien_tai) - toNumber(newRow.ton_dau_ky));
+            }
+            nextChiTiet.push(newRow);
+        }
+        return { ...current, chi_tiet: nextChiTiet };
+    });
+  }, [updateCashierForm]);
+
+  const handleResetKhoTong = useCallback((thuNganId) => {
+    updateCashierForm(thuNganId, (current) => {
+      const cats = [TIEN_MAT_TUOI, 'Tài Khoản Ngân Hàng', ...(tuoiVangOptions || []).map(o => o.ten_tuoi)];
+      const nextChiTiet = cats.map(cat => ({
+        row_id: `reset_${Date.now()}_${cat}`,
+        tuoi_vang: cat,
+        ton_dau_ky: 0,
+        so_du_hien_tai: 0,
+        gia_tri_lech: 0
+      }));
+      return {
+        ...current,
+        chi_tiet: nextChiTiet
+      };
+    });
+  }, [updateCashierForm, tuoiVangOptions]);
+
   const handleNoteChange = useCallback((thuNganId, value) => {
     updateCashierForm(thuNganId, (current) => ({ ...current, ghi_chu: value }));
   }, [updateCashierForm]);
@@ -287,29 +348,6 @@ export default function ThuNganPage() {
     }
   };
 
-  const handleResetAll = async () => {
-    if (!window.confirm(`Reset all ngày ${ngay} để đưa toàn bộ số liệu về 0 và xóa hết lịch sử chốt?`)) return;
-    setResettingAll(true);
-    try {
-      const res = await fetch(`${API}/api/thu_ngan_so_quy/reset_all`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ngay }),
-      });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-      clearAllTimers();
-      pendingFormsRef.current = {};
-      setDraftStatusMap({});
-      applyPayload(payload, ngay);
-      setNotice(`Đã reset toàn bộ thu ngân ngày ${ngay} về 0.`);
-    } catch (err) {
-      setNotice(`Không reset được thu ngân: ${err.message}`);
-    } finally {
-      setResettingAll(false);
-    }
-  };
-
   const summary = useMemo(() => (
     (data.rows || []).reduce((acc, row) => {
       const form = formMap[row.thu_ngan_id] || buildFormMap([row])[row.thu_ngan_id] || { ghi_chu: '', chi_tiet: [] };
@@ -325,31 +363,17 @@ export default function ThuNganPage() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', padding: '0 28px', display: 'flex', gap: 4 }}>
+      <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', padding: '0 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button type="button" style={{ padding: '12px 18px', border: 'none', cursor: 'default', fontSize: 13, fontWeight: 700, background: 'none', color: '#1e293b', borderBottom: '2.5px solid #f59e0b' }}>
           💵 Thu ngân
         </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>Ngày làm việc</label>
+          <input type="date" value={ngay} onChange={(e) => setNgay(e.target.value)} style={{ ...inputBase, minWidth: 140 }} />
+        </div>
       </div>
 
       <div style={{ flex: 1, padding: '24px 28px', overflowY: 'auto', background: '#f8fafc' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{data.rows.length} thu ngân</div>
-            <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6, maxWidth: 780 }}>
-              Mỗi thu ngân có danh sách dòng theo tuổi vàng. Bạn có thể thêm bằng nút <b>+</b>, sửa trực tiếp trên dòng, xóa bằng <b>X</b> và hệ thống tự lưu nháp trước khi chốt.
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ minWidth: 180 }}>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 5 }}>Ngày làm việc</label>
-              <input type="date" value={ngay} onChange={(e) => setNgay(e.target.value)} style={inputBase} />
-            </div>
-            <button type="button" onClick={handleResetAll} disabled={resettingAll} style={{ ...actionBtn('#dc2626'), minWidth: 140, opacity: resettingAll ? 0.7 : 1 }}>
-              {resettingAll ? 'Đang reset...' : 'Reset all về 0'}
-            </button>
-          </div>
-        </div>
-
         <ThuNganManager onCashiersChanged={reloadCashLedger} />
 
         {notice && (
@@ -358,23 +382,37 @@ export default function ThuNganPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 18 }}>
-          <div style={metricCardStyle}><div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>SỐ THU NGÂN</div><div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a' }}>{summary.soThuNgan}</div></div>
-          <div style={metricCardStyle}><div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>TỔNG TỒN ĐẦU KỲ</div><div style={{ fontSize: 28, fontWeight: 900, color: '#0f766e' }}>{fmt(summary.dauKy)} ₫</div></div>
-          <div style={metricCardStyle}><div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>TỔNG SỐ DƯ HIỆN TẠI</div><div style={{ fontSize: 28, fontWeight: 900, color: '#1d4ed8' }}>{fmt(summary.hienTai)} ₫</div></div>
-          <div style={metricCardStyle}><div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, marginBottom: 6 }}>TỔNG LỆCH</div><div style={{ fontSize: 28, fontWeight: 900, color: summary.chenhLech >= 0 ? '#16a34a' : '#dc2626' }}>{summary.chenhLech >= 0 ? '+' : ''}{fmt(summary.chenhLech)} ₫</div><div style={{ fontSize: 10, color: '#94a3b8', marginTop: 6 }}>{summary.soDong} dòng chi tiết</div></div>
-        </div>
+
 
         {loading ? (
           <div style={{ ...panelStyle, padding: 32, textAlign: 'center', color: '#94a3b8' }}>Đang tải dữ liệu thu ngân...</div>
         ) : data.rows.length === 0 ? (
           <div style={{ ...panelStyle, padding: 40, textAlign: 'center', color: '#94a3b8' }}>Chưa có thu ngân nào. Hãy tạo thu ngân ngay ở phần quản lý phía trên.</div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 14, marginBottom: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
             {data.rows.map((row) => {
               const fallbackForm = buildFormMap([row])[row.thu_ngan_id] || { ghi_chu: row.ghi_chu || '', chi_tiet: [] };
               const form = formMap[row.thu_ngan_id] || fallbackForm;
               const totals = totalsFromForm(form, row);
+
+              if (row.thu_ngan_id === 'kho_tong') {
+                  return (
+                      <KhoTongCard
+                          key="kho_tong"
+                          draftState={statusMeta[draftStatusMap[row.thu_ngan_id] || 'idle']}
+                          form={form}
+                          isSaving={!!savingMap[row.thu_ngan_id]}
+                          onChot={handleChot}
+                          onReset={handleResetKhoTong}
+                          onUpsertCategoryField={handleUpsertCategoryField}
+                          onNoteChange={handleNoteChange}
+                          row={row}
+                          totals={totals}
+                          tuoiVangOptions={tuoiVangOptions}
+                      />
+                  );
+              }
+
               return (
                 <ThuNganCard
                   key={row.thu_ngan_id}

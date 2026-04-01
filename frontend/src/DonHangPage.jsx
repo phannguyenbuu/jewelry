@@ -84,6 +84,8 @@ export default function DonHangPage() {
     const [filterLoai, setFilterLoai] = useState('');
     const [detailModal, setDetailModal] = useState(null);
     const [confirmDel, setConfirmDel] = useState(null);
+    const [confirmDelAll, setConfirmDelAll] = useState(false);
+    const [isDeletingAll, setIsDeletingAll] = useState(false);
     const [posOpen, setPosOpen] = useState(false);
 
     const load = async () => {
@@ -121,6 +123,21 @@ export default function DonHangPage() {
     const del = async () => {
         await fetch(`${API}/api/don_hang/${confirmDel}`, { method: 'DELETE' });
         setConfirmDel(null); load();
+    };
+
+    const delAll = async () => {
+        setIsDeletingAll(true);
+        try {
+            const chunk = 10;
+            for (let i = 0; i < list.length; i += chunk) {
+                const batch = list.slice(i, i + chunk);
+                await Promise.all(batch.map(d => fetch(`${API}/api/don_hang/${d.id}`, { method: 'DELETE' })));
+            }
+        } finally {
+            setIsDeletingAll(false);
+            setConfirmDelAll(false);
+            load();
+        }
     };
 
     const filtered = list.filter(d => {
@@ -179,6 +196,7 @@ export default function DonHangPage() {
                         {Object.keys(STATUS_CFG).map(s => <option key={s}>{s}</option>)}
                     </select>
                     <div style={{ flex: 1 }} />
+                    <button onClick={() => setConfirmDelAll(true)} style={{ ...btn('#fee2e2', '#dc2626'), display: 'flex', alignItems: 'center', gap: 6 }}>🗑 Xóa toàn bộ</button>
                     <button onClick={() => setPosOpen(true)} style={{ ...btn('#1e293b'), display: 'flex', alignItems: 'center', gap: 6 }}>📱 POS</button>
                     <button onClick={openAdd} style={{ ...btn('#6366f1'), display: 'flex', alignItems: 'center', gap: 6 }}>+ Tạo đơn hàng</button>
                 </div>
@@ -188,7 +206,7 @@ export default function DonHangPage() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                         <thead>
                             <tr style={{ background: '#f8fafc' }}>
-                                {['Mã đơn', 'Loại', 'Khách hàng', 'Ngày đặt', 'Tổng tiền', 'Đặt cọc', 'Trạng thái', ''].map(h => (
+                                {['Mã đơn', 'Loại', 'Khách hàng', 'Ngày đặt', 'Tổng tiền', 'Tiền mặt', 'Trạng thái', ''].map(h => (
                                     <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: '#64748b', borderBottom: '1.5px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
                                 ))}
                             </tr>
@@ -293,7 +311,7 @@ export default function DonHangPage() {
                             <Field label="Tổng tiền (₫)">
                                 <input type="number" style={inp} value={form.tong_tien} onChange={e => setForm({ ...form, tong_tien: e.target.value })} />
                             </Field>
-                            <Field label="Đặt cọc (₫)">
+                            <Field label="Tiền mặt (₫)">
                                 <input type="number" style={inp} value={form.dat_coc} onChange={e => setForm({ ...form, dat_coc: e.target.value })} />
                             </Field>
 
@@ -390,19 +408,11 @@ export default function DonHangPage() {
                             {/* Loại đơn badge */}
                             <div style={{ marginBottom: 14 }}><LoaiBadge l={detailModal.loai_don || 'Mua'} /></div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: 16 }}>
                                 {[
-                                    ['Khách hàng', detailModal.khach_hang],
+                                    ['Tên Khách hàng - CCCD', `${detailModal.khach_hang}${detailModal.cccd ? ' - ' + detailModal.cccd : ''}`],
+                                    ['Địa chỉ', detailModal.dia_chi_kh || detailModal.dia_chi || '—'],
                                     ['SĐT', detailModal.so_dien_thoai || '—'],
-                                    ...(detailModal.loai_don === 'Trao đổi' ? [
-                                        ['CCCD / CMND', detailModal.cccd || '—'],
-                                        ['Địa chỉ KH', detailModal.dia_chi_kh || '—'],
-                                    ] : [
-                                        ['Địa chỉ giao', detailModal.dia_chi || '—'],
-                                    ]),
-                                    ['Ngày đặt', detailModal.ngay_dat],
-                                    ['Ngày giao', detailModal.ngay_giao || '—'],
-                                    ['Người tạo', detailModal.nguoi_tao || '—'],
                                 ].map(([k, v]) => (
                                     <div key={k} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px' }}>
                                         <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 3 }}>{k.toUpperCase()}</div>
@@ -417,11 +427,11 @@ export default function DonHangPage() {
                                     <div style={{ fontSize: 16, fontWeight: 900, color: '#15803d' }}>{fmt(detailModal.tong_tien)} ₫</div>
                                 </div>
                                 <div style={{ background: '#fff7ed', borderRadius: 8, padding: '10px 14px', border: '1px solid #fed7aa' }}>
-                                    <div style={{ fontSize: 10, color: '#c2410c', fontWeight: 700, marginBottom: 3 }}>ĐẶT CỌC</div>
+                                    <div style={{ fontSize: 10, color: '#c2410c', fontWeight: 700, marginBottom: 3 }}>TIỀN MẶT</div>
                                     <div style={{ fontSize: 16, fontWeight: 900, color: '#c2410c' }}>{fmt(detailModal.dat_coc)} ₫</div>
                                 </div>
                                 <div style={{ background: '#fef3c7', borderRadius: 8, padding: '10px 14px', border: '1px solid #fde68a' }}>
-                                    <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, marginBottom: 3 }}>CÒN LẠI</div>
+                                    <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, marginBottom: 3 }}>CHUYỂN KHOẢN</div>
                                     <div style={{ fontSize: 16, fontWeight: 900, color: '#92400e' }}>{fmt((detailModal.tong_tien || 0) - (detailModal.dat_coc || 0))} ₫</div>
                                 </div>
                             </div>
@@ -444,6 +454,21 @@ export default function DonHangPage() {
                         </div>
                     )}
                 </Modal>
+
+                {/* Confirm Delete All */}
+                {confirmDelAll && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ background: 'white', borderRadius: 14, padding: 28, maxWidth: 360, width: '90%', textAlign: 'center' }}>
+                            <div style={{ fontSize: 32, marginBottom: 12 }}>🧨</div>
+                            <div style={{ fontWeight: 700, marginBottom: 8 }}>Xóa {list.length} đơn hàng?</div>
+                            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Bạn có chắc muốn xóa <b>tất cả đơn hàng hiện có</b> không? Hành động này sẽ không thể hoàn tác.</div>
+                            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                                <button onClick={() => setConfirmDelAll(false)} disabled={isDeletingAll} style={{ ...btn('#f1f5f9', '#475569') }}>Hủy</button>
+                                <button onClick={delAll} disabled={isDeletingAll} style={{ ...btn('#dc2626') }}>{isDeletingAll ? 'Đang xóa...' : 'Xóa tất cả'}</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Confirm Delete */}
                 {confirmDel && (

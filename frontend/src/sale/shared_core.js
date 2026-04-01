@@ -377,6 +377,26 @@ const formatWeight = value => {
     if (!Number.isFinite(value)) return '';
     return value.toFixed(4).replace(/\.?0+$/, '') || '0';
 };
+const getGoldLineEffectiveQuantity = (line) => {
+    const effectiveCat = line?.tx === 'trade' ? 'gold' : line?.cat;
+    const baseQty = parseFmt(line?.qty || 0);
+    if (!['sell', 'trade'].includes(line?.tx) || effectiveCat !== 'gold') {
+        return Math.max(0, baseQty);
+    }
+    const itemGoldWeight = parseWeight(line?.itemGoldWeight || 0);
+    const addGold = parseWeight(line?.sellAddedGold || 0);
+    const cutGold = parseWeight(line?.sellCutGold || 0);
+    const baseGoldQty = line?.itemId ? (itemGoldWeight || 1) : baseQty;
+    return Math.max(0, baseGoldQty + addGold - cutGold);
+};
+const getTradeCompensationQuantity = (line) => {
+    if (line?.tx !== 'trade') return 0;
+    const oldGoldQty = Math.max(0, parseWeight(line?.customerQty || 0));
+    const newGoldQty = getGoldLineEffectiveQuantity(line);
+    return Math.min(oldGoldQty, newGoldQty);
+};
+const getTradeCompensationUnitAmount = (line) => Math.max(0, Math.round(parseFmt(line?.tradeComp || 0)));
+const getTradeCompensationAmount = (line) => Math.round(getTradeCompensationQuantity(line) * getTradeCompensationUnitAmount(line));
 const computeRepairNextWeight = (line, repairMode) => {
     const current = parseWeight(line?.tl_vang_hien_tai);
     if (repairMode !== 'sua') return line?.tl_vang_hien_tai || formatWeight(current);
@@ -479,6 +499,10 @@ export {
   inventoryStatusLabel,
   parseWeight,
   formatWeight,
+  getGoldLineEffectiveQuantity,
+  getTradeCompensationQuantity,
+  getTradeCompensationUnitAmount,
+  getTradeCompensationAmount,
   computeRepairNextWeight,
   BUY_GOLD_OTHER_OPTION,
   firstProductForCategory,

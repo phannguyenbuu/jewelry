@@ -10,8 +10,10 @@ import {
 
 const RECEIPT_WIDTH = 620;
 const RECEIPT_PADDING = 40;
-const RECEIPT_SCALE = 2;
-const RECEIPT_LAYOUT_SCALE = 0.6;
+const RECEIPT_MEASURE_SCALE = 1;
+const RECEIPT_OUTPUT_SCALE = 4;
+const RECEIPT_LAYOUT_SCALE = 0.9;
+const RECEIPT_TABLE_FONT_SCALE = 0.64;
 const MIN_RECEIPT_HEIGHT = 920;
 const WORKING_RECEIPT_HEIGHT = 4200;
 const RECEIPT_FONT = "'Tahoma', 'Arial', 'Segoe UI', sans-serif";
@@ -80,6 +82,27 @@ const ellipsisText = (ctx, text, maxWidth) => {
         next = next.slice(0, -1);
     }
     return `${next}...`;
+};
+
+const scaleFontSpec = (font, scale = 1) => (
+    String(font || '').replace(/(\d+(?:\.\d+)?)px/, (_, rawSize) => `${Math.max(1, Number(rawSize) * scale)}px`)
+);
+
+const fitFontToWidth = (ctx, text, width, font, minScale = 1) => {
+    const source = safeText(text, '');
+    if (!source || !width || width <= 0) return font;
+    ctx.font = font;
+    const measuredWidth = ctx.measureText(source).width;
+    if (!measuredWidth || measuredWidth <= width) return font;
+
+    const matched = String(font || '').match(/(\d+(?:\.\d+)?)px/);
+    if (!matched) return font;
+
+    const baseSize = Number(matched[1]);
+    const nextSize = Math.max(baseSize * minScale, baseSize * (width / measuredWidth));
+    if (!Number.isFinite(nextSize) || nextSize <= 0 || nextSize >= baseSize) return font;
+
+    return String(font).replace(/(\d+(?:\.\d+)?)px/, `${nextSize}px`);
 };
 
 const splitLongToken = (ctx, token, maxWidth) => {
@@ -565,11 +588,11 @@ const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
         headerLines,
         sections,
         summaryRows: [
-            { label: 'Dẻ:', value: summary.oldGold, bold: false },
+            summary.oldGold > 0 ? { label: 'Dẻ:', value: summary.oldGold, bold: false } : null,
             { label: 'Vàng mới:', value: summary.newGold, bold: true },
             { label: hasTrade ? 'Tiền bù:' : 'Tiền bớt:', value: adjustmentAmount, bold: false },
             { label: 'Tổng cộng:', value: paymentAmount, bold: true },
-        ],
+        ].filter(Boolean),
         footerLines: FOOTER_LINES,
         machineLine: `In từ máy tính: ${machineName}`,
     };
@@ -583,21 +606,34 @@ const drawCellText = (
     width,
     align = 'left',
     font = `400 ${px(28)}px ${RECEIPT_FONT}`,
-    color = RECEIPT_TEXT_COLOR
+    color = RECEIPT_TEXT_COLOR,
+    options = {}
 ) => {
+    const {
+        allowEllipsis = true,
+        clip = false,
+        fitMinScale = 1,
+    } = options;
+    const source = safeText(text, '');
+    const clippedFont = fitMinScale < 1 ? fitFontToWidth(ctx, source, width, font, fitMinScale) : font;
     ctx.save();
-    ctx.font = font;
+    ctx.font = clippedFont;
     ctx.fillStyle = color;
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
+    if (clip) {
+        ctx.beginPath();
+        ctx.rect(x, y - px(26), width, px(52));
+        ctx.clip();
+    }
     const drawX = align === 'right' ? x + width : align === 'center' ? x + width / 2 : x;
-    ctx.fillText(ellipsisText(ctx, text, width), drawX, y);
+    ctx.fillText(allowEllipsis ? ellipsisText(ctx, source, width) : source, drawX, y);
     ctx.restore();
 };
 
 const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, rowMinHeight) => {
-    ctx.font = `400 ${px(26)}px ${RECEIPT_FONT}`;
-    const bodyLineHeight = px(28);
+    ctx.font = scaleFontSpec(`400 ${px(26)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE);
+    const bodyLineHeight = px(22);
     const labelLines = wrapText(ctx, row.code, colWidths[0] - px(18), 2);
     const rowHeight = Math.max(rowMinHeight, px(24) + labelLines.length * bodyLineHeight);
 
@@ -610,7 +646,7 @@ const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, ro
     }
 
     ctx.save();
-    ctx.font = `400 ${px(28)}px ${RECEIPT_FONT}`;
+    ctx.font = scaleFontSpec(`400 ${px(28)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE);
     ctx.fillStyle = RECEIPT_TEXT_COLOR;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -619,9 +655,10 @@ const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, ro
     });
     ctx.restore();
 
-    drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
-    drawCellText(ctx, row.labor, colXs[2], y + rowHeight / 2, colWidths[2], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
-    drawCellText(ctx, row.price, colXs[3], y + rowHeight / 2, colWidths[3], 'center', `400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`);
+    const cellTextOptions = { allowEllipsis: false, clip: true };
+    drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
+    drawCellText(ctx, row.labor, colXs[2], y + rowHeight / 2, colWidths[2], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
+    drawCellText(ctx, row.price, colXs[3], y + rowHeight / 2, colWidths[3], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
     drawCellText(
         ctx,
         `${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`,
@@ -629,15 +666,17 @@ const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, ro
         y + rowHeight / 2,
         colWidths[4] - px(16),
         'right',
-        `500 ${px(34)}px ${RECEIPT_NUMBER_FONT}`
+        scaleFontSpec(`500 ${px(34)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE),
+        RECEIPT_TEXT_COLOR,
+        cellTextOptions
     );
 
     return y + rowHeight;
 };
 
-const drawReceiptToCanvas = (ctx, model) => {
-    const width = ctx.canvas.width / RECEIPT_SCALE;
-    const height = ctx.canvas.height / RECEIPT_SCALE;
+const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => {
+    const width = ctx.canvas.width / renderScale;
+    const height = ctx.canvas.height / renderScale;
     const tableLeft = RECEIPT_PADDING;
     const tableWidth = width - RECEIPT_PADDING * 2;
     const colWidths = [
@@ -708,7 +747,9 @@ const drawReceiptToCanvas = (ctx, model) => {
             y + headerHeight / 2,
             index === 0 ? colWidths[index] - px(20) : colWidths[index],
             index === 0 ? 'left' : 'center',
-            `600 ${px(28)}px ${RECEIPT_FONT}`
+            scaleFontSpec(`600 ${px(28)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE),
+            RECEIPT_TEXT_COLOR,
+            { allowEllipsis: false, clip: true }
         );
     });
     y += headerHeight;
@@ -808,25 +849,25 @@ const createSaleReceiptPreview = async ({ orderId, customerInfo, lines, rates, t
     const model = buildReceiptModel({ orderId, customerInfo, lines, rates, total });
     await ensureFontsReady();
 
-    const createCanvas = (logicalHeight) => {
+    const createCanvas = (logicalHeight, renderScale) => {
         const canvas = document.createElement('canvas');
-        canvas.width = RECEIPT_WIDTH * RECEIPT_SCALE;
-        canvas.height = logicalHeight * RECEIPT_SCALE;
+        canvas.width = RECEIPT_WIDTH * renderScale;
+        canvas.height = logicalHeight * renderScale;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
             throw new Error('Không tạo được preview PNG.');
         }
-        ctx.scale(RECEIPT_SCALE, RECEIPT_SCALE);
+        ctx.scale(renderScale, renderScale);
         return { canvas, ctx };
     };
 
-    const working = createCanvas(WORKING_RECEIPT_HEIGHT);
-    const usedHeight = Math.max(MIN_RECEIPT_HEIGHT, Math.ceil(drawReceiptToCanvas(working.ctx, model) + px(36)));
+    const working = createCanvas(WORKING_RECEIPT_HEIGHT, RECEIPT_MEASURE_SCALE);
+    const usedHeight = Math.max(MIN_RECEIPT_HEIGHT, Math.ceil(drawReceiptToCanvas(working.ctx, model, RECEIPT_MEASURE_SCALE) + px(36)));
     let canvas = working.canvas;
 
-    if (usedHeight !== WORKING_RECEIPT_HEIGHT) {
-        const finalRender = createCanvas(usedHeight);
-        drawReceiptToCanvas(finalRender.ctx, model);
+    if (usedHeight !== WORKING_RECEIPT_HEIGHT || RECEIPT_MEASURE_SCALE !== RECEIPT_OUTPUT_SCALE) {
+        const finalRender = createCanvas(usedHeight, RECEIPT_OUTPUT_SCALE);
+        drawReceiptToCanvas(finalRender.ctx, model, RECEIPT_OUTPUT_SCALE);
         canvas = finalRender.canvas;
     }
 

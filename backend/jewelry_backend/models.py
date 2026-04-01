@@ -1,3 +1,5 @@
+from werkzeug.security import check_password_hash, generate_password_hash
+
 from .state import db
 
 
@@ -50,8 +52,25 @@ class ThuNgan(db.Model):
     ten_thu_ngan      = db.Column(db.String(150), nullable=False)
     kho_id            = db.Column(db.Integer, db.ForeignKey('kho.id'), nullable=False)
     nhan_vien_id      = db.Column(db.Integer, nullable=True)
+    password_hash     = db.Column(db.String(255), default='')
     ghi_chu           = db.Column(db.Text)
     ngay_tao          = db.Column(db.String(30), default='')
+
+    @property
+    def has_password(self):
+        return bool(str(self.password_hash or '').strip())
+
+    def set_password(self, raw_password):
+        password = str(raw_password or '')
+        self.password_hash = generate_password_hash(password) if password else ''
+
+    def check_password(self, raw_password):
+        if not self.has_password:
+            return False
+        try:
+            return check_password_hash(self.password_hash, str(raw_password or ''))
+        except ValueError:
+            return False
 
 
 class LoaiVang(db.Model):

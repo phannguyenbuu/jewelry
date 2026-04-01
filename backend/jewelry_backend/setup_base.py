@@ -219,6 +219,18 @@ def _ensure_quay_nho_thu_ngan_column():
     db.session.commit()
 
 
+def _ensure_thu_ngan_password_hash_column():
+    table_name = ThuNgan.__table__.name
+    inspector = inspect(db.engine)
+    if table_name not in inspector.get_table_names():
+        return
+    column_names = {col['name'] for col in inspector.get_columns(table_name)}
+    if 'password_hash' in column_names:
+        return
+    db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN password_hash VARCHAR(255) DEFAULT ''"))
+    db.session.commit()
+
+
 def _ensure_thu_ngan_so_quy_detail_columns():
     table_name = ThuNganSoQuyTheoNguoi.__table__.name
     inspector = inspect(db.engine)

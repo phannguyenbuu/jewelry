@@ -24,12 +24,33 @@ def _thu_ngan_json(obj, kho_map=None, nhan_vien_map=None, quays_by_thu_ngan=None
         'ten_kho': kho_map.get(obj.kho_id, ''),
         'nhan_vien_id': obj.nhan_vien_id,
         'nguoi_quan_ly': manager.ho_ten if manager else '',
+        'has_password': bool(getattr(obj, 'has_password', False)),
         'ghi_chu': obj.ghi_chu or '',
         'ngay_tao': obj.ngay_tao or '',
         'quay_ids': [q.id for q in quays],
         'quays': [{'id': q.id, 'ten_quay': q.ten_quay} for q in quays],
         'so_quay': len(quays),
     }
+
+
+def _resolve_thu_ngan_password(data):
+    payload = data or {}
+    if payload.get('clear_password'):
+        return '', None
+    if 'password' not in payload:
+        return None, None
+
+    password = str(payload.get('password') or '')
+    if not password:
+        return None, None
+    if len(password) < 4:
+        return None, ('Mật khẩu thu ngân phải có ít nhất 4 ký tự.', 400)
+
+    if 'confirm_password' in payload:
+        confirm_password = str(payload.get('confirm_password') or '')
+        if password != confirm_password:
+            return None, ('Mật khẩu nhập lại không khớp.', 400)
+    return password, None
 
 
 def _save_thu_ngan_record(obj, data, is_new=False):
@@ -48,6 +69,10 @@ def _save_thu_ngan_record(obj, data, is_new=False):
     if nhan_vien_id is not None and not NhanVien.query.get(nhan_vien_id):
         return None, ('Nhân sự quản lý không tồn tại.', 404)
 
+    password_value, password_error = _resolve_thu_ngan_password(data)
+    if password_error:
+        return None, password_error
+
     quay_ids = _normalize_quay_ids((data or {}).get('quay_ids'))
     assigned_quays = []
     if quay_ids:
@@ -64,6 +89,8 @@ def _save_thu_ngan_record(obj, data, is_new=False):
     obj.kho_id = kho.id
     obj.nhan_vien_id = nhan_vien_id
     obj.ghi_chu = (data or {}).get('ghi_chu', obj.ghi_chu or '')
+    if password_value is not None:
+        obj.set_password(password_value)
     if is_new and not obj.ngay_tao:
         obj.ngay_tao = now_str()
 

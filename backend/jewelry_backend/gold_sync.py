@@ -12,6 +12,7 @@ from .setup_base import (
     _ensure_item_tuoi_vang_column,
     _ensure_quay_nho_thu_ngan_column,
     _ensure_search_indexes,
+    _ensure_thu_ngan_password_hash_column,
     _ensure_thu_ngan_so_quy_detail_columns,
     _ensure_tuoi_vang_columns,
     _get_or_create_default_kho,
@@ -448,6 +449,7 @@ def bootstrap_database():
     _ensure_item_tuoi_vang_column()
     _ensure_tuoi_vang_columns()
     _ensure_quay_nho_thu_ngan_column()
+    _ensure_thu_ngan_password_hash_column()
     _ensure_thu_ngan_so_quy_detail_columns()
     _ensure_khach_hang_sao_column()
     _ensure_khach_hang_favorite_column()

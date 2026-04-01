@@ -89,6 +89,8 @@ export default function ThuNganManager({ onCashiersChanged }) {
       kho_id: kho.id,
       kho_ten: kho.ten_kho,
       nhan_vien_id: '',
+      password: '',
+      confirm_password: '',
       ghi_chu: '',
       quay_ids: [],
       ton_dau_ky_tien_mat: '',
@@ -123,6 +125,8 @@ export default function ThuNganManager({ onCashiersChanged }) {
       kho_ten: cashier.ten_kho,
       nhan_vien_id: cashier.nhan_vien_id || '',
       quay_ids: cashier.quay_ids || cashier.quays?.map((q) => q.id) || [],
+      password: '',
+      confirm_password: '',
       ton_dau_ky_tien_mat: tonDauKyTienMat,
       ton_dau_ky_map: tonDauKyMap,
     });
@@ -133,6 +137,14 @@ export default function ThuNganManager({ onCashiersChanged }) {
     e.preventDefault();
     try {
       const isEdit = cashierModal !== 'add';
+      const password = String(cashierForm.password || '');
+      const confirmPassword = String(cashierForm.confirm_password || '');
+      if (password && password.length < 4) {
+        throw new Error('Mật khẩu thu ngân phải có ít nhất 4 ký tự.');
+      }
+      if (password && password !== confirmPassword) {
+        throw new Error('Mật khẩu nhập lại không khớp.');
+      }
       const payload = {
         ten_thu_ngan: cashierForm.ten_thu_ngan || '',
         kho_id: cashierForm.kho_id,
@@ -140,6 +152,10 @@ export default function ThuNganManager({ onCashiersChanged }) {
         ghi_chu: cashierForm.ghi_chu || '',
         quay_ids: cashierForm.quay_ids || [],
       };
+      if (password) {
+        payload.password = password;
+        payload.confirm_password = confirmPassword;
+      }
       const savedRes = await readResponse(await fetch(
         isEdit ? `${API}/api/thu_ngan/${cashierModal.id}` : `${API}/api/thu_ngan`,
         { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
@@ -343,6 +359,9 @@ export default function ThuNganManager({ onCashiersChanged }) {
                                 {cashier.nguoi_quan_ly && <span style={badge('#eef2ff', '#4338ca')}>Nhân sự: {cashier.nguoi_quan_ly}</span>}
                                 <span style={badge('#ccfbf1', '#0f766e')}>{assignedQuays.length} quầy nhỏ</span>
                                 {cashier.ngay_tao && <span style={{ fontSize: 10, color: '#94a3b8' }}>🕐 {cashier.ngay_tao}</span>}
+                                <span style={badge(cashier.has_password ? '#dcfce7' : '#fef3c7', cashier.has_password ? '#166534' : '#92400e')}>
+                                  {cashier.has_password ? 'Đã có mật khẩu' : 'Chưa có mật khẩu'}
+                                </span>
                               </div>
                               <div
                                 style={{ display: 'flex', gap: 5, flexShrink: 0 }}
@@ -416,6 +435,30 @@ export default function ThuNganManager({ onCashiersChanged }) {
               <option value="">-- Chọn kho --</option>
               {sortedKhos.map((kho) => <option key={kho.id} value={kho.id}>{kho.ten_kho}</option>)}
             </select>
+          </Field>
+          <Field label="Mật khẩu đăng nhập">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                type="password"
+                autoComplete="new-password"
+                style={inp}
+                placeholder={cashierModal === 'add' ? 'Nhập mật khẩu cho user thu ngân' : 'Để trống nếu không đổi mật khẩu'}
+                value={cashierForm.password || ''}
+                onChange={(e) => setCashierForm({ ...cashierForm, password: e.target.value })}
+              />
+              <input
+                type="password"
+                autoComplete="new-password"
+                style={inp}
+                placeholder="Nhập lại mật khẩu"
+                value={cashierForm.confirm_password || ''}
+                onChange={(e) => setCashierForm({ ...cashierForm, confirm_password: e.target.value })}
+              />
+              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                Tên thu ngân hiện được dùng như user đăng nhập. Mật khẩu tối thiểu 4 ký tự.
+                {cashierModal !== 'add' ? ` ${cashierModal?.has_password ? 'Để trống nếu giữ nguyên mật khẩu hiện tại.' : 'Thu ngân này hiện chưa có mật khẩu.'}` : ''}
+              </div>
+            </div>
           </Field>
           <Field label="Nhân sự phụ trách">
             <select style={inp} value={cashierForm.nhan_vien_id || ''} onChange={handleCashierStaffChange}>

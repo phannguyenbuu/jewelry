@@ -344,6 +344,7 @@ def _normalize_print_command_payload(data):
         copies = 1
     return {
         'printer_name': printer_name,
+        'unc_path': _clean_text(payload.get('unc_path') or payload.get('target_unc_path')),
         'document_name': document_name,
         'mode': mode,
         'content_text': str(payload.get('content_text') or ''),

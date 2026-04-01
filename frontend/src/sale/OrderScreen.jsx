@@ -52,8 +52,16 @@ function generateThumbnail(base64, mimeType = 'image/jpeg') {
     });
 }
 const RECEIPT_PRINT_TARGETS = {
+    1: {
+        machineName: 'LAPTOP_PHAT',
+        hostName: 'LAPTOP_PHAT',
+        deviceName: 'LAPTOP_PHAT',
+        printerName: 'EPSON TM-T81III Receipt6',
+        uncPath: '\\\\LAPTOP_PHAT\\EPSON TM-T81III Receipt6',
+    },
     5: {
         machineName: 'MAY05',
+        hostName: '192.168.1.110',
         deviceName: 'MAY05',
         printerName: 'EPSON TM-T(203dpi) Receipt6',
         uncPath: '\\\\MAY05\\EPSON TM-T(203dpi) Receipt6',
@@ -649,6 +657,12 @@ export default function OrderScreen({
             handlePrintReceipt(currentPosNo);
             return;
         }
+        const printOptions = {
+            paper_width_mm: 76,
+            margin_mm: 0,
+            fit_width: true,
+            print_strategy: 'gdi_image',
+        };
         const imageData = parseImageDataUrl(receiptPreviewUrl);
         if (!imageData?.imageBase64) {
             setReceiptActionMessage('KhÃ´ng Ä‘á»c Ä‘Æ°á»£c PNG Ä‘á»ƒ gá»­i mÃ¡y in.');
@@ -669,9 +683,11 @@ export default function OrderScreen({
                     file_name: `${safeOrderId}-pos-${currentPosNo}.png`,
                     requested_by: 'POS Mobile',
                     machine_name: target.machineName,
+                    host_name: target.hostName,
                     device_name: target.deviceName,
                     printer_name: target.printerName,
                     unc_path: target.uncPath,
+                    options: printOptions,
                 }),
             });
             const payload = await response.json().catch(() => ({}));
@@ -693,6 +709,12 @@ export default function OrderScreen({
             handlePrintReceipt(currentPosNo);
             return;
         }
+        const printOptions = {
+            paper_width_mm: 76,
+            margin_mm: 0,
+            fit_width: true,
+            print_strategy: 'gdi_image',
+        };
         const imageData = parseImageDataUrl(receiptPreviewUrl);
         if (!imageData?.imageBase64) {
             setReceiptActionMessage('Khong doc duoc PNG de gui may in.');
@@ -713,9 +735,11 @@ export default function OrderScreen({
                     file_name: `${safeOrderId}-pos-${currentPosNo}.png`,
                     requested_by: 'POS Mobile',
                     machine_name: target.machineName,
+                    host_name: target.hostName,
                     device_name: target.deviceName,
                     printer_name: target.printerName,
                     unc_path: target.uncPath,
+                    options: printOptions,
                 }),
             });
             const payload = await response.json().catch(() => ({}));
@@ -1161,7 +1185,7 @@ export default function OrderScreen({
                         {draftMessage && <div style={{ marginTop: 8, fontSize: 10, color: '#6b7280' }}>{draftMessage}</div>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                        <button
+                        {false && <button
                             onClick={onSaveDraft}
                             title="Lưu giao dịch"
                             aria-label="Lưu giao dịch"
@@ -1174,7 +1198,7 @@ export default function OrderScreen({
                             }}
                         >
                             <IoSaveOutline />
-                        </button>
+                        </button>}
                         <button
                             onClick={handleOpenPrintPreview}
                             title="In Pos"

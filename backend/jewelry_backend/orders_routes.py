@@ -12,7 +12,13 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from flask import jsonify, request, send_from_directory
+from sqlalchemy.orm.attributes import flag_modified
 
+from .company_bank_accounts import (
+    LEGACY_BANK_LEDGER_NAME,
+    find_company_bank_account,
+    list_company_bank_accounts,
+)
 from . import easyinvoice_client
 from .state import app, db
 from .models import ChungTu, DonHang, HangSuaBo, HeThongCauHinh, Item, KhachHang, NhanVien, ThuChi, ThuNgan
@@ -168,6 +174,111 @@ def _duplicate_match_priority(match):
     if 'so_dien_thoai' in fields:
         return (1, -(match.get('record') or {}).get('id', 0))
     return (2, -(match.get('record') or {}).get('id', 0))
+
+
+TIEN_MAT_CATEGORY = 'Tiền mặt'
+BANK_ACCOUNT_CATEGORY = LEGACY_BANK_LEDGER_NAME
+
+
+def _normalize_so_quy_ngay(value):
+    text = str(value or '').strip()
+    if not text:
+        return today_iso()
+    return text[:10]
+
+
+def _apply_signed_amount_to_cashier_detail(thu_ngan_obj, ngay, category_name, amount_vnd):
+    amount = _parse_bigint(amount_vnd, 0)
+    if not thu_ngan_obj or amount == 0:
+        return False
+
+    from .cashier_routes import (
+        _get_or_create_thu_ngan_so_quy_row,
+        _make_thu_ngan_so_quy_detail_row,
+        _sync_thu_ngan_so_quy_detail_totals,
+    )
+
+    scaled_amount = _parse_thu_ngan_amount_input(amount, 0)
+    if scaled_amount == 0:
+        return False
+
+    so_quy = _get_or_create_thu_ngan_so_quy_row(ngay, thu_ngan_obj.id)
+    chi_tiet = list(so_quy.chi_tiet or [])
+
+    for detail in chi_tiet:
+        if _clean_text(detail.get('tuoi_vang')) != category_name:
+            continue
+        opening = _parse_bigint(detail.get('ton_dau_ky', detail.get('so_tien_dau_ngay')), 0)
+        current = _parse_bigint(detail.get('so_du_hien_tai', detail.get('so_tien_hien_tai')), 0)
+        next_current = current + scaled_amount
+        detail['so_du_hien_tai'] = next_current
+        detail['gia_tri_lech'] = next_current - opening
+        break
+    else:
+        chi_tiet.insert(0, _make_thu_ngan_so_quy_detail_row(
+            category_name,
+            ton_dau_ky=0,
+            so_du_hien_tai=scaled_amount,
+            gia_tri_lech=scaled_amount,
+        ))
+
+    so_quy.chi_tiet = chi_tiet
+    flag_modified(so_quy, 'chi_tiet')
+    _sync_thu_ngan_so_quy_detail_totals(so_quy)
+    so_quy.cap_nhat_luc = now_str()
+    db.session.add(so_quy)
+    return True
+
+
+def _resolve_company_bank_ledger_name(account_id='', ledger_key='', account_no=''):
+    account = find_company_bank_account(
+        account_id=account_id,
+        ledger_key=ledger_key,
+        account_no=account_no,
+    )
+    if account:
+        return account.get('ledger_key') or BANK_ACCOUNT_CATEGORY
+
+    _, accounts = list_company_bank_accounts()
+    if accounts:
+        return (accounts[0] or {}).get('ledger_key') or BANK_ACCOUNT_CATEGORY
+
+    return BANK_ACCOUNT_CATEGORY
+
+
+def _apply_sale_payment_bookings(
+    ngay,
+    cash_payment=0,
+    bank_payment=0,
+    company_bank_account_id='',
+    company_bank_ledger_key='',
+    company_bank_account_no='',
+):
+    updated = False
+    cash = _parse_bigint(cash_payment, 0)
+    bank = _parse_bigint(bank_payment, 0)
+
+    # /sale gui so tien co dau: duong = khach tra, am = cua hang chi tra lai khach.
+    if cash != 0:
+        tn1 = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%TN1%')).order_by(ThuNgan.id).first()
+        if tn1:
+            updated = _apply_signed_amount_to_cashier_detail(tn1, ngay, TIEN_MAT_CATEGORY, cash) or updated
+        else:
+            print('Khong tim thay thu ngan TN1 de cap nhat tien mat cho don hang.')
+
+    if bank != 0:
+        kho_tong = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%Kho Tổng%')).order_by(ThuNgan.id).first()
+        if kho_tong:
+            bank_category = _resolve_company_bank_ledger_name(
+                account_id=company_bank_account_id,
+                ledger_key=company_bank_ledger_key,
+                account_no=company_bank_account_no,
+            )
+            updated = _apply_signed_amount_to_cashier_detail(kho_tong, ngay, bank_category, bank) or updated
+        else:
+            print('Khong tim thay Kho Tong de cap nhat tai khoan ngan hang cho don hang.')
+
+    return updated
 
 
 @app.route('/api/khach_hang', methods=['GET'])
@@ -986,58 +1097,18 @@ def add_don_hang():
 
     if created:
         try:
-            cash = int(d.get('cash_payment') or 0)
-            bank = int(d.get('bank_payment') or 0)
-            if cash != 0 or bank != 0:
-                from .models import ThuNgan
-                from .cashier_routes import _get_or_create_thu_ngan_so_quy_row, _sync_thu_ngan_so_quy_detail_totals
-                from sqlalchemy.orm.attributes import flag_modified
-                
-                ngay_hom_nay = today_iso()
-                
-                if cash != 0:
-                    tn1 = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%TN1%')).first()
-                    if tn1:
-                        so_quy_tn1 = _get_or_create_thu_ngan_so_quy_row(ngay_hom_nay, tn1.id)
-                        chi_tiet_tn1 = list(so_quy_tn1.chi_tiet or [])
-                        found = False
-                        for detail in chi_tiet_tn1:
-                            if detail.get('tuoi_vang') == 'Tiền mặt':
-                                current = int(detail.get('so_du_hien_tai') or detail.get('so_tien_hien_tai') or 0)
-                                # "trừ đi trong Số dư hiện tại của TN1"
-                                detail['so_du_hien_tai'] = current - cash
-                                found = True
-                                break
-                        if not found:
-                            from .cashier_routes import _make_thu_ngan_so_quy_detail_row
-                            chi_tiet_tn1.insert(0, _make_thu_ngan_so_quy_detail_row('Tiền mặt', ton_dau_ky=0, so_du_hien_tai=-cash))
-                        so_quy_tn1.chi_tiet = chi_tiet_tn1
-                        flag_modified(so_quy_tn1, 'chi_tiet')
-                        _sync_thu_ngan_so_quy_detail_totals(so_quy_tn1)
-                        db.session.add(so_quy_tn1)
-
-                if bank != 0:
-                    kho_tong = ThuNgan.query.filter(ThuNgan.ten_thu_ngan.ilike('%Kho Tổng%')).first()
-                    if kho_tong:
-                        so_quy_kho = _get_or_create_thu_ngan_so_quy_row(ngay_hom_nay, kho_tong.id)
-                        chi_tiet_kho = list(so_quy_kho.chi_tiet or [])
-                        found = False
-                        for detail in chi_tiet_kho:
-                            if detail.get('tuoi_vang') == 'Tài Khoản Ngân Hàng':
-                                current = int(detail.get('so_du_hien_tai') or detail.get('so_tien_hien_tai') or 0)
-                                # "cộng thêm trong tài khoản ngân hàng của kho tổng"
-                                detail['so_du_hien_tai'] = current + bank
-                                found = True
-                                break
-                        if not found:
-                            from .cashier_routes import _make_thu_ngan_so_quy_detail_row
-                            chi_tiet_kho.insert(0, _make_thu_ngan_so_quy_detail_row('Tài Khoản Ngân Hàng', ton_dau_ky=0, so_du_hien_tai=bank))
-                        so_quy_kho.chi_tiet = chi_tiet_kho
-                        flag_modified(so_quy_kho, 'chi_tiet')
-                        _sync_thu_ngan_so_quy_detail_totals(so_quy_kho)
-                        db.session.add(so_quy_kho)
+            updated = _apply_sale_payment_bookings(
+                _normalize_so_quy_ngay(d.get('ngay_dat')),
+                cash_payment=d.get('cash_payment'),
+                bank_payment=d.get('bank_payment'),
+                company_bank_account_id=d.get('company_bank_account_id'),
+                company_bank_ledger_key=d.get('company_bank_ledger_key'),
+                company_bank_account_no=d.get('company_bank_account_no'),
+            )
+            if updated:
                 db.session.commit()
         except Exception as e:
+            db.session.rollback()
             print("Loi cap nhat thu ngan:", e)
 
     return jsonify({'msg': 'Created' if created else 'Updated', 'id': obj.id, 'ma_don': obj.ma_don}), 201 if created else 200

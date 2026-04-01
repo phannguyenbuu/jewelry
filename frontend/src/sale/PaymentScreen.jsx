@@ -12,17 +12,11 @@ import EasyInvoicePaper from './EasyInvoicePaper';
 
 import { ConfirmDialog } from './Dialogs';
 
-import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
+import { buildCompanyBankLabel, fetchCompanyBankAccounts, withFallbackCompanyBankAccounts } from '../lib/companyBankAccounts';
+import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, getTradeCompensationAmount, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
 
 import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogoUrl } from './vietQrBanks';
 
-
-
-const FIXED_QR_BANK = 'BIDV';
-
-const FIXED_QR_ACCOUNT_NO = 'MBFDN2473E9644CABID';
-
-const FIXED_QR_ACCOUNT_NAME = '';
 
 const FIXED_QR_NOTE = 'Mua hang tai cong ty van kim';
 
@@ -50,6 +44,22 @@ const normalizeVietQrBankCode = (value) => {
 
     return pickText(bank?.code || value).toUpperCase();
 
+};
+
+const pickPreferredCompanyBankAccount = (accounts, amount, preferredId, isIncoming = true) => {
+    const normalizedAccounts = withFallbackCompanyBankAccounts(accounts, true);
+    if (!normalizedAccounts.length) return null;
+    const preferred = normalizedAccounts.find(account => String(account.id) === String(preferredId || '')) || null;
+    if (!isIncoming) return preferred || normalizedAccounts[0] || null;
+
+    const absAmount = Math.max(0, Math.round(Number(amount || 0)));
+    const canReceive = (account) => {
+        const maxIncoming = Math.max(0, Math.round(Number(account?.max_incoming_amount || 0)));
+        return maxIncoming <= 0 || absAmount <= maxIncoming;
+    };
+
+    if (preferred && canReceive(preferred)) return preferred;
+    return normalizedAccounts.find(canReceive) || preferred || normalizedAccounts[0] || null;
 };
 
 const normalizeSharedCustomerInfo = (customerInfo = {}) => ({
@@ -146,7 +156,7 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
         : inventoryValue;
 
-    const tradeAdjustmentAmount = Math.round(parseFmt(nextLine.tradeComp || 0));
+    const tradeAdjustmentAmount = nextLine.tx === 'trade' ? getTradeCompensationAmount(nextLine) : 0;
 
     const tradeCustomerAmount = nextLine.tx === 'trade' ? Math.round(customerQty * parseFmt(customerRate)) : 0;
 
@@ -445,11 +455,32 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
     const [voucherSending, setVoucherSending] = useState(false);
 
     const [payoutBankMenuOpen, setPayoutBankMenuOpen] = useState(false);
+    const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
+    const [selectedCompanyBankAccountId, setSelectedCompanyBankAccountId] = useState('');
+    const [companyBankLoadError, setCompanyBankLoadError] = useState('');
     useEffect(() => {
 
         setEasyInvoiceDraft(prev => mergeEasyInvoiceDraft(createEasyInvoiceDraft({ orderId, customerInfo, lines, rates }), prev));
 
     }, [orderId, customerInfo, lines, rates]);
+
+    useEffect(() => {
+        let cancelled = false;
+        fetchCompanyBankAccounts()
+            .then((items) => {
+                if (cancelled) return;
+                setCompanyBankAccounts(withFallbackCompanyBankAccounts(items, true));
+                setCompanyBankLoadError('');
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setCompanyBankAccounts(withFallbackCompanyBankAccounts([], true));
+                setCompanyBankLoadError('Chưa tải được danh sách tài khoản công ty, đang dùng tài khoản mặc định.');
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
 
@@ -460,6 +491,19 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
         }
 
     }, [isIn]);
+
+    useEffect(() => {
+        const preferredAccount = pickPreferredCompanyBankAccount(
+            companyBankAccounts,
+            bank,
+            selectedCompanyBankAccountId,
+            isIn,
+        );
+        const nextId = preferredAccount?.id || '';
+        if (nextId !== selectedCompanyBankAccountId) {
+            setSelectedCompanyBankAccountId(nextId);
+        }
+    }, [bank, companyBankAccounts, isIn, selectedCompanyBankAccountId]);
 
     const easyInvoiceCustomer = {
 
@@ -539,21 +583,47 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
+    const effectiveCompanyBankAccounts = withFallbackCompanyBankAccounts(companyBankAccounts, true);
+
+    const selectedCompanyBankAccount = effectiveCompanyBankAccounts.find((account) => String(account.id) === String(selectedCompanyBankAccountId || ''))
+        || effectiveCompanyBankAccounts[0]
+        || null;
+
+    const selectedCompanyBankBank = findVietQrBank(selectedCompanyBankAccount?.bank_code || selectedCompanyBankAccount?.bank_name);
+
+    const selectedCompanyBankLabel = selectedCompanyBankAccount ? buildCompanyBankLabel(selectedCompanyBankAccount) : '';
+
+    const companyBankLimit = Math.max(0, Math.round(Number(selectedCompanyBankAccount?.max_incoming_amount || 0)));
+
+    const companyBankOverLimit = isIn && bank > 0 && companyBankLimit > 0 && bank > companyBankLimit;
+
     const selectedPayoutBank = findVietQrBank(sharedCustomerInfo?.bankCode || sharedCustomerInfo?.bankName);
 
     const selectedPayoutBankLabel = selectedPayoutBank ? formatVietQrBankLabel(selectedPayoutBank) : '';
 
-    const qrBankName = isIn ? FIXED_QR_BANK : pickText(selectedPayoutBank?.shortName || sharedCustomerInfo?.bankName);
+    const qrBankName = isIn
+        ? pickText(selectedCompanyBankAccount?.bank_name || selectedCompanyBankAccount?.bank_code)
+        : pickText(selectedPayoutBank?.shortName || sharedCustomerInfo?.bankName);
 
-    const qrBankCode = isIn ? FIXED_QR_BANK : pickText(selectedPayoutBank?.code || sharedCustomerInfo?.bankCode);
+    const qrBankCode = isIn
+        ? pickText(selectedCompanyBankAccount?.bank_code)
+        : pickText(selectedPayoutBank?.code || sharedCustomerInfo?.bankCode);
 
-    const qrAccountNo = isIn ? FIXED_QR_ACCOUNT_NO : pickText(sharedCustomerInfo?.bankNo);
+    const qrAccountNo = isIn
+        ? pickText(selectedCompanyBankAccount?.account_no)
+        : pickText(sharedCustomerInfo?.bankNo);
 
-    const qrAccountName = isIn ? FIXED_QR_ACCOUNT_NAME : pickText(sharedCustomerInfo?.name);
+    const qrAccountName = isIn
+        ? pickText(selectedCompanyBankAccount?.account_name)
+        : pickText(sharedCustomerInfo?.name);
 
     const qrNote = isIn ? FIXED_QR_NOTE : pickText(orderId ? `Chi tra ${orderId}` : 'Chi tra cho khach');
 
-    const canRenderQr = bank > 0 && Boolean(qrBankCode) && Boolean(qrAccountNo);
+    const qrBlockedReason = companyBankOverLimit
+        ? `So tien chuyen khoan vuot muc ${fmtMoneyDisplay(companyBankLimit)} cua tai khoan da chon.`
+        : '';
+
+    const canRenderQr = bank > 0 && Boolean(qrBankCode) && Boolean(qrAccountNo) && !companyBankOverLimit;
 
     const qrUrl = canRenderQr
 
@@ -1112,6 +1182,18 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         cash,
 
+        companyBankAccountId: selectedCompanyBankAccount?.id || '',
+
+        companyBankLedgerKey: selectedCompanyBankAccount?.ledger_key || '',
+
+        companyBankAccountNo: selectedCompanyBankAccount?.account_no || '',
+
+        companyBankLabel: selectedCompanyBankLabel,
+
+        companyBankMaxIncomingAmount: companyBankLimit,
+
+        companyBankLimitExceeded: companyBankOverLimit,
+
         frombank: [qrBankCode || qrBankName, qrAccountNo, qrAccountName].filter(Boolean).join('-'),
 
         transactiontype: isIn ? 'THU' : 'CHI',
@@ -1561,6 +1643,58 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                     </div>
 
+                    <div>
+
+                        <span style={S.label}>{isIn ? 'Tài khoản công ty nhận' : 'Tài khoản công ty chi'}</span>
+
+                        <select
+                            style={{ ...S.inp, width: '100%', height: 56, minHeight: 56, padding: '8px 14px', textAlign: 'left', fontWeight: 400 }}
+                            value={selectedCompanyBankAccount?.id || ''}
+                            onChange={(event) => setSelectedCompanyBankAccountId(event.target.value)}
+                        >
+                            {effectiveCompanyBankAccounts.map((account) => {
+                                const maxText = Number(account?.max_incoming_amount || 0) > 0
+                                    ? ` · max ${fmtMoneyDisplay(account.max_incoming_amount)}`
+                                    : '';
+                                return (
+                                    <option key={account.id || account.ledger_key} value={account.id || ''}>
+                                        {buildCompanyBankLabel(account)}{maxText}
+                                    </option>
+                                );
+                            })}
+                        </select>
+
+                        {selectedCompanyBankAccount ? (
+                            <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 14, border: `1px solid ${companyBankOverLimit ? '#fecaca' : '#dbe4ee'}`, background: companyBankOverLimit ? '#fff1f2' : '#f8fafc' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                    {selectedCompanyBankBank ? (
+                                        <img src={getVietQrBankLogoUrl(selectedCompanyBankBank)} alt={selectedCompanyBankBank.shortName} style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
+                                    ) : (
+                                        <span style={{ fontSize: 18, flexShrink: 0 }}>🏦</span>
+                                    )}
+                                    <div style={{ minWidth: 0, flex: 1 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {selectedCompanyBankLabel}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: '#64748b' }}>
+                                            {selectedCompanyBankAccount.account_no || 'Chưa có số tài khoản'}
+                                            {companyBankLimit > 0 ? ` · Nhận tối đa ${fmtMoneyDisplay(companyBankLimit)}` : ' · Không giới hạn'}
+                                        </div>
+                                    </div>
+                                </div>
+                                {companyBankLoadError ? (
+                                    <div style={{ marginTop: 8, fontSize: 11, color: '#9a3412' }}>{companyBankLoadError}</div>
+                                ) : null}
+                                {companyBankOverLimit ? (
+                                    <div style={{ marginTop: 8, fontSize: 11, color: '#b91c1c' }}>
+                                        So tien chuyen khoan dang vuot muc nhan toi da {fmtMoneyDisplay(companyBankLimit)} cua tai khoan nay.
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
+
+                    </div>
+
                     {!isIn ? (
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
@@ -1765,7 +1899,11 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                                 <div style={{ borderRadius: 12, border: '1px dashed rgba(99,102,241,.35)', background: '#ffffff', padding: 18, fontSize: 12, lineHeight: 1.55, color: '#475569', textAlign: 'center' }}>
 
-                                    {isIn ? 'Chưa tạo được QR chuyển khoản.' : 'Nhập ngân hàng và số tài khoản để sinh VietQR cho khách nhận.'}
+                                    {companyBankOverLimit
+                                        ? qrBlockedReason
+                                        : isIn
+                                            ? 'Chua tao duoc QR chuyen khoan.'
+                                            : 'Nhap ngan hang va so tai khoan de sinh VietQR cho khach nhan.'}
 
                                 </div>
 
@@ -1781,7 +1919,13 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                             {qrAccountName ? <div style={{ fontSize: 12, color: '#334155' }}>{qrAccountName}</div> : null}
 
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Nội dung: {qrNote}</div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Noi dung: {qrNote}</div>
+
+                            {isIn && selectedCompanyBankAccount ? (
+                                <div style={{ fontSize: 11, color: companyBankOverLimit ? '#b91c1c' : '#64748b', marginTop: 4 }}>
+                                    Gioi han nhan 1 lan: {companyBankLimit > 0 ? fmtMoneyDisplay(companyBankLimit) : 'Khong gioi han'}
+                                </div>
+                            ) : null}
 
                         </div>
 

@@ -63,6 +63,19 @@ function MoneyInput({ value, onChange, onCommit, style, placeholder, readOnly })
     );
 }
 
+const quayTagStyle = (isEmpty = false) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '4px 9px',
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 700,
+    background: isEmpty ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.18)',
+    color: 'white',
+    border: `1px solid ${isEmpty ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.24)'}`,
+});
+
 
 export default function ThuNganCard({
     draftState,
@@ -80,6 +93,7 @@ export default function ThuNganCard({
     const [confirmDialog, setConfirmDialog] = useState(null);
     const [collapsed, setCollapsed] = useState(false);
     const isConfirmingRef = useRef(false);
+    const assignedQuays = Array.isArray(row?.quays) ? row.quays.filter(Boolean) : [];
 
     const requestConfirm = (rowId, newVal) => {
         return new Promise((resolve) => {
@@ -123,6 +137,17 @@ export default function ThuNganCard({
                         <div style={{ color: 'white', fontWeight: 900, fontSize: 18 }}>{row.ten_thu_ngan}</div>
                         <div style={{ color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 2 }}>
                             {row.nguoi_quan_ly || 'Chưa gán nhân sự'}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                            {assignedQuays.length > 0 ? assignedQuays.map((quay) => (
+                                <span key={quay.id || quay.ten_quay} style={quayTagStyle(false)}>
+                                    🗂 {quay.ten_quay}
+                                </span>
+                            )) : (
+                                <span style={quayTagStyle(true)}>
+                                    Chưa gán quầy
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>

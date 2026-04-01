@@ -7,6 +7,12 @@ from decimal import Decimal
 
 from flask import jsonify, request, send_from_directory
 
+from .company_bank_accounts import (
+    find_company_bank_account,
+    list_company_bank_accounts,
+    normalize_company_bank_account,
+    save_company_bank_accounts,
+)
 from .state import app, db
 from .models import *
 from .setup import *
@@ -263,3 +269,107 @@ def cau_hinh_trao_doi_tuoi_vang():
         obj.ngay_tao = obj.cap_nhat_luc
     db.session.commit()
     return jsonify(trao_doi_tuoi_vang_config_json(obj))
+
+
+def _company_bank_account_json(item):
+    row = normalize_company_bank_account(item, existing_created_at=_clean_text((item or {}).get('created_at')))
+    return {
+        'id': row.get('id', ''),
+        'bank_code': row.get('bank_code', ''),
+        'bank_name': row.get('bank_name', ''),
+        'account_no': row.get('account_no', ''),
+        'account_name': row.get('account_name', ''),
+        'display_name': row.get('display_name', ''),
+        'label': row.get('label', ''),
+        'max_incoming_amount': row.get('max_incoming_amount', 0),
+        'ledger_key': row.get('ledger_key', ''),
+        'note': row.get('note', ''),
+        'created_at': row.get('created_at', ''),
+        'updated_at': row.get('updated_at', ''),
+    }
+
+
+def _validate_company_bank_account_payload(data):
+    item = normalize_company_bank_account(data or {})
+    if not item.get('bank_code'):
+        return None, 'Thiếu mã ngân hàng.'
+    if not item.get('bank_name'):
+        return None, 'Thiếu tên ngân hàng.'
+    if not item.get('account_no'):
+        return None, 'Thiếu số tài khoản.'
+    return item, None
+
+
+@app.route('/api/cau_hinh/tai_khoan_ngan_hang', methods=['GET', 'POST'])
+def cau_hinh_tai_khoan_ngan_hang():
+    obj, accounts = list_company_bank_accounts()
+    if request.method == 'GET':
+        return jsonify({
+            'items': [_company_bank_account_json(item) for item in accounts],
+            'ngay_tao': obj.ngay_tao or '',
+            'cap_nhat_luc': obj.cap_nhat_luc or '',
+        })
+
+    normalized_item, error = _validate_company_bank_account_payload(request.json or {})
+    if error:
+        return jsonify({'error': error}), 400
+
+    next_accounts = list(accounts)
+    next_accounts.append(normalized_item)
+    obj, saved_accounts = save_company_bank_accounts(next_accounts)
+    db.session.commit()
+    created = find_company_bank_account(
+        account_id=normalized_item.get('id'),
+        account_no=normalized_item.get('account_no'),
+    ) or normalized_item
+    return jsonify({
+        'msg': 'Created',
+        'item': _company_bank_account_json(created),
+        'items': [_company_bank_account_json(item) for item in saved_accounts],
+        'ngay_tao': obj.ngay_tao or '',
+        'cap_nhat_luc': obj.cap_nhat_luc or '',
+    }), 201
+
+
+@app.route('/api/cau_hinh/tai_khoan_ngan_hang/<account_id>', methods=['PUT', 'DELETE'])
+def update_cau_hinh_tai_khoan_ngan_hang(account_id):
+    obj, accounts = list_company_bank_accounts()
+    target_id = _clean_text(account_id)
+    target = next((item for item in accounts if item.get('id') == target_id), None)
+    if not target:
+        return jsonify({'error': 'Không tìm thấy tài khoản ngân hàng.'}), 404
+
+    if request.method == 'DELETE':
+        next_accounts = [item for item in accounts if item.get('id') != target_id]
+        obj, saved_accounts = save_company_bank_accounts(next_accounts)
+        db.session.commit()
+        return jsonify({
+            'msg': 'Deleted',
+            'id': target_id,
+            'items': [_company_bank_account_json(item) for item in saved_accounts],
+            'ngay_tao': obj.ngay_tao or '',
+            'cap_nhat_luc': obj.cap_nhat_luc or '',
+        })
+
+    payload = dict(request.json or {})
+    payload['id'] = target_id
+    if not payload.get('created_at'):
+        payload['created_at'] = target.get('created_at') or ''
+    normalized_item, error = _validate_company_bank_account_payload(payload)
+    if error:
+        return jsonify({'error': error}), 400
+
+    next_accounts = [
+        normalized_item if item.get('id') == target_id else item
+        for item in accounts
+    ]
+    obj, saved_accounts = save_company_bank_accounts(next_accounts)
+    db.session.commit()
+    updated = next((item for item in saved_accounts if item.get('id') == target_id), normalized_item)
+    return jsonify({
+        'msg': 'Updated',
+        'item': _company_bank_account_json(updated),
+        'items': [_company_bank_account_json(item) for item in saved_accounts],
+        'ngay_tao': obj.ngay_tao or '',
+        'cap_nhat_luc': obj.cap_nhat_luc or '',
+    })

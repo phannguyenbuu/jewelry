@@ -28,16 +28,111 @@ def _print_agent_matches(agent, machine_name='', device_name=''):
     return False
 
 
-def _print_device_matches(device, printer_name='', unc_path=''):
-    printer_key = _clean_text(printer_name).lower()
-    unc_key = _clean_text(unc_path).lower()
-    device_keys = {
+def _extract_unc_host(value):
+    raw = _clean_text(value).lstrip('\\').strip()
+    if not raw:
+        return ''
+    return _clean_text(raw.split('\\', 1)[0]).lower()
+
+
+def _print_device_keys(device):
+    return {
         _clean_text(device.printer_name).lower(),
         _clean_text(device.share_name).lower(),
         _clean_text(device.system_name).lower(),
         _clean_text(device.unc_path).lower(),
     }
-    return (printer_key and printer_key in device_keys) or (unc_key and unc_key in device_keys)
+
+
+def _print_device_host_keys(device):
+    return {
+        _clean_text(device.system_name).lower(),
+        _extract_unc_host(device.unc_path),
+        _clean_text(device.port_name).lower(),
+    }
+
+
+def _print_device_match_score(device, printer_name='', unc_path='', machine_name='', host_name='', device_name=''):
+    printer_key = _clean_text(printer_name).lower()
+    unc_key = _clean_text(unc_path).lower()
+    device_keys = _print_device_keys(device)
+    host_keys = _print_device_host_keys(device)
+    request_host_keys = {
+        _clean_text(machine_name).lower(),
+        _clean_text(host_name).lower(),
+        _clean_text(device_name).lower(),
+    }
+
+    score = 0
+    if printer_key:
+        if printer_key == _clean_text(device.printer_name).lower():
+            score += 12
+        elif printer_key in device_keys:
+            score += 10
+    if unc_key:
+        if unc_key == _clean_text(device.unc_path).lower():
+            score += 14
+        elif unc_key in device_keys:
+            score += 10
+
+    request_host_keys.discard('')
+    if request_host_keys and host_keys.intersection(request_host_keys):
+        score += 6
+
+    return score
+
+
+def _print_device_matches(device, printer_name='', unc_path='', machine_name='', host_name='', device_name=''):
+    return _print_device_match_score(
+        device,
+        printer_name=printer_name,
+        unc_path=unc_path,
+        machine_name=machine_name,
+        host_name=host_name,
+        device_name=device_name,
+    ) > 0
+
+
+def _find_agent_and_printer_by_device(all_agents, printer_name='', unc_path='', machine_name='', host_name='', device_name=''):
+    if not any(_clean_text(value) for value in (printer_name, unc_path, machine_name, host_name, device_name)):
+        return None, None
+
+    agents_by_id = {agent.id: agent for agent in all_agents}
+    devices = (
+        PrintDevice.query
+        .order_by(PrintDevice.is_default.desc(), PrintDevice.updated_at.desc(), PrintDevice.id.desc())
+        .all()
+    )
+    candidates = []
+    for device in devices:
+        score = _print_device_match_score(
+            device,
+            printer_name=printer_name,
+            unc_path=unc_path,
+            machine_name=machine_name,
+            host_name=host_name,
+            device_name=device_name,
+        )
+        if score <= 0:
+            continue
+        agent = agents_by_id.get(device.agent_id)
+        if agent is None:
+            continue
+        candidates.append((
+            score,
+            1 if _print_agent_is_online(agent) else 0,
+            1 if bool(device.is_default) else 0,
+            device.id,
+            agent,
+            device,
+        ))
+
+    if not candidates:
+        return None, None
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=True)
+    _, _, _, _, agent, device = candidates[0]
+    return agent, device
 
 
 def _apply_print_device(agent, row, timestamp, existing=None):
@@ -87,6 +182,11 @@ def _ensure_print_agent(d, auto_create=False):
 def _resolve_print_agent_and_printer(d):
     agent = None
     all_agents = PrintAgent.query.order_by(PrintAgent.id.desc()).all()
+    printer_name = _clean_text(d.get('printer_name'))
+    unc_path = _clean_text(d.get('unc_path'))
+    machine_name = _clean_text(d.get('machine_name'))
+    host_name = _clean_text(d.get('host_name'))
+    device_name = _clean_text(d.get('device_name'))
     agent_id = d.get('agent_id')
     if agent_id not in (None, ''):
         try:
@@ -98,12 +198,23 @@ def _resolve_print_agent_and_printer(d):
         if agent_key:
             agent = PrintAgent.query.filter_by(agent_key=agent_key).first()
     if agent is None:
+        matched_agent, matched_printer = _find_agent_and_printer_by_device(
+            all_agents,
+            printer_name=printer_name,
+            unc_path=unc_path,
+            machine_name=machine_name,
+            host_name=host_name,
+            device_name=device_name,
+        )
+        if matched_agent is not None:
+            return matched_agent, matched_printer, None, None
+    if agent is None:
         matched_agents = [
             row for row in all_agents
             if _print_agent_matches(
                 row,
-                machine_name=d.get('machine_name') or d.get('host_name'),
-                device_name=d.get('device_name'),
+                machine_name=machine_name or host_name,
+                device_name=device_name,
             )
         ]
         agent = next((row for row in matched_agents if _print_agent_is_online(row)), None) or (matched_agents[0] if matched_agents else None)
@@ -112,12 +223,20 @@ def _resolve_print_agent_and_printer(d):
     if agent is None:
         return None, None, jsonify({'error': 'Chua co print agent nao san sang'}), 404
 
-    printer_name = _clean_text(d.get('printer_name'))
-    unc_path = _clean_text(d.get('unc_path'))
     devices = PrintDevice.query.filter_by(agent_id=agent.id).order_by(PrintDevice.is_default.desc(), PrintDevice.printer_name.asc(), PrintDevice.id.asc()).all()
     printer = None
     if printer_name or unc_path:
-        printer = next((device for device in devices if _print_device_matches(device, printer_name=printer_name, unc_path=unc_path)), None)
+        printer = next((
+            device for device in devices
+            if _print_device_matches(
+                device,
+                printer_name=printer_name,
+                unc_path=unc_path,
+                machine_name=machine_name,
+                host_name=host_name,
+                device_name=device_name,
+            )
+        ), None)
     if printer is None and devices:
         printer = devices[0]
     if printer is None:
@@ -316,6 +435,7 @@ def dispatch_png_to_agent():
 
     payload = _normalize_print_command_payload({
         'printer_name': _clean_text(d.get('printer_name')) or printer.printer_name,
+        'unc_path': _clean_text(d.get('unc_path')) or printer.unc_path,
         'document_name': _clean_text(d.get('document_name')) or 'Phieu ke mua hang',
         'mode': _clean_text(d.get('mode')) or 'image_base64',
         'content_base64': image_base64,

@@ -3,8 +3,10 @@ import ThuNganCard from './thuNgan/ThuNganCard';
 import KhoTongCard from './thuNgan/KhoTongCard';
 import ThuNganHistory from './thuNgan/ThuNganHistory';
 import ThuNganManager from './thuNgan/ThuNganManager';
+import { fetchCompanyBankAccounts, withFallbackCompanyBankAccounts } from './lib/companyBankAccounts';
 import {
   API,
+  TIEN_MAT_TUOI,
   buildFormMap,
   buildPayload,
   emptyDetailRow,
@@ -26,6 +28,7 @@ export default function ThuNganPage() {
   const [data, setData] = useState({ ngay: today(), rows: [], history: [] });
   const [formMap, setFormMap] = useState({});
   const [tuoiVangOptions, setTuoiVangOptions] = useState([]);
+  const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingMap, setSavingMap] = useState({});
   const [draftStatusMap, setDraftStatusMap] = useState({});
@@ -103,6 +106,12 @@ export default function ThuNganPage() {
       .then((r) => r.json())
       .then((rows) => setTuoiVangOptions(Array.isArray(rows) ? rows : []))
       .catch(() => setTuoiVangOptions([]));
+  }, []);
+
+  useEffect(() => {
+    fetchCompanyBankAccounts()
+      .then((items) => setCompanyBankAccounts(Array.isArray(items) ? items : []))
+      .catch(() => setCompanyBankAccounts([]));
   }, []);
 
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
@@ -256,9 +265,12 @@ export default function ThuNganPage() {
     });
   }, [updateCashierForm]);
 
-  const handleResetKhoTong = useCallback((thuNganId) => {
+const handleResetKhoTong = useCallback((thuNganId) => {
     updateCashierForm(thuNganId, (current) => {
-      const cats = [TIEN_MAT_TUOI, 'Tài Khoản Ngân Hàng', ...(tuoiVangOptions || []).map(o => o.ten_tuoi)];
+      const bankLedgerKeys = withFallbackCompanyBankAccounts(companyBankAccounts, true)
+        .map((account) => account.ledger_key)
+        .filter(Boolean);
+      const cats = [TIEN_MAT_TUOI, ...bankLedgerKeys, ...(tuoiVangOptions || []).map(o => o.ten_tuoi)];
       const nextChiTiet = cats.map(cat => ({
         row_id: `reset_${Date.now()}_${cat}`,
         tuoi_vang: cat,
@@ -271,7 +283,7 @@ export default function ThuNganPage() {
         chi_tiet: nextChiTiet
       };
     });
-  }, [updateCashierForm, tuoiVangOptions]);
+  }, [companyBankAccounts, updateCashierForm, tuoiVangOptions]);
 
   const handleNoteChange = useCallback((thuNganId, value) => {
     updateCashierForm(thuNganId, (current) => ({ ...current, ghi_chu: value }));
@@ -408,6 +420,7 @@ export default function ThuNganPage() {
                           onNoteChange={handleNoteChange}
                           row={row}
                           totals={totals}
+                          companyBankAccounts={withFallbackCompanyBankAccounts(companyBankAccounts, true)}
                           tuoiVangOptions={tuoiVangOptions}
                       />
                   );

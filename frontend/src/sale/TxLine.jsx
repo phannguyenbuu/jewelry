@@ -3,7 +3,7 @@ import { IoCloseOutline } from 'react-icons/io5';
 import FormattedNumberInput from './FormattedNumberInput';
 import { GoldBuyFieldGroup, GoldSaleFieldGroup } from './GoldFieldGroups';
 import { MoneyField } from './TxLineExtras.jsx';
-import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, calcValueStyle, filterInventoryItems, findInventoryByCode, firstProductForCategory, fmtCalc, formatBuyGoldProductLabel, formatWeight, getTxTheme, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
+import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, calcValueStyle, filterInventoryItems, findInventoryByCode, firstProductForCategory, fmtCalc, formatBuyGoldProductLabel, formatWeight, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTxTheme, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
 
 export default function TxLine({ line, rates, inventoryItems, onChange, onRemove, showRemove }) {
     const cats = Object.keys(rates);
@@ -56,7 +56,9 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
     const goldEditorAmount = (line.tx === 'sell' || line.tx === 'trade') && effectiveCat === 'gold'
         ? Math.round(inventoryValue + sellLabor)
         : inventoryValue;
-    const tradeAdjustmentAmount = Math.round(parseFmt(line.tradeComp || 0));
+    const tradeCompensationQty = isTrade ? getTradeCompensationQuantity(line) : 0;
+    const tradeCompensationUnitAmount = isTrade ? getTradeCompensationUnitAmount(line) : 0;
+    const tradeAdjustmentAmount = isTrade ? getTradeCompensationAmount(line) : 0;
     const tradeCustomerAmount = isTrade ? Math.round(customerQty * parseFmt(customerRate)) : 0;
     const tradeAmount = Math.round(goldEditorAmount - tradeCustomerAmount + tradeAdjustmentAmount);
     const value = line.tx === 'trade' ? tradeAmount : goldEditorAmount;
@@ -97,7 +99,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         appendFormulaRateTerm('+', sellAddedGold, tradeRate);
         appendFormulaRateTerm('-', sellCutGold, tradeRate);
         appendFormulaRateTerm('-', customerQty, customerRate);
-        appendFormulaMoneyTerm('+', parseFmt(line.tradeComp || 0));
+        appendFormulaRateTerm('+', tradeCompensationQty, tradeCompensationUnitAmount);
     } else if (line.tx === 'buy' && isGold) {
         appendFormulaRateTerm('+', baseQty, buyRate);
     }

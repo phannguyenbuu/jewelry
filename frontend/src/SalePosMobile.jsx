@@ -5,7 +5,7 @@ import OrderScreen from './sale/OrderScreen';
 import PaymentScreen from './sale/PaymentScreen';
 import RepairJobScreen from './sale/RepairJobScreen';
 import { OrderListScreen, SavedTransactionsModal } from './sale/SavedScreens';
-import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
+import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldLineEffectiveQuantity, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
 
 const serializeOrderLines = (saleLines = []) => saleLines.map((line, index) => ({
     stt: index + 1,
@@ -73,14 +73,18 @@ export default function SalePosMobile() {
             const customerQty = parseWeight(l.customerQty || 0);
             const customerAmount = Math.round(customerQty * customerRate);
             const labor = parseFmt(l.sellLabor || 0);
-            const addedGold = parseWeight(l.sellAddedGold || 0);
-            const cutGold = parseWeight(l.sellCutGold || 0);
-            const baseWeight = l.itemId
-                ? (parseWeight(l.itemGoldWeight || 0) || 1)
-                : parseWeight(l.qty || 0);
-            const actualQty = Math.max(0, baseWeight + addedGold - cutGold);
+            const actualQty = getGoldLineEffectiveQuantity(l);
             const newGoldAmount = Math.round(actualQty * rate + labor);
-            const adjustAmount = Math.round(parseFmt(l.tradeLabor || 0) + parseFmt(l.tradeComp || 0));
+            const manualAdjustment = Math.round(parseFmt(l.tradeLabor || 0));
+            const tradeCompQty = getTradeCompensationQuantity(l);
+            const tradeCompUnitAmount = getTradeCompensationUnitAmount(l);
+            const tradeCompAmount = getTradeCompensationAmount(l);
+            const tradeAdjustedAmount = manualAdjustment + tradeCompAmount;
+            const tradeNote = [
+                manualAdjustment > 0 ? ` | Chinh tay: ${fmtVN(manualAdjustment)}` : '',
+                tradeCompAmount > 0 ? ` | Bu: ${fmtVN(tradeCompUnitAmount)} x ${formatWeight(tradeCompQty)}` : '',
+            ].join('');
+            return `${sign}Vang moi ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)} - De ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}${tradeNote} = ${fmtVN(newGoldAmount - customerAmount + tradeAdjustedAmount)}`;
             const adjustNote = adjustAmount ? ` | Chỉnh tay: ${fmtVN(adjustAmount)}` : '';
             return `${sign}Vàng mới ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)} - Dẻ ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}${adjustNote} = ${fmtVN(newGoldAmount - customerAmount + adjustAmount)}`;
         }
@@ -369,6 +373,7 @@ export default function SalePosMobile() {
             nextCustomerInfo.expiry.trim() ? `Có giá trị đến: ${nextCustomerInfo.expiry.trim()}` : '',
             nextCustomerInfo.phone.trim() ? `SĐT: ${nextCustomerInfo.phone.trim()}` : '',
             nextCustomerInfo.address.trim() ? `Địa chỉ liên hệ: ${nextCustomerInfo.address.trim()}` : '',
+            payload.companyBankLabel ? `Tài khoản công ty: ${payload.companyBankLabel}` : '',
             frontImageRef ? `Ảnh CCCD mặt trước: ${frontImageRef}` : '',
             backImageRef ? `Ảnh CCCD mặt sau: ${backImageRef}` : '',
             nextCustomerInfo.backText.trim() ? `OCR mặt sau:\n${nextCustomerInfo.backText.trim()}` : '',
@@ -386,6 +391,9 @@ export default function SalePosMobile() {
                 dat_coc: Math.abs(parseFmt(payload.cash || '0')),
                 cash_payment: parseFmt(payload.cash || '0') * Math.sign(parseFmt(payload.total || '0')),
                 bank_payment: parseFmt(payload.bank || '0') * Math.sign(parseFmt(payload.total || '0')),
+                company_bank_account_id: payload.companyBankAccountId || '',
+                company_bank_ledger_key: payload.companyBankLedgerKey || '',
+                company_bank_account_no: payload.companyBankAccountNo || '',
                 items: serializeOrderLines(lines),
                 trang_thai: 'New',
                 ghi_chu: [...customerNote, payload.formula, payload.note].filter(Boolean).join('\n').trim(),

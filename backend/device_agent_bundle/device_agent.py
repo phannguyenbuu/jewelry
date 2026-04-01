@@ -90,7 +90,7 @@ DEFAULT_CONFIG = {
     },
     'printer': {
         'enabled': True,
-        'poll_interval_seconds': 3,
+        'poll_interval_seconds': 1,
         'heartbeat_interval_seconds': 15,
         'scan_interval_seconds': 90,
         'scan_network_shares': True,
@@ -171,7 +171,7 @@ def normalize_config(raw):
     config['scale']['poll_interval_seconds'] = coerce_float(config['scale'].get('poll_interval_seconds'), 3)
     config['scale']['heartbeat_interval_seconds'] = coerce_float(config['scale'].get('heartbeat_interval_seconds'), 15)
     config['printer']['enabled'] = coerce_bool(config['printer'].get('enabled'), True)
-    config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 3)
+    config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 1)
     config['printer']['heartbeat_interval_seconds'] = coerce_float(config['printer'].get('heartbeat_interval_seconds'), 15)
     config['printer']['scan_interval_seconds'] = coerce_float(config['printer'].get('scan_interval_seconds'), 90)
     config['printer']['scan_network_shares'] = coerce_bool(config['printer'].get('scan_network_shares'), True)
@@ -828,6 +828,122 @@ Get-Content -LiteralPath $env:PRINT_FILE | Out-Printer -Name $env:PRINT_TARGET
             pass
 
 
+def print_image_to_local_printer(file_path, printer_name, document_name='Print job', options=None):
+    options = options if isinstance(options, dict) else {}
+    paper_width_mm = max(0.0, coerce_float(options.get('paper_width_mm'), 0.0))
+    paper_height_mm = max(0.0, coerce_float(options.get('paper_height_mm'), 0.0))
+    margin_mm = max(0.0, coerce_float(options.get('margin_mm'), 0.0))
+    fit_width = coerce_bool(options.get('fit_width'), True)
+    script = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$culture = [System.Globalization.CultureInfo]::InvariantCulture
+$image = [System.Drawing.Image]::FromFile($env:PRINT_FILE)
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.DocumentName = $env:PRINT_TITLE
+$doc.PrinterSettings.PrinterName = $env:PRINT_TARGET
+if (-not $doc.PrinterSettings.IsValid) {
+  throw "Settings to access printer '$env:PRINT_TARGET' are not valid."
+}
+$doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
+
+function Parse-EnvDouble([string]$value) {
+  if ([string]::IsNullOrWhiteSpace($value)) { return 0.0 }
+  return [double]::Parse($value, $culture)
+}
+
+$paperWidthMm = Parse-EnvDouble $env:PRINT_PAPER_WIDTH_MM
+$paperHeightMm = Parse-EnvDouble $env:PRINT_PAPER_HEIGHT_MM
+$marginMm = Parse-EnvDouble $env:PRINT_MARGIN_MM
+$fitWidth = [string]::Equals($env:PRINT_FIT_WIDTH, 'true', [System.StringComparison]::OrdinalIgnoreCase)
+
+$marginUnits = [int][Math]::Round(($marginMm / 25.4) * 100.0)
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins($marginUnits, $marginUnits, $marginUnits, $marginUnits)
+$doc.OriginAtMargins = $true
+
+if ($paperWidthMm -gt 0) {
+  $usableWidthMm = [Math]::Max(1.0, $paperWidthMm - ($marginMm * 2.0))
+  if ($paperHeightMm -le 0) {
+    $paperHeightMm = (($image.Height / [double]$image.Width) * $usableWidthMm) + ($marginMm * 2.0)
+  }
+  $paperWidthUnits = [int][Math]::Round(($paperWidthMm / 25.4) * 100.0)
+  $paperHeightUnits = [int][Math]::Round(($paperHeightMm / 25.4) * 100.0)
+  $paperWidthUnits = [Math]::Max(100, [Math]::Min(32000, $paperWidthUnits))
+  $paperHeightUnits = [Math]::Max(100, [Math]::Min(32000, $paperHeightUnits))
+  $paper = New-Object System.Drawing.Printing.PaperSize('CustomImage', $paperWidthUnits, $paperHeightUnits)
+  $doc.DefaultPageSettings.PaperSize = $paper
+}
+
+$handler = [System.Drawing.Printing.PrintPageEventHandler]{
+  param($sender, $e)
+  $bounds = $e.MarginBounds
+  if ($bounds.Width -le 0 -or $bounds.Height -le 0) {
+    $bounds = $e.PageBounds
+  }
+
+  $imgW = [double]$image.Width
+  $imgH = [double]$image.Height
+  if ($imgW -le 0 -or $imgH -le 0) {
+    throw 'Image has invalid dimensions.'
+  }
+
+  if ($fitWidth) {
+    $drawWidth = [double]$bounds.Width
+    $drawHeight = [Math]::Round($drawWidth * $imgH / $imgW)
+  } else {
+    $scale = [Math]::Min([double]$bounds.Width / $imgW, [double]$bounds.Height / $imgH)
+    if ($scale -le 0) { $scale = 1.0 }
+    $drawWidth = [Math]::Round($imgW * $scale)
+    $drawHeight = [Math]::Round($imgH * $scale)
+  }
+
+  if ($drawHeight -gt $bounds.Height) {
+    $scale = [double]$bounds.Height / [Math]::Max(1.0, [double]$drawHeight)
+    $drawWidth = [Math]::Round($drawWidth * $scale)
+    $drawHeight = [Math]::Round($drawHeight * $scale)
+  }
+
+  $x = $bounds.Left + [Math]::Max(0, [int][Math]::Round(($bounds.Width - $drawWidth) / 2.0))
+  $y = $bounds.Top
+
+  $e.Graphics.Clear([System.Drawing.Color]::White)
+  $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $e.Graphics.DrawImage($image, $x, $y, [int]$drawWidth, [int]$drawHeight)
+  $e.HasMorePages = $false
+}
+
+try {
+  $doc.add_PrintPage($handler)
+  $doc.Print()
+} finally {
+  $doc.remove_PrintPage($handler)
+  $doc.Dispose()
+  $image.Dispose()
+}
+"""
+    completed = run_powershell(script, timeout=90, env={
+        'PRINT_FILE': file_path,
+        'PRINT_TARGET': printer_name,
+        'PRINT_TITLE': document_name,
+        'PRINT_PAPER_WIDTH_MM': f'{paper_width_mm:.3f}',
+        'PRINT_PAPER_HEIGHT_MM': f'{paper_height_mm:.3f}',
+        'PRINT_MARGIN_MM': f'{margin_mm:.3f}',
+        'PRINT_FIT_WIDTH': 'true' if fit_width else 'false',
+    })
+    if completed.returncode != 0:
+        raise RuntimeError(clean_text(completed.stderr) or clean_text(completed.stdout) or 'Image print failed.')
+    return {
+        'strategy': 'gdi_image',
+        'target': printer_name,
+        'file_path': file_path,
+        'document_name': document_name,
+        'paper_width_mm': paper_width_mm,
+        'paper_height_mm': paper_height_mm,
+        'margin_mm': margin_mm,
+        'fit_width': fit_width,
+    }
+
+
 def print_file_to_printer(file_path, printer_name='', document_name='Print job'):
     script = r"""
 $ErrorActionPreference = 'Stop'
@@ -970,12 +1086,14 @@ def file_suffix_from_name(name, content_type):
 def dispatch_print_job(command, printers):
     payload = command.get('payload') if isinstance(command.get('payload'), dict) else {}
     printer_name = clean_text(payload.get('printer_name') or command.get('printer_name'))
+    unc_selector = clean_text(payload.get('unc_path') or payload.get('target_unc_path'))
     document_name = clean_text(payload.get('document_name') or command.get('document_name') or f"Print job #{command.get('id')}")
     copies = max(1, coerce_int(payload.get('copies'), 1))
     prepared = build_print_payload(payload)
-    target = resolve_printer_target(printers, printer_name)
-    target_name = clean_text(target.get('printer_name') if target else printer_name) or printer_name
-    unc_path = clean_text(target.get('unc_path') if target else '')
+    options = payload.get('options') if isinstance(payload.get('options'), dict) else {}
+    target = resolve_printer_target(printers, unc_selector or printer_name)
+    target_name = clean_text(target.get('printer_name') if target else printer_name) or printer_name or unc_selector
+    unc_path = clean_text(target.get('unc_path') if target else unc_selector)
 
     results = []
     for index in range(copies):
@@ -992,6 +1110,18 @@ def dispatch_print_job(command, printers):
                 results.append(print_raw_to_unc(unc_path, prepared['data'], current_name))
             else:
                 results.append(print_raw_to_local_printer(target_name, prepared['data'], current_name))
+            continue
+
+        if prepared['mode'] in {'image_base64', 'image_url'}:
+            suffix = file_suffix_from_name(prepared['file_name'], prepared['content_type'])
+            temp_path = write_temp_bytes(prepared['data'], suffix=suffix)
+            try:
+                results.append(print_image_to_local_printer(temp_path, target_name or unc_path, current_name, options=options))
+            finally:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
             continue
 
         suffix = file_suffix_from_name(prepared['file_name'], prepared['content_type'])
@@ -1649,7 +1779,7 @@ DASHBOARD_HTML = """
         scale_poll_interval_seconds: (config.scale || {}).poll_interval_seconds ?? 3,
         scale_heartbeat_interval_seconds: (config.scale || {}).heartbeat_interval_seconds ?? 15,
         printer_enabled: String(!!printer.enabled),
-        printer_poll_interval_seconds: printer.poll_interval_seconds ?? 3,
+        printer_poll_interval_seconds: printer.poll_interval_seconds ?? 1,
         printer_heartbeat_interval_seconds: printer.heartbeat_interval_seconds ?? 15,
         printer_scan_interval_seconds: printer.scan_interval_seconds ?? 90,
         printer_scan_network_shares: String(!!printer.scan_network_shares),

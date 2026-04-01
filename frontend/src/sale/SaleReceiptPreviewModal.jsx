@@ -1,5 +1,4 @@
-import { IoCloseOutline, IoCopyOutline, IoDownloadOutline } from 'react-icons/io5';
-import { S } from './shared';
+import { IoCloseOutline } from 'react-icons/io5';
 
 export default function SaleReceiptPreviewModal({
     open,
@@ -9,8 +8,6 @@ export default function SaleReceiptPreviewModal({
     orderId,
     onClose,
     onPrint,
-    onCopy,
-    onDownload,
     actionMessage,
     actionError,
 }) {
@@ -106,36 +103,6 @@ export default function SaleReceiptPreviewModal({
                         </div>
                     ) : null}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
-                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                            <button
-                                type="button"
-                                onClick={onDownload}
-                                disabled={loading || !imageUrl}
-                                style={{
-                                    ...S.pillBtn('#ffffff', '#111827'),
-                                    border: '1px solid #dbe4ee',
-                                    boxShadow: 'none',
-                                    opacity: loading || !imageUrl ? 0.55 : 1,
-                                }}
-                            >
-                                <IoDownloadOutline />
-                                <span>PNG</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={onCopy}
-                                disabled={loading || !imageUrl}
-                                style={{
-                                    ...S.pillBtn('#ffffff', '#111827'),
-                                    border: '1px solid #dbe4ee',
-                                    boxShadow: 'none',
-                                    opacity: loading || !imageUrl ? 0.55 : 1,
-                                }}
-                            >
-                                <IoCopyOutline />
-                                <span>Copy</span>
-                            </button>
-                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                             {[1, 2, 3, 4, 5].map(posNo => (
                                 <button

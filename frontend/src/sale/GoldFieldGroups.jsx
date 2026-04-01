@@ -1,9 +1,9 @@
 import { IoChevronDownOutline, IoChevronUpOutline } from 'react-icons/io5';
 
 import FormattedNumberInput from './FormattedNumberInput';
-import TxLineExtras from './TxLineExtras.jsx';
+import TxLineExtras, { MoneyField } from './TxLineExtras.jsx';
 import TxLineInventoryLookup from './TxLineInventoryLookup';
-import { S } from './shared';
+import { S, fmtCalc, normalizeTradeRate } from './shared';
 
 function ProductSelect({ value, onChange, options, disabled = false, width = '100%' }) {
     return (
@@ -181,18 +181,35 @@ export function GoldSaleFieldGroup({
                 </div>
             )}
 
+            {/* Sell: Số lượng cùng hàng với Tuổi vàng */}
+            {!title && (
+                <QuantityField
+                    label="Số lượng"
+                    value={qty}
+                    onChange={onQtyChange}
+                    adjust={adjustQty}
+                    step={quantityStep}
+                    lineAccent={lineAccent}
+                    txTheme={txTheme}
+                    disabled={qtyLocked}
+                />
+            )}
+
             <TxLineInventoryLookup {...inventoryLookupProps} />
 
-            <QuantityField
-                label="Số lượng"
-                value={qty}
-                onChange={onQtyChange}
-                adjust={adjustQty}
-                step={quantityStep}
-                lineAccent={lineAccent}
-                txTheme={txTheme}
-                disabled={qtyLocked}
-            />
+            {/* Trade: Số lượng sau lookup */}
+            {title && (
+                <QuantityField
+                    label="Số lượng"
+                    value={qty}
+                    onChange={onQtyChange}
+                    adjust={adjustQty}
+                    step={quantityStep}
+                    lineAccent={lineAccent}
+                    txTheme={txTheme}
+                    disabled={qtyLocked}
+                />
+            )}
 
             <div>
                 <span style={S.label}>{rateLabel}</span>
@@ -202,6 +219,23 @@ export function GoldSaleFieldGroup({
                     onValueChange={onRateChange}
                 />
             </div>
+
+            {/* Sell: Tiền công cùng hàng với Giá bán */}
+            {!title && (
+                <MoneyField
+                    label="Tiền công"
+                    placeholder="Nhập tiền công"
+                    list={sellMoneySuggestionId}
+                    txTheme={txTheme}
+                    lineAccent={lineAccent}
+                    value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+                    onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+                    onIncrease={() => adjustSellLabor(sellMoneyStep)}
+                    onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+                    increaseLabel="Tăng tiền công"
+                    decreaseLabel="Giảm tiền công"
+                />
+            )}
 
             <TxLineExtras
                 visible
@@ -218,6 +252,7 @@ export function GoldSaleFieldGroup({
                 adjustSellLabor={adjustSellLabor}
                 adjustTradeComp={adjustTradeComp}
                 set={set}
+                hideLaborField={!title}
             />
         </>
     );

@@ -48,7 +48,7 @@ function StepButtons({ txTheme, lineAccent, onIncrease, onDecrease, increaseLabe
     );
 }
 
-function MoneyField({
+export function MoneyField({
     label,
     placeholder,
     value,
@@ -100,42 +100,45 @@ export default function TxLineExtras({
     adjustSellLabor,
     adjustTradeComp,
     set,
+    hideLaborField = false,
 }) {
     if (!visible) return null;
 
     return (
         <div style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'grid', gap: 10 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: showTradeComp ? '1fr 1fr' : '1fr', gap: 10 }}>
-                    <MoneyField
-                        label="Tiền công"
-                        placeholder="Nhập tiền công"
-                        list={sellMoneySuggestionId}
-                        txTheme={txTheme}
-                        lineAccent={lineAccent}
-                        value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
-                        onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
-                        onIncrease={() => adjustSellLabor(sellMoneyStep)}
-                        onDecrease={() => adjustSellLabor(-sellMoneyStep)}
-                        increaseLabel="Tăng tiền công"
-                        decreaseLabel="Giảm tiền công"
-                    />
-                    {showTradeComp && (
+                {!hideLaborField && (
+                    <div style={{ display: 'grid', gridTemplateColumns: showTradeComp ? '1fr 1fr' : '1fr', gap: 10 }}>
                         <MoneyField
-                            label="Bù"
-                            placeholder="Nhập tiền bù"
-                            list={tradeMoneySuggestionId || sellMoneySuggestionId}
+                            label="Tiền công"
+                            placeholder="Nhập tiền công"
+                            list={sellMoneySuggestionId}
                             txTheme={txTheme}
                             lineAccent={lineAccent}
-                            value={line.tradeComp ? fmtCalc(line.tradeComp) : ''}
-                            onValueChange={raw => set('tradeComp', normalizeTradeRate('money', raw))}
-                            onIncrease={() => adjustTradeComp(sellMoneyStep)}
-                            onDecrease={() => adjustTradeComp(-sellMoneyStep)}
-                            increaseLabel="Tăng bù"
-                            decreaseLabel="Giảm bù"
+                            value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+                            onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+                            onIncrease={() => adjustSellLabor(sellMoneyStep)}
+                            onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+                            increaseLabel="Tăng tiền công"
+                            decreaseLabel="Giảm tiền công"
                         />
-                    )}
-                </div>
+                        {showTradeComp && (
+                            <MoneyField
+                                label="Bù"
+                                placeholder="Nhập tiền bù"
+                                list={tradeMoneySuggestionId || sellMoneySuggestionId}
+                                txTheme={txTheme}
+                                lineAccent={lineAccent}
+                                value={line.tradeComp ? fmtCalc(line.tradeComp) : ''}
+                                onValueChange={raw => set('tradeComp', normalizeTradeRate('money', raw))}
+                                onIncrease={() => adjustTradeComp(sellMoneyStep)}
+                                onDecrease={() => adjustTradeComp(-sellMoneyStep)}
+                                increaseLabel="Tăng bù"
+                                decreaseLabel="Giảm bù"
+                            />
+                        )}
+                    </div>
+                )}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     {[

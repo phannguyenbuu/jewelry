@@ -156,8 +156,8 @@ export function GoldSaleFieldGroup({
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1', marginTop: 2, paddingTop: 10, borderTop: `1px solid ${txTheme.softBorder}` }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <span style={S.label}>{title}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
+                        <span style={{ ...S.label, alignSelf: 'center', whiteSpace: 'nowrap' }}>{title}</span>
                         <div style={{ width: '100%' }}>
                             <ProductSelect
                                 value={product}
@@ -167,6 +167,16 @@ export function GoldSaleFieldGroup({
                                 width={tradeComboWidth}
                             />
                         </div>
+                        <QuantityField
+                            label="Số lượng"
+                            value={qty}
+                            onChange={onQtyChange}
+                            adjust={adjustQty}
+                            step={quantityStep}
+                            lineAccent={lineAccent}
+                            txTheme={txTheme}
+                            disabled={qtyLocked}
+                        />
                     </div>
                 </div>
             ) : (
@@ -181,7 +191,7 @@ export function GoldSaleFieldGroup({
                 </div>
             )}
 
-            {/* Sell: Số lượng cùng hàng với Tuổi vàng */}
+            {/* Trade: So luong cung hang voi Tuoi vang trong header */}
             {!title && (
                 <QuantityField
                     label="Số lượng"
@@ -196,20 +206,6 @@ export function GoldSaleFieldGroup({
             )}
 
             <TxLineInventoryLookup {...inventoryLookupProps} />
-
-            {/* Trade: Số lượng sau lookup */}
-            {title && (
-                <QuantityField
-                    label="Số lượng"
-                    value={qty}
-                    onChange={onQtyChange}
-                    adjust={adjustQty}
-                    step={quantityStep}
-                    lineAccent={lineAccent}
-                    txTheme={txTheme}
-                    disabled={qtyLocked}
-                />
-            )}
 
             <div>
                 <span style={S.label}>{rateLabel}</span>
@@ -277,8 +273,8 @@ export function GoldBuyFieldGroup({
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <span style={S.label}>{title}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
+                        <span style={{ ...S.label, alignSelf: 'center', whiteSpace: 'nowrap' }}>{title}</span>
                         <div style={{ width: '100%' }}>
                             <ProductSelect
                                 value={product}
@@ -287,6 +283,15 @@ export function GoldBuyFieldGroup({
                                 width={tradeComboWidth}
                             />
                         </div>
+                        <QuantityField
+                            label="Số lượng"
+                            value={qty}
+                            onChange={onQtyChange}
+                            adjust={adjustQty}
+                            step={quantityStep}
+                            lineAccent={lineAccent}
+                            txTheme={txTheme}
+                        />
                     </div>
                 </div>
             ) : (
@@ -300,15 +305,17 @@ export function GoldBuyFieldGroup({
                 </div>
             )}
 
-            <QuantityField
-                label="Số lượng"
-                value={qty}
-                onChange={onQtyChange}
-                adjust={adjustQty}
-                step={quantityStep}
-                lineAccent={lineAccent}
-                txTheme={txTheme}
-            />
+            {!title && (
+                <QuantityField
+                    label="Số lượng"
+                    value={qty}
+                    onChange={onQtyChange}
+                    adjust={adjustQty}
+                    step={quantityStep}
+                    lineAccent={lineAccent}
+                    txTheme={txTheme}
+                />
+            )}
 
             <div>
                 <span style={S.label}>Giá mua</span>

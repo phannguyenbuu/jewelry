@@ -3,7 +3,7 @@ from .state import db
 
 class Item(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
-    ma_hang      = db.Column(db.String(50),  nullable=False, index=True)
+    ma_hang      = db.Column(db.String(50),  nullable=False)
     ncc          = db.Column(db.String(200))
     nhom_hang    = db.Column(db.String(100))
     quay_nho     = db.Column(db.String(150))

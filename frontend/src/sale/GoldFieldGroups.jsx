@@ -156,8 +156,8 @@ export function GoldSaleFieldGroup({
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1', marginTop: 2, paddingTop: 10, borderTop: `1px solid ${txTheme.softBorder}` }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <span style={{ ...S.label, alignSelf: 'center', whiteSpace: 'nowrap' }}>{title}</span>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em', marginBottom: 6 }}>{title}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
                         <div style={{ width: '100%' }}>
                             <ProductSelect
                                 value={product}
@@ -216,21 +216,38 @@ export function GoldSaleFieldGroup({
                 />
             </div>
 
-            {/* Sell: Tiền công cùng hàng với Giá bán */}
-            {!title && (
-                <MoneyField
-                    label="Tiền công"
-                    placeholder="Nhập tiền công"
-                    list={sellMoneySuggestionId}
-                    txTheme={txTheme}
-                    lineAccent={lineAccent}
-                    value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
-                    onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
-                    onIncrease={() => adjustSellLabor(sellMoneyStep)}
-                    onDecrease={() => adjustSellLabor(-sellMoneyStep)}
-                    increaseLabel="Tăng tiền công"
-                    decreaseLabel="Giảm tiền công"
-                />
+            {/* Tiền công cùng hàng với Giá bán (cả Sell lẫn Trade) */}
+            <MoneyField
+                label="Tiền công"
+                placeholder="Nhập tiền công"
+                list={sellMoneySuggestionId}
+                txTheme={txTheme}
+                lineAccent={lineAccent}
+                value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+                onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+                onIncrease={() => adjustSellLabor(sellMoneyStep)}
+                onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+                increaseLabel="Tăng tiền công"
+                decreaseLabel="Giảm tiền công"
+            />
+
+            {/* Bù (trade only) - full width */}
+            {showTradeComp && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                    <MoneyField
+                        label="Bù"
+                        placeholder="Nhập tiền bù"
+                        list={tradeMoneySuggestionId}
+                        txTheme={txTheme}
+                        lineAccent={lineAccent}
+                        value={line.tradeComp ? fmtCalc(line.tradeComp) : ''}
+                        onValueChange={raw => set('tradeComp', normalizeTradeRate('money', raw))}
+                        onIncrease={() => adjustTradeComp && adjustTradeComp(sellMoneyStep)}
+                        onDecrease={() => adjustTradeComp && adjustTradeComp(-sellMoneyStep)}
+                        increaseLabel="Tăng bù"
+                        decreaseLabel="Giảm bù"
+                    />
+                </div>
             )}
 
             <TxLineExtras
@@ -248,7 +265,7 @@ export function GoldSaleFieldGroup({
                 adjustSellLabor={adjustSellLabor}
                 adjustTradeComp={adjustTradeComp}
                 set={set}
-                hideLaborField={!title}
+                hideLaborField
             />
         </>
     );
@@ -273,8 +290,8 @@ export function GoldBuyFieldGroup({
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <span style={{ ...S.label, alignSelf: 'center', whiteSpace: 'nowrap' }}>{title}</span>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em', marginBottom: 6 }}>{title}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
                         <div style={{ width: '100%' }}>
                             <ProductSelect
                                 value={product}

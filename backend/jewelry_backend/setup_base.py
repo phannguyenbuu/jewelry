@@ -347,7 +347,6 @@ def _ensure_search_indexes():
     An toan voi ca SQLite va PostgreSQL vi dung CREATE INDEX IF NOT EXISTS.
     """
     inspector = inspect(db.engine)
-    dialect = db.engine.dialect.name  # 'sqlite' hoac 'postgresql'
 
     index_specs = [
         # (table_name, index_name, column_name)

@@ -183,6 +183,12 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isTrade, line.cat]);
 
+    // Luon dung Vang, khong con Ngoai te
+    useEffect(() => {
+        if (line.cat !== 'gold') onChange({ cat: 'gold' });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [line.cat]);
+
     useEffect(() => {
         if (!isInventoryProductLocked) return;
         if (String(line.qty || '') === '1') return;
@@ -390,35 +396,6 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-                {/* Danh mục */}
-                {!isTrade && (
-                    <div>
-                        <span style={S.label}>Phân loại</span>
-                        <div style={S.toggleRow}>
-                            {cats.map(c => (
-                                <button key={c} style={S.toggleOpt(line.cat === c, txTheme.gradient)}
-                                    onClick={() => {
-                                        const nextProduct = firstProductForCategory(rates, c);
-                                        const nextLine = sanitizeLineInventoryState({ ...line, cat: c, product: nextProduct });
-                                        onChange({
-                                            cat: c,
-                                            product: nextProduct,
-                                            itemId: nextLine.itemId,
-                                            itemName: nextLine.itemName,
-                                            itemGoldWeight: nextLine.itemGoldWeight || '',
-                                            productCode: nextLine.productCode,
-                                            entryMode: nextLine.entryMode,
-                                        });
-                                        setLookupMessage('');
-                                        setCatalogQuery('');
-                                    }}>
-                                    {c === 'gold' ? 'Vàng' : 'Ngoại tệ'}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
                 {isTradeGold ? (
                     <>
                         <GoldBuyFieldGroup

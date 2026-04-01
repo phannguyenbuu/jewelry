@@ -12,7 +12,10 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from flask import jsonify, request, send_from_directory
-from sqlalchemy.orm.attributes import flag_modified
+try:
+    from pgcompat import flag_modified
+except ImportError:
+    from sqlalchemy.orm.attributes import flag_modified
 
 from .company_bank_accounts import (
     LEGACY_BANK_LEDGER_NAME,

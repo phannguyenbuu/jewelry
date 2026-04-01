@@ -179,121 +179,93 @@ def _get_or_create_default_kho():
 
 def _ensure_item_tuoi_vang_column():
     item_table = Item.__table__.name
-    column_names = {col['name'] for col in inspect(db.engine).get_columns(item_table)}
-    if 'tuoi_vang' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {item_table} ADD COLUMN tuoi_vang VARCHAR(100)'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {item_table} ADD COLUMN IF NOT EXISTS tuoi_vang VARCHAR(100)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_tuoi_vang_columns():
     tuoi_table = TuoiVang.__table__.name
-    inspector = inspect(db.engine)
-    if tuoi_table not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(tuoi_table)}
-    alter_statements = []
-    if 'gia_ban' not in column_names:
-        alter_statements.append(f'ALTER TABLE {tuoi_table} ADD COLUMN gia_ban BIGINT DEFAULT 0')
-    if 'gia_mua' not in column_names:
-        alter_statements.append(f'ALTER TABLE {tuoi_table} ADD COLUMN gia_mua BIGINT DEFAULT 0')
-    if 'trong_luong_rieng' not in column_names:
-        alter_statements.append(f'ALTER TABLE {tuoi_table} ADD COLUMN trong_luong_rieng FLOAT DEFAULT 0')
-    if 'lich_su' not in column_names:
-        alter_statements.append(f'ALTER TABLE {tuoi_table} ADD COLUMN lich_su JSON')
-    for sql in alter_statements:
-        db.session.execute(text(sql))
-    if alter_statements:
-        db.session.commit()
+    cols = [
+        ('gia_ban',          'BIGINT DEFAULT 0'),
+        ('gia_mua',          'BIGINT DEFAULT 0'),
+        ('trong_luong_rieng','FLOAT DEFAULT 0'),
+        ('lich_su',          'JSON'),
+    ]
+    changed = False
+    for col, definition in cols:
+        try:
+            db.session.execute(text(f'ALTER TABLE {tuoi_table} ADD COLUMN IF NOT EXISTS {col} {definition}'))
+            db.session.commit()
+            changed = True
+        except Exception:
+            db.session.rollback()
 
 
 def _ensure_quay_nho_thu_ngan_column():
     quay_table = QuayNho.__table__.name
-    inspector = inspect(db.engine)
-    if quay_table not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(quay_table)}
-    if 'thu_ngan_id' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {quay_table} ADD COLUMN thu_ngan_id INTEGER'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {quay_table} ADD COLUMN IF NOT EXISTS thu_ngan_id INTEGER'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_thu_ngan_password_hash_column():
     table_name = ThuNgan.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    if 'password_hash' in column_names:
-        return
-    db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN password_hash VARCHAR(255) DEFAULT ''"))
-    db.session.commit()
+    try:
+        db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) DEFAULT ''"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_thu_ngan_so_quy_detail_columns():
     table_name = ThuNganSoQuyTheoNguoi.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    if 'chi_tiet' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN chi_tiet JSON'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS chi_tiet JSON'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_khach_hang_sao_column():
     table_name = KhachHang.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    if 'sao' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN sao INTEGER DEFAULT 0'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS sao INTEGER DEFAULT 0'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_khach_hang_favorite_column():
     table_name = KhachHang.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    if 'yeu_thich' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN yeu_thich INTEGER DEFAULT 0'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS yeu_thich INTEGER DEFAULT 0'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _ensure_khach_hang_cccd_image_columns():
     table_name = KhachHang.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    alter_statements = []
-    if 'anh_mat_truoc' not in column_names:
-        alter_statements.append(f'ALTER TABLE {table_name} ADD COLUMN anh_mat_truoc TEXT')
-    if 'anh_mat_sau' not in column_names:
-        alter_statements.append(f'ALTER TABLE {table_name} ADD COLUMN anh_mat_sau TEXT')
-    for sql in alter_statements:
-        db.session.execute(text(sql))
-    if alter_statements:
-        db.session.commit()
+    for col in ['anh_mat_truoc', 'anh_mat_sau']:
+        try:
+            db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col} TEXT'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 
 def _ensure_khach_hang_photo_gallery_column():
     table_name = KhachHang.__table__.name
-    inspector = inspect(db.engine)
-    if table_name not in inspector.get_table_names():
-        return
-    column_names = {col['name'] for col in inspector.get_columns(table_name)}
-    if 'anh_bo_suu_tap' in column_names:
-        return
-    db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN anh_bo_suu_tap JSON'))
-    db.session.commit()
+    try:
+        db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS anh_bo_suu_tap JSON'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _parse_int_id(value):

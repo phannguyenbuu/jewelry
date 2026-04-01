@@ -1076,6 +1076,18 @@ export default function OrderScreen({
                                                     {customerInfo?.favorite ? <IoHeart style={{ fontSize: 15 }} /> : <IoHeartOutline style={{ fontSize: 15 }} />}
                                                 </button>
                                             </div>
+                                            <button
+                                                type="button"
+                                                onClick={saveCustomerToBackend}
+                                                disabled={customerSaveLoading}
+                                                style={{
+                                                    ...S.pillBtn('linear-gradient(135deg,#2563eb,#3b82f6)'),
+                                                    height: 30, padding: '0 12px', fontSize: 11, minHeight: 30,
+                                                    opacity: customerSaveLoading ? 0.7 : 1,
+                                                }}
+                                            >
+                                                {customerSaveLoading ? 'Đang lưu...' : (customerInfo?.id ? 'Cập nhật KH' : 'Lưu KH')}
+                                            </button>
                                         </div>
                                     </div>
                                 </div>

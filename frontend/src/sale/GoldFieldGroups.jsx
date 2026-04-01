@@ -231,25 +231,6 @@ export function GoldSaleFieldGroup({
                 decreaseLabel="Giảm tiền công"
             />
 
-            {/* Bù (trade only) - full width */}
-            {showTradeComp && (
-                <div style={{ gridColumn: '1 / -1' }}>
-                    <MoneyField
-                        label="Bù"
-                        placeholder="Nhập tiền bù"
-                        list={tradeMoneySuggestionId}
-                        txTheme={txTheme}
-                        lineAccent={lineAccent}
-                        value={line.tradeComp ? fmtCalc(line.tradeComp) : ''}
-                        onValueChange={raw => set('tradeComp', normalizeTradeRate('money', raw))}
-                        onIncrease={() => adjustTradeComp && adjustTradeComp(sellMoneyStep)}
-                        onDecrease={() => adjustTradeComp && adjustTradeComp(-sellMoneyStep)}
-                        increaseLabel="Tăng bù"
-                        decreaseLabel="Giảm bù"
-                    />
-                </div>
-            )}
-
             <TxLineExtras
                 visible
                 line={line}
@@ -285,6 +266,7 @@ export function GoldBuyFieldGroup({
     txTheme,
     rateValue,
     onRateChange,
+    buField,
 }) {
     return (
         <>
@@ -342,6 +324,8 @@ export function GoldBuyFieldGroup({
                     onValueChange={onRateChange}
                 />
             </div>
+
+            {buField || null}
         </>
     );
 }

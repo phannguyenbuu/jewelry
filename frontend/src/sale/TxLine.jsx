@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IoCloseOutline } from 'react-icons/io5';
 import FormattedNumberInput from './FormattedNumberInput';
 import { GoldBuyFieldGroup, GoldSaleFieldGroup } from './GoldFieldGroups';
+import { MoneyField } from './TxLineExtras.jsx';
 import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, calcValueStyle, filterInventoryItems, findInventoryByCode, firstProductForCategory, fmtCalc, formatBuyGoldProductLabel, formatWeight, getTxTheme, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
 
 export default function TxLine({ line, rates, inventoryItems, onChange, onRemove, showRemove }) {
@@ -399,7 +400,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                 {isTradeGold ? (
                     <>
                         <GoldBuyFieldGroup
-                            title="DẺ"
+                            title="Dẻ"
                             productOptions={goldBuyProductOptions}
                             product={line.customerProduct || ''}
                             onProductChange={handleCustomerProductChange}
@@ -415,6 +416,21 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                             txTheme={txTheme}
                             rateValue={fmtCalc(customerRate)}
                             onRateChange={raw => onChange({ customerCustomBuy: normalizeTradeRate('gold', raw) })}
+                            buField={
+                                <MoneyField
+                                    label="Bù"
+                                    placeholder="Nhập tiền bù"
+                                    list={tradeMoneySuggestionId}
+                                    txTheme={txTheme}
+                                    lineAccent={lineAccent}
+                                    value={line.tradeComp ? fmtCalc(line.tradeComp) : ''}
+                                    onValueChange={raw => set('tradeComp', normalizeTradeRate('money', raw))}
+                                    onIncrease={() => adjustTradeComp(sellMoneyStep)}
+                                    onDecrease={() => adjustTradeComp(-sellMoneyStep)}
+                                    increaseLabel="Tăng bù"
+                                    decreaseLabel="Giảm bù"
+                                />
+                            }
                         />
                         <GoldSaleFieldGroup
                             title="VÀNG MỚI"

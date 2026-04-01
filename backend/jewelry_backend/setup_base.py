@@ -362,10 +362,6 @@ def _ensure_search_indexes():
     for table_name, index_name, column_name in index_specs:
         if table_name not in existing_tables:
             continue
-        # Kiem tra index da ton tai chua
-        existing_indexes = {idx['name'] for idx in inspector.get_indexes(table_name)}
-        if index_name in existing_indexes:
-            continue
         try:
             db.session.execute(
                 text(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})')

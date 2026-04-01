@@ -12,7 +12,6 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from flask import jsonify, request, send_from_directory
-from sqlalchemy import func, or_
 
 from . import easyinvoice_client
 from .state import app, db
@@ -134,19 +133,16 @@ def _find_customer_duplicates(raw_id, ten, cccd, so_dien_thoai):
     if not expected_name and not expected_cccd and not expected_phone:
         return []
 
-    # Pre-filter bang SQL de tranh full-table scan
-    sql_filters = []
-    if expected_cccd:
-        sql_filters.append(func.lower(KhachHang.cccd) == expected_cccd)
-    if expected_phone:
-        sql_filters.append(func.lower(KhachHang.so_dien_thoai) == expected_phone)
-    if expected_name:
-        sql_filters.append(func.lower(KhachHang.ten) == expected_name)
-
-    query = KhachHang.query.filter(or_(*sql_filters)).order_by(KhachHang.id.desc())
+    
+    query = KhachHang.query.order_by(KhachHang.id.desc())
     if target_id is not None:
-        query = query.filter(KhachHang.id != target_id)
+        try:
+            query = query.filter(KhachHang.id != target_id)
+        except Exception:
+            pass
     rows = query.all()
+    if target_id is not None:
+        rows = [r for r in rows if r.id != target_id]
 
     matches = []
     for row in rows:

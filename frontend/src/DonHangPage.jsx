@@ -6,7 +6,50 @@ import { API_BASE } from './lib/api';
 const API = API_BASE;
 
 const fmt = n => n ? Number(n).toLocaleString('vi-VN') : '0';
-const today = () => new Date().toISOString().slice(0, 10);
+const pad2 = value => String(value).padStart(2, '0');
+const parseOrderDateValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const normalized = raw.replace('T', ' ').replace(/\.\d+$/, '');
+    const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (matched) {
+        const [, year, month, day, hour = '00', minute = '00', second = '00'] = matched;
+        return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hour),
+            Number(minute),
+            Number(second),
+        );
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const toDateTimeInputValue = (value = new Date()) => {
+    const date = parseOrderDateValue(value) || (value instanceof Date ? value : new Date());
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+};
+const toOrderDateStorageValue = (value) => {
+    const date = parseOrderDateValue(value);
+    if (!date || Number.isNaN(date.getTime())) return String(value || '').trim();
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+};
+const splitOrderDateDisplay = (value) => {
+    const date = parseOrderDateValue(value);
+    if (!date || Number.isNaN(date.getTime())) {
+        return {
+            dateText: String(value || '').trim() || '-',
+            timeText: '--:--:--',
+        };
+    }
+    return {
+        dateText: `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`,
+        timeText: `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`,
+    };
+};
+const today = () => toDateTimeInputValue(new Date());
 
 const STATUS_CFG = {
     'Mới': { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
@@ -107,7 +150,15 @@ export default function DonHangPage() {
     }, []);
 
     const openAdd = () => { setForm({ ...EMPTY_FORM }); setModal('add'); };
-    const openEdit = d => { setForm({ ...EMPTY_FORM, ...d, chung_tu: d.chung_tu || [] }); setModal(d); };
+    const openEdit = d => {
+        setForm({
+            ...EMPTY_FORM,
+            ...d,
+            ngay_dat: toDateTimeInputValue(d?.ngay_dat || new Date()),
+            chung_tu: d.chung_tu || [],
+        });
+        setModal(d);
+    };
 
     const save = async e => {
         e.preventDefault();
@@ -115,7 +166,12 @@ export default function DonHangPage() {
         await fetch(isEdit ? `${API}/api/don_hang/${modal.id}` : `${API}/api/don_hang`, {
             method: isEdit ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...form, tong_tien: Number(form.tong_tien || 0), dat_coc: Number(form.dat_coc || 0) }),
+            body: JSON.stringify({
+                ...form,
+                ngay_dat: toOrderDateStorageValue(form.ngay_dat),
+                tong_tien: Number(form.tong_tien || 0),
+                dat_coc: Number(form.dat_coc || 0),
+            }),
         });
         setModal(null); load();
     };
@@ -225,7 +281,10 @@ export default function DonHangPage() {
                                         <div style={{ fontWeight: 600 }}>{d.khach_hang}</div>
                                         <div style={{ fontSize: 11, color: '#94a3b8' }}>{d.so_dien_thoai}{d.cccd && ` · CCCD: ${d.cccd}`}</div>
                                     </td>
-                                    <td style={{ padding: '10px 14px', color: '#64748b' }}>{d.ngay_dat}</td>
+                                    <td style={{ padding: '10px 14px', color: '#64748b' }}>
+                                        <div>{splitOrderDateDisplay(d.ngay_dat).dateText}</div>
+                                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{splitOrderDateDisplay(d.ngay_dat).timeText}</div>
+                                    </td>
                                     <td style={{ padding: '10px 14px', fontWeight: 700, color: '#16a34a' }}>{fmt(d.tong_tien)} ₫</td>
                                     <td style={{ padding: '10px 14px', color: '#c2410c' }}>{fmt(d.dat_coc)} ₫</td>
                                     <td style={{ padding: '10px 14px' }}><StatusBadge s={d.trang_thai} /></td>
@@ -298,7 +357,7 @@ export default function DonHangPage() {
                             )}
 
                             <Field label="Ngày đặt">
-                                <input type="date" style={inp} value={form.ngay_dat} onChange={e => setForm({ ...form, ngay_dat: e.target.value })} />
+                                <input type="datetime-local" style={inp} value={form.ngay_dat} onChange={e => setForm({ ...form, ngay_dat: e.target.value })} />
                             </Field>
 
                             {/* Ngày giao — chỉ Mua/Bán */}

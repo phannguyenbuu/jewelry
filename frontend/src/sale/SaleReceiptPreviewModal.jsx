@@ -1,5 +1,7 @@
 import { IoCloseOutline } from 'react-icons/io5';
 
+const LOCKED_POS_NUMBERS = new Set([2]);
+
 export default function SaleReceiptPreviewModal({
     open,
     loading,
@@ -105,32 +107,38 @@ export default function SaleReceiptPreviewModal({
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                             {[1, 2, 3, 4, 5].map(posNo => (
-                                <button
-                                    key={posNo}
-                                    type="button"
-                                    onClick={() => onPrint?.(posNo)}
-                                    disabled={loading || !imageUrl}
-                                    title={`POS ${posNo}`}
-                                    aria-label={`In POS ${posNo}`}
-                                    style={{
-                                        width: 38,
-                                        height: 38,
-                                        borderRadius: '50%',
-                                        border: 'none',
-                                        background: 'linear-gradient(135deg,#15803d,#22c55e)',
-                                        color: '#ffffff',
-                                        fontWeight: 900,
-                                        fontSize: 13,
-                                        cursor: loading || !imageUrl ? 'not-allowed' : 'pointer',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        boxShadow: '0 10px 18px rgba(34,197,94,.24)',
-                                        opacity: loading || !imageUrl ? 0.55 : 1,
-                                    }}
-                                >
-                                    {posNo}
-                                </button>
+                                (() => {
+                                    const isLocked = LOCKED_POS_NUMBERS.has(posNo);
+                                    const isDisabled = loading || !imageUrl || isLocked;
+                                    return (
+                                        <button
+                                            key={posNo}
+                                            type="button"
+                                            onClick={() => onPrint?.(posNo)}
+                                            disabled={isDisabled}
+                                            title={isLocked ? `POS ${posNo} đã khóa` : `POS ${posNo}`}
+                                            aria-label={isLocked ? `POS ${posNo} đã khóa` : `In POS ${posNo}`}
+                                            style={{
+                                                width: 38,
+                                                height: 38,
+                                                borderRadius: '50%',
+                                                border: 'none',
+                                                background: isLocked ? '#cbd5e1' : 'linear-gradient(135deg,#15803d,#22c55e)',
+                                                color: '#ffffff',
+                                                fontWeight: 900,
+                                                fontSize: 13,
+                                                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                boxShadow: isLocked ? 'none' : '0 10px 18px rgba(34,197,94,.24)',
+                                                opacity: isDisabled ? 0.55 : 1,
+                                            }}
+                                        >
+                                            {posNo}
+                                        </button>
+                                    );
+                                })()
                             ))}
                         </div>
                     </div>

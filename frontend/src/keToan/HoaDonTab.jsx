@@ -55,12 +55,12 @@ function formatDuration(seconds) {
 
 function formatPollInterval(seconds) {
     const value = Number(seconds || 60);
-    if (!Number.isFinite(value) || value <= 0) return '1 phÃºt / láº§n';
+    if (!Number.isFinite(value) || value <= 0) return '1 phút / lần';
     if (value % 60 === 0) {
         const minutes = value / 60;
-        return `${minutes} phÃºt / láº§n`;
+        return `${minutes} phút / lần`;
     }
-    return `${value} giÃ¢y / láº§n`;
+    return `${value} giây / lần`;
 }
 
 function syncStatusMeta(syncInfo) {

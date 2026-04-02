@@ -133,7 +133,7 @@ export default function DocumentPreviewModal({
                             style={{ ...S.pillBtn('linear-gradient(135deg,#15803d,#22c55e)', '#ffffff'), opacity: loading || !imageUrl || sending ? 0.55 : 1 }}
                         >
                             <IoPrintOutline />
-                            <span>{sending ? 'Đang gửi agent' : 'Gửi agent'}</span>
+                            <span>{sending ? 'Đang in Phiếu Kê' : 'In Phiếu Kê'}</span>
                         </button>
                     </div>
                 </div>

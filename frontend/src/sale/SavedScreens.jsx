@@ -3,10 +3,37 @@ import { useState } from 'react';
 import { IoAddOutline, IoCheckmarkCircle, IoCheckmarkCircleOutline, IoRemoveOutline, IoTrashOutline } from 'react-icons/io5';
 import { POS_RED, S, fmtVN } from './shared';
 
+const pad2 = value => String(value).padStart(2, '0');
+const parseOrderDateValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const normalized = raw.replace('T', ' ').replace(/\.\d+$/, '');
+    const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (matched) {
+        const [, year, month, day, hour = '00', minute = '00', second = '00'] = matched;
+        return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hour),
+            Number(minute),
+            Number(second),
+        );
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const formatOrderDateDisplay = (value) => {
+    const date = parseOrderDateValue(value);
+    if (!date || Number.isNaN(date.getTime())) return String(value || '').trim() || '-';
+    return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+};
+
 function OrderListScreen({ orders, onClose, onSettle, settleLoading }) {
     const todayOrders = orders.filter(o => {
-        const d = new Date(o.ngay_dat);
+        const d = parseOrderDateValue(o.ngay_dat);
         const t = new Date();
+        if (!d || Number.isNaN(d.getTime())) return false;
         return d.getDate() === t.getDate() && d.getMonth() === t.getMonth() && d.getFullYear() === t.getFullYear();
     });
 
@@ -33,7 +60,7 @@ function OrderListScreen({ orders, onClose, onSettle, settleLoading }) {
                     <div key={o.id} style={{ ...S.card, background: 'rgba(255,255,255,.98)', border: '1px solid rgba(15,23,42,.06)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                             <div style={{ color: '#111827', fontWeight: 800, fontSize: 12 }}>{o.ma_don}</div>
-                            <div style={{ fontSize: 10, color: '#6b7280' }}>{o.ngay_dat}</div>
+                            <div style={{ fontSize: 10, color: '#6b7280' }}>{formatOrderDateDisplay(o.ngay_dat)}</div>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                             {[

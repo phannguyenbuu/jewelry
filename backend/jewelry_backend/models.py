@@ -88,8 +88,11 @@ class LoaiVang(db.Model):
 class DonHang(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     ma_don        = db.Column(db.String(50), unique=True)
+    loai_don      = db.Column(db.String(20), default='Mua')
     khach_hang    = db.Column(db.String(200))
+    cccd          = db.Column(db.String(50), default='')
     so_dien_thoai = db.Column(db.String(20))
+    dia_chi_kh    = db.Column(db.Text, default='')
     dia_chi       = db.Column(db.Text)
     ngay_dat      = db.Column(db.String(30))
     ngay_giao     = db.Column(db.String(30))
@@ -98,8 +101,12 @@ class DonHang(db.Model):
     dat_coc       = db.Column(db.BigInteger, default=0)
     trang_thai    = db.Column(db.String(50), default='Mới')  # Mới/Xử lý/Hoàn thành/Hủy
     ghi_chu       = db.Column(db.Text)
+    chung_tu      = db.Column(db.JSON, default=list)
+    hoa_don_tai_chinh = db.Column(db.JSON, default=dict)
+    da_hach_toan_so_quy = db.Column(db.Integer, default=0)
     nguoi_tao     = db.Column(db.String(150), default='')
     ngay_tao      = db.Column(db.String(30), default='')
+    cap_nhat_luc  = db.Column(db.String(30), default='')
 
 
 class KhachHang(db.Model):
@@ -123,10 +130,10 @@ class KhachHang(db.Model):
     anh_mat_truoc  = db.Column(db.Text)
     anh_mat_sau    = db.Column(db.Text)
     anh_bo_suu_tap = db.Column(db.JSON, default=list)
+    ghi_chu        = db.Column(db.Text, default='')
     nguoi_tao      = db.Column(db.String(150), default='')
     ngay_tao       = db.Column(db.String(30), default='')
     cap_nhat_luc   = db.Column(db.String(30), default='')
-
 
 class HangSuaBo(db.Model):
     __tablename__ = 'hang_sua_bo'

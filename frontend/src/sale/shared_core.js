@@ -64,14 +64,23 @@ const createEmptyCustomerInfo = () => ({
     sao: 0,
     favorite: false,
     photoGallery: [],
+    photoGalleryThumbs: [],
+    photoGalleryAssets: [],
+    photoThumbMap: {},
     backText: '',
     frontImage: '',
+    frontThumb: '',
     backImage: '',
+    backThumb: '',
 });
 const hasCustomerInfo = (info) => Object.entries(info || {}).some(([key, value]) => {
     if (key === 'sao') return Number(value || 0) > 0;
     if (key === 'favorite') return Boolean(value);
     if (key === 'photoGallery') return Array.isArray(value) && value.length > 0;
+    if (key === 'photoGalleryThumbs') return false;
+    if (key === 'photoGalleryAssets') return false;
+    if (key === 'photoThumbMap') return false;
+    if (key === 'frontThumb' || key === 'backThumb') return false;
     return String(value || '').trim();
 });
 

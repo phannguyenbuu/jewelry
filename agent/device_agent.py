@@ -492,7 +492,7 @@ def normalize_config(raw):
     config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 1)
     config['printer']['heartbeat_interval_seconds'] = coerce_float(config['printer'].get('heartbeat_interval_seconds'), 15)
     config['printer']['scan_interval_seconds'] = coerce_float(config['printer'].get('scan_interval_seconds'), 90)
-    config['printer']['scan_network_shares'] = coerce_bool(config['printer'].get('scan_network_shares'), True)
+    config['printer']['scan_network_shares'] = True
     config['printer']['network_host_limit'] = coerce_int(config['printer'].get('network_host_limit'), 0)
     config['scale']['serial'] = normalize_serial_settings(config['scale'].get('serial') or {}, defaults=AND_SERIAL_DEFAULTS)
     config['sartorius']['serial'] = normalize_sartorius_settings(config['sartorius'].get('serial') or {})
@@ -565,7 +565,7 @@ def parse_request_config(payload):
             'poll_interval_seconds': payload.get('printer_poll_interval_seconds'),
             'heartbeat_interval_seconds': payload.get('printer_heartbeat_interval_seconds'),
             'scan_interval_seconds': payload.get('printer_scan_interval_seconds'),
-            'scan_network_shares': payload.get('printer_scan_network_shares'),
+            'scan_network_shares': True,
             'network_host_limit': payload.get('printer_network_host_limit'),
         },
     })
@@ -1413,11 +1413,10 @@ def scan_all_printers(scan_network_shares=True, limit=0):
         printers.extend(scan_local_printers())
     except Exception as exc:
         errors.append(f'local scan failed: {exc}')
-    if scan_network_shares:
-        try:
-            printers.extend(scan_network_shared_printers(limit=limit))
-        except Exception as exc:
-            errors.append(f'network scan failed: {exc}')
+    try:
+        printers.extend(scan_network_shared_printers(limit=limit))
+    except Exception as exc:
+        errors.append(f'network scan failed: {exc}')
     printers = dedupe_printers(printers)
     if errors and not printers:
         raise RuntimeError(' ; '.join(errors))
@@ -2215,6 +2214,10 @@ def dispatch_print_job(command, printers):
     copies = max(1, coerce_int(payload.get('copies'), 1))
     prepared = build_print_payload(payload)
     options = payload.get('options') if isinstance(payload.get('options'), dict) else {}
+    force_local_connection = (
+        coerce_bool(payload.get('force_local_connection'), False)
+        or coerce_bool(payload.get('prefer_local_connection'), False)
+    )
     target = with_printer_aliases(target)
     target_name = clean_text(target.get('printer_name')) or printer_name
     unc_path = normalize_unc_path(target.get('unc_path'))
@@ -2227,13 +2230,14 @@ def dispatch_print_job(command, printers):
         if prepared['mode'] == 'text':
             step = None
             text_errors = []
-            for unc_candidate in unc_candidates:
-                try:
-                    step = print_text_to_unc(unc_candidate, prepared['text'], current_name)
-                    results.append(step)
-                    break
-                except Exception as exc:
-                    text_errors.append(f'{unc_candidate}: {exc}')
+            if not force_local_connection:
+                for unc_candidate in unc_candidates:
+                    try:
+                        step = print_text_to_unc(unc_candidate, prepared['text'], current_name)
+                        results.append(step)
+                        break
+                    except Exception as exc:
+                        text_errors.append(f'{unc_candidate}: {exc}')
             if step is not None:
                 continue
 
@@ -2260,7 +2264,7 @@ def dispatch_print_job(command, printers):
             continue
 
         if prepared['mode'] == 'raw':
-            if unc_candidates:
+            if unc_candidates and not force_local_connection:
                 unc_errors = []
                 step = None
                 for unc_candidate in unc_candidates:
@@ -2473,7 +2477,7 @@ class DeviceAgentService:
         printer_config = config['printer']
         try:
             printers = scan_all_printers(
-                scan_network_shares=printer_config.get('scan_network_shares', True),
+                scan_network_shares=True,
                 limit=printer_config.get('network_host_limit', 0),
             )
             with STATE_LOCK:
@@ -3524,6 +3528,7 @@ DASHBOARD_HTML = """
                 <div class="section-copy">Local printers come from Win32_Printer. Network printer shares come from SMB browser, ARP, and subnet SMB probing.</div>
               </div>
             </div>
+            <div id="printerActionStatus" class="muted" style="margin-bottom:12px; min-height:20px;"></div>
             <div class="table-wrap">
               <table><thead><tr><th>Action</th><th>Printer</th><th>Host PC</th><th>UNC</th><th>Driver</th><th>Port</th><th>Flags</th><th>Source</th></tr></thead><tbody id="printersBody"></tbody></table>
             </div>
@@ -3586,7 +3591,7 @@ DASHBOARD_HTML = """
               <div class="field"><label>Printer poll s</label><input name="printer_poll_interval_seconds" /></div>
               <div class="field"><label>Printer heartbeat s</label><input name="printer_heartbeat_interval_seconds" /></div>
               <div class="field"><label>Printer scan s</label><input name="printer_scan_interval_seconds" /></div>
-              <div class="field"><label>Scan network shares</label><select name="printer_scan_network_shares"><option value="true">true</option><option value="false">false</option></select></div>
+              <div class="field"><label>Scan network shares</label><input name="printer_scan_network_shares" value="true" readonly /></div>
               <div class="field"><label>Network host limit (0 = full subnet)</label><input name="printer_network_host_limit" /></div>
             </div>
             <div class="toolbar" style="margin-top:14px;">
@@ -3609,6 +3614,7 @@ DASHBOARD_HTML = """
     const stateUrl = '/api/state';
     const configForm = document.getElementById('configForm');
     const formStatus = document.getElementById('formStatus');
+    const printerActionStatus = document.getElementById('printerActionStatus');
     const printersBody = document.getElementById('printersBody');
     const navItems = Array.from(document.querySelectorAll('[data-view]'));
     const viewNames = ['overview', 'and', 'sartorius', 'printer', 'config', 'logs'];
@@ -3745,58 +3751,211 @@ DASHBOARD_HTML = """
         4,
       );
     }
-    function buildTestPageText(row) {
-      const machineName = (((latestState || {}).app || {}).machine_name) || '-';
-      const printerName = row.printer_name || row.share_name || row.unc_path || '-';
-      const hostName = row.host_pc || row.system_name || '-';
-      const uncPath = row.unc_path || '-';
-      const printedAt = new Date().toLocaleString('en-US', { hour12: false });
-      return [
-        'JEWELRY DEVICE AGENT TEST PAGE',
-        '',
-        `PC Name: ${machineName}`,
-        `Printer Name: ${printerName}`,
-        `Printer Host: ${hostName}`,
-        `Printer UNC: ${uncPath}`,
-        `Generated At: ${printedAt}`,
-        '',
-        'This page was sent from the local agent dashboard.',
-      ].join('\\r\\n');
+    function setPrinterActionStatus(message, isError = false) {
+      if (!printerActionStatus) return;
+      printerActionStatus.textContent = message || '';
+      printerActionStatus.style.color = message ? (isError ? '#b91c1c' : '#0f766e') : '#64748b';
     }
-    async function sendTestPrint(index, button) {
+    function normalizeBaseUrl(value) {
+      return String(value || '').trim().replace(/\\/+$/, '');
+    }
+    function parseDataUrl(value) {
+      const matched = String(value || '').match(/^data:(.+?);base64,(.+)$/i);
+      if (!matched) return null;
+      return { mimeType: matched[1] || 'image/png', imageBase64: matched[2] || '' };
+    }
+    function makeFileToken(value, fallback = 'phieu-ke-mua-hang') {
+      const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\\u0300-\\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      return normalized || fallback;
+    }
+    function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+      const segments = String(text || '').split(/\\r?\\n/);
+      let cursorY = y;
+      segments.forEach((segment, segmentIndex) => {
+        const words = String(segment || '').split(/\\s+/).filter(Boolean);
+        if (!words.length) {
+          cursorY += lineHeight;
+          return;
+        }
+        let line = '';
+        words.forEach((word) => {
+          const probe = line ? `${line} ${word}` : word;
+          if (ctx.measureText(probe).width <= maxWidth || !line) {
+            line = probe;
+            return;
+          }
+          ctx.fillText(line, x, cursorY);
+          cursorY += lineHeight;
+          line = word;
+        });
+        if (line) {
+          ctx.fillText(line, x, cursorY);
+          cursorY += lineHeight;
+        }
+        if (segmentIndex < segments.length - 1) {
+          cursorY += Math.round(lineHeight * 0.2);
+        }
+      });
+      return cursorY;
+    }
+    function drawVoucherInfoBlock(ctx, title, value, x, y, maxWidth) {
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 28px "Segoe UI", Arial, sans-serif';
+      ctx.fillText(title, x, y);
+      ctx.fillStyle = '#334155';
+      ctx.font = '400 28px "Segoe UI", Arial, sans-serif';
+      return wrapCanvasText(ctx, value || '-', x, y + 42, maxWidth, 38) + 12;
+    }
+    function buildAgentVoucherPng(row) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1240;
+      canvas.height = 1754;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Khong khoi tao duoc canvas de tao PNG.');
+      }
+
+      const appState = latestState || {};
+      const config = appState.config || {};
+      const app = appState.app || {};
+      const machineName = app.machine_name || '-';
+      const serverUrl = normalizeBaseUrl(config.server_url || '');
+      const printerName = row.printer_name || row.share_name || row.unc_path || '-';
+      const hostPc = row.host_pc || row.system_name || row.host_address || '-';
+      const hostAddress = row.host_address || row.system_name || '-';
+      const uncPath = row.unc_path || '-';
+      const printedAt = new Date().toLocaleString('vi-VN', { hour12: false });
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#0f766e';
+      ctx.fillRect(0, 0, canvas.width, 190);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 64px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('PHIEU KE MUA HANG', 76, 92);
+      ctx.font = '400 30px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Ban in mau duoc gui tu Device Agent Dashboard', 76, 142);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 42px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Thong tin lenh in', 76, 262);
+
+      let y = 330;
+      y = drawVoucherInfoBlock(ctx, 'May gui lenh', machineName, 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'May in dich', printerName, 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'Host may in', hostPc, 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'Dia chi/alias', hostAddress, 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'Duong dan UNC', uncPath, 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'Server dispatch', serverUrl || '-', 76, y, 1088);
+      y = drawVoucherInfoBlock(ctx, 'Thoi gian tao PNG', printedAt, 76, y, 1088);
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(76, y + 14, 1088, 2);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 34px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('Ghi chu', 76, y + 82);
+      ctx.fillStyle = '#334155';
+      ctx.font = '400 28px "Segoe UI", Arial, sans-serif';
+      wrapCanvasText(
+        ctx,
+        'Lenh nay duoc gui tu browser len server, sau do server chuyen toi dung print agent dang so huu may in nay. Dashboard khong goi in truc tiep tu webview.',
+        76,
+        y + 128,
+        1088,
+        40,
+      );
+
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
+      return canvas.toDataURL('image/png');
+    }
+    function buildPrinterDispatchTarget(row) {
+      const machineName = row.host_pc || row.system_name || row.host_address || '';
+      const hostName = row.host_address || row.system_name || row.host_pc || '';
+      const deviceName = row.system_name || row.host_pc || row.host_address || '';
+      const printerName = row.printer_name || row.share_name || row.unc_path || '';
+      return {
+        machine_name: machineName,
+        host_name: hostName,
+        device_name: deviceName,
+        printer_name: printerName,
+        unc_path: row.unc_path || '',
+      };
+    }
+    async function sendVoucherPrint(index, button) {
       const row = currentPrinters[index];
       if (!row) {
         window.alert('Printer row not found.');
         return;
       }
-      const targetName = row.unc_path || row.printer_name || row.share_name || '';
-      if (!targetName) {
+      const config = ((latestState || {}).config || {});
+      const serverUrl = normalizeBaseUrl(config.server_url || '');
+      if (!serverUrl) {
+        window.alert('Server URL is empty.');
+        return;
+      }
+      const target = buildPrinterDispatchTarget(row);
+      if (!target.printer_name && !target.unc_path) {
         window.alert('Printer target is empty.');
         return;
       }
 
-      const label = row.printer_name || row.share_name || targetName;
+      const label = target.printer_name || target.unc_path || 'Phieu ke mua hang';
       const originalText = button.textContent;
       button.disabled = true;
-      button.textContent = 'Printing...';
+      button.textContent = 'Dang gui...';
+      setPrinterActionStatus(`Dang gui phieu ke toi ${label}...`, false);
 
       try {
-        const response = await fetch('/api/print/dispatch', {
+        const imageData = parseDataUrl(buildAgentVoucherPng(row));
+        if (!imageData?.imageBase64) {
+          throw new Error('Khong tao duoc PNG de gui agent.');
+        }
+        const response = await fetch(`${serverUrl}/api/print/dispatch-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            printer_name: targetName,
-            document_name: `Test Page - ${label}`.slice(0, 120),
-            mode: 'text',
-            content_text: buildTestPageText(row),
-            copies: 1,
+            image_base64: imageData.imageBase64,
+            content_type: imageData.mimeType || 'image/png',
+            document_name: `Phieu ke mua hang - ${label}`.slice(0, 120),
+            file_name: `${makeFileToken(label)}.png`,
+            requested_by: 'Device Agent Dashboard',
+            machine_name: target.machine_name,
+            host_name: target.host_name,
+            device_name: target.device_name,
+            printer_name: target.printer_name,
+            unc_path: target.unc_path,
+            options: {},
           }),
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data.error || 'Test print failed.');
+          throw new Error(data.error || 'Khong gui duoc phieu ke.');
         }
-        button.textContent = 'Sent';
+        const agentName = (((data || {}).agent || {}).machine_name)
+          || (((data || {}).agent || {}).device_name)
+          || (((data || {}).agent || {}).agent_key)
+          || target.machine_name
+          || target.host_name
+          || 'agent';
+        const printerName = (((data || {}).printer || {}).printer_name)
+          || (((data || {}).command || {}).printer_name)
+          || target.printer_name
+          || target.unc_path;
+        setPrinterActionStatus(
+          printerName ? `Da gui phieu ke toi ${agentName} / ${printerName}.` : `Da gui phieu ke toi ${agentName}.`,
+          false,
+        );
+        button.textContent = 'Da gui';
         await refreshState();
         window.setTimeout(() => {
           button.disabled = false;
@@ -3805,7 +3964,8 @@ DASHBOARD_HTML = """
       } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
-        window.alert((error && error.message) ? error.message : 'Test print failed.');
+        setPrinterActionStatus((error && error.message) ? error.message : 'Khong gui duoc phieu ke.', true);
+        window.alert((error && error.message) ? error.message : 'Khong gui duoc phieu ke.');
         await refreshState().catch(() => {});
       }
     }
@@ -3877,7 +4037,7 @@ DASHBOARD_HTML = """
           const hostCell = hostAddress && hostAddress !== hostPc
             ? `<div>${escapeHtml(hostPc)}</div><div class="muted">${escapeHtml(hostAddress)}</div>`
             : escapeHtml(hostPc);
-          return `<tr><td><button type="button" class="btn-light btn-mini" data-test-print="${index}">Test Print</button></td><td>${escapeHtml(row.printer_name || row.share_name || '')}</td><td>${hostCell}</td><td>${escapeHtml(row.unc_path || '')}</td><td>${escapeHtml(row.driver_name || '')}</td><td>${escapeHtml(row.port_name || '')}</td><td>${row.is_default ? 'default ' : ''}${row.is_network ? 'network ' : ''}${row.is_shared ? 'shared' : ''}</td><td>${escapeHtml(row.source || '')}</td></tr>`;
+          return `<tr><td><button type="button" class="btn-light btn-mini" data-print-voucher="${index}" title="Gui mot PNG phieu ke mau len server de server chuyen lenh toi dung agent va may in nay.">In Phiếu Kê</button></td><td>${escapeHtml(row.printer_name || row.share_name || '')}</td><td>${hostCell}</td><td>${escapeHtml(row.unc_path || '')}</td><td>${escapeHtml(row.driver_name || '')}</td><td>${escapeHtml(row.port_name || '')}</td><td>${row.is_default ? 'default ' : ''}${row.is_network ? 'network ' : ''}${row.is_shared ? 'shared' : ''}</td><td>${escapeHtml(row.source || '')}</td></tr>`;
         }),
         8,
       );
@@ -3936,11 +4096,11 @@ DASHBOARD_HTML = """
       await refreshState();
     });
     printersBody.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-test-print]');
+      const button = event.target.closest('[data-print-voucher]');
       if (!button) return;
-      const index = Number(button.dataset.testPrint);
+      const index = Number(button.dataset.printVoucher);
       if (!Number.isFinite(index)) return;
-      sendTestPrint(index, button).catch(console.error);
+      sendVoucherPrint(index, button).catch(console.error);
     });
     navItems.forEach((button) => button.addEventListener('click', () => activateView(button.dataset.view)));
     activateView('overview');

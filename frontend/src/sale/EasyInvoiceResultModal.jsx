@@ -17,6 +17,13 @@ const buildApiUrl = (path = '') => {
     return `${API}${path}`;
 };
 
+const buildSiteUrl = (path = '') => {
+    if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
+    if (typeof window === 'undefined') return path;
+    return `${window.location.origin}${path.startsWith('/') ? '' : '/'}${path}`;
+};
+
 const buildWebPayload = (result) => ({
     pattern: String(result?.pattern || result?.invoice?.Pattern || '').trim(),
     ikey: String(result?.ikey || '').trim(),
@@ -30,6 +37,7 @@ const buildDebugPayload = (result) => ({
     msg: result?.message || result?.msg || '',
     created: result?.created,
     record: result?.record || null,
+    link_view: result?.link_view || '',
     pattern: result?.pattern || '',
     serial: result?.serial || '',
     ikey: result?.ikey || '',
@@ -39,6 +47,10 @@ const buildDebugPayload = (result) => ({
     amount: result?.amount ?? null,
     invoice_status: result?.invoice_status ?? null,
     status_text: result?.status_text || '',
+    vat_bill: result?.vat_bill || null,
+    vat_bill_url: result?.vat_bill_url || '',
+    vat_bill_absolute_url: result?.vat_bill_absolute_url || '',
+    vat_bill_error: result?.vat_bill_error || '',
     invoice: result?.invoice || null,
     state: result?.state || null,
     raw: result?.raw || null,
@@ -47,6 +59,7 @@ const buildDebugPayload = (result) => ({
 export default function EasyInvoiceResultModal({ open, result, loading = false, onClose }) {
     const [bootstrapping, setBootstrapping] = useState(false);
     const [submittingLogin, setSubmittingLogin] = useState(false);
+    const [savingVatBill, setSavingVatBill] = useState(false);
     const [viewerUrl, setViewerUrl] = useState('');
     const [captchaUrl, setCaptchaUrl] = useState('');
     const [flowId, setFlowId] = useState('');
@@ -57,11 +70,34 @@ export default function EasyInvoiceResultModal({ open, result, loading = false, 
     const [noticeText, setNoticeText] = useState('');
     const [errorText, setErrorText] = useState('');
     const [copyMessage, setCopyMessage] = useState('');
+    const [vatBillLink, setVatBillLink] = useState('');
+    const [vatBillStatus, setVatBillStatus] = useState('');
     const [debugExpanded, setDebugExpanded] = useState(false);
 
     const webPayload = buildWebPayload(result);
     const isCompact = typeof window !== 'undefined' ? window.innerWidth < 920 : false;
     const debugText = JSON.stringify(buildDebugPayload(result), null, 2);
+
+    const extractVatBillLink = (payload) => (
+        String(payload?.vat_bill_absolute_url || payload?.vat_bill?.absolute_url || '').trim()
+        || buildSiteUrl(String(payload?.vat_bill_url || payload?.vat_bill?.url || '').trim())
+    );
+
+    const extractVatBillHtmlFromFrame = () => {
+        try {
+            const innerDoc = document.getElementById('easyinvoiceFrame')?.contentWindow?.document;
+            if (!innerDoc) return '';
+            for (const selector of ['#printView', '#container', '.VATTEMP', '.modal-body']) {
+                const node = innerDoc.querySelector(selector);
+                if (node?.outerHTML) {
+                    return String(node.outerHTML);
+                }
+            }
+            return '';
+        } catch {
+            return '';
+        }
+    };
 
     const applyBootstrapPayload = (payload) => {
         setViewerUrl(buildApiUrl(payload?.viewer_url || ''));
@@ -113,6 +149,8 @@ export default function EasyInvoiceResultModal({ open, result, loading = false, 
             setNoticeText('');
             setErrorText('');
             setCopyMessage('');
+            setVatBillLink(extractVatBillLink(result));
+            setVatBillStatus(String(result?.vat_bill_error || '').trim());
             setBootstrapping(true);
             try {
                 const response = await fetch(buildApiUrl('/api/easyinvoice/web/bootstrap'), {
@@ -220,6 +258,57 @@ export default function EasyInvoiceResultModal({ open, result, loading = false, 
         }
     };
 
+    const handleGenerateVatBillLink = async () => {
+        const htmlSnapshot = extractVatBillHtmlFromFrame();
+        if (!htmlSnapshot && !result?.link_view) {
+            setVatBillStatus('Không thấy HTML hóa đơn hay link_view để tạo bản public.');
+            return;
+        }
+        setSavingVatBill(true);
+        setVatBillStatus('');
+        try {
+            const response = await fetch(buildApiUrl('/api/easyinvoice/vat-bill/save'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    html: htmlSnapshot || '',
+                    source_url: result.link_view,
+                    record_id: result?.record?.id,
+                    ma_ct: result?.record?.ma_ct,
+                    order_id: result?.order_id,
+                    ikey: result?.ikey,
+                    invoice_no: result?.invoice_no,
+                    lookup_code: result?.lookup_code,
+                    buyer: result?.buyer,
+                    amount: result?.amount,
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || `HTTP ${response.status}`);
+            }
+            const publicLink = extractVatBillLink(payload);
+            setVatBillLink(publicLink);
+            setVatBillStatus(publicLink ? 'Đã tạo link public cho khách.' : 'Đã lưu file nhưng chưa dựng được URL.');
+        } catch (error) {
+            setVatBillStatus(error.message || 'Không tạo được link public.');
+        } finally {
+            setSavingVatBill(false);
+        }
+    };
+
+    const handleCopyVatBill = async () => {
+        if (!vatBillLink) return;
+        try {
+            await navigator.clipboard.writeText(vatBillLink);
+            setVatBillStatus('Đã copy link khách.');
+            window.setTimeout(() => setVatBillStatus(value => (value === 'Đã copy link khách.' ? '' : value)), 1600);
+        } catch {
+            setVatBillStatus('Không copy được link khách.');
+            window.setTimeout(() => setVatBillStatus(value => (value === 'Không copy được link khách.' ? '' : value)), 1600);
+        }
+    };
+
     const handleCopyDebug = async () => {
         try {
             await navigator.clipboard.writeText(debugText);
@@ -321,6 +410,47 @@ export default function EasyInvoiceResultModal({ open, result, loading = false, 
                             {tenantUrl ? (
                                 <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.6, color: '#475569', wordBreak: 'break-word' }}>
                                     <b>Tenant URL:</b> {tenantUrl}
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div style={{ borderRadius: 20, border: '1px solid #dbe4ee', background: '#ffffff', padding: 14, display: 'grid', gap: 10 }}>
+                            <div style={{ fontSize: 12, fontWeight: 900, color: '#111827' }}>Link tải cho khách</div>
+                            <div style={{ fontSize: 11, lineHeight: 1.6, color: '#64748b' }}>
+                                Backend sẽ lưu một bản public vào <b>/download/vat-bill/...</b> để khách mở trực tiếp mà không cần đăng nhập EasyInvoice.
+                            </div>
+                            {vatBillLink ? (
+                                <div style={{ fontSize: 11, lineHeight: 1.65, color: '#0f172a', wordBreak: 'break-word' }}>
+                                    <a href={vatBillLink} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontWeight: 700 }}>
+                                        {vatBillLink}
+                                    </a>
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: 11, lineHeight: 1.6, color: '#64748b' }}>
+                                    Chưa có link public. Bấm nút bên dưới để tạo.
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    onClick={handleGenerateVatBillLink}
+                                    disabled={savingVatBill}
+                                    style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', minHeight: 34, height: 34, padding: '0 12px', fontSize: 11, opacity: savingVatBill ? 0.72 : 1 }}
+                                >
+                                    {savingVatBill ? 'Đang tạo link...' : 'Tạo link khách'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleCopyVatBill}
+                                    disabled={!vatBillLink}
+                                    style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', minHeight: 34, height: 34, padding: '0 12px', fontSize: 11, opacity: vatBillLink ? 1 : 0.48 }}
+                                >
+                                    Copy link
+                                </button>
+                            </div>
+                            {vatBillStatus ? (
+                                <div style={{ fontSize: 11, color: /khong|chua|http/i.test(String(vatBillStatus || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()) ? '#b91c1c' : '#166534' }}>
+                                    {vatBillStatus}
                                 </div>
                             ) : null}
                         </div>

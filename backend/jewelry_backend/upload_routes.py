@@ -1,7 +1,7 @@
 import os
 import uuid
 
-from flask import jsonify, request, send_from_directory
+from flask import jsonify, has_request_context, request, send_from_directory
 
 from .state import app, db
 from .models import *
@@ -24,19 +24,46 @@ def _safe_upload_extension(filename, fallback='bin'):
     return safe_ext or fallback
 
 
+def _host_is_local_or_private(hostname):
+    host = _clean_text(hostname).split(':', 1)[0].lower()
+    if host in {'localhost', '127.0.0.1', '0.0.0.0', '::1'}:
+        return True
+    if host.startswith('192.168.') or host.startswith('10.'):
+        return True
+    parts = host.split('.')
+    if len(parts) == 4 and parts[0] == '172':
+        try:
+            second = int(parts[1])
+        except ValueError:
+            return False
+        return 16 <= second <= 31
+    return False
+
+
 def _absolute_upload_url(filename):
-    proto = _clean_text(request.headers.get('X-Forwarded-Proto') or request.scheme or 'http') or 'http'
-    host = _clean_text(request.headers.get('X-Forwarded-Host') or request.host)
-    host_name = host.split(':', 1)[0].lower()
-    if proto == 'http' and host_name not in {'localhost', '127.0.0.1'} and not host_name.startswith('192.168.') and not host_name.startswith('10.'):
-        proto = 'https'
+    proto = 'https'
+    host = _clean_text(os.environ.get('PUBLIC_HOST') or 'jewelry.n-lux.com')
+    if has_request_context():
+        req_proto = _clean_text(request.headers.get('X-Forwarded-Proto') or request.scheme or 'https') or 'https'
+        req_host = _clean_text(request.headers.get('X-Forwarded-Host') or request.host) or host
+        is_private_host = _host_is_local_or_private(req_host)
+        if not is_private_host:
+            host = req_host
+            proto = req_proto
+        elif req_proto == 'https':
+            proto = 'https'
+        if proto == 'http' and not is_private_host:
+            proto = 'https'
     return f'{proto}://{host}/api/uploads/{filename}'
 
 
 def _upload_json(filename, original_name=''):
+    thumb_url = ensure_upload_thumbnail(filename)
     return {
         'url': f'/api/uploads/{filename}',
         'absolute_url': _absolute_upload_url(filename),
+        'thumb_url': thumb_url,
+        'thumb_absolute_url': _absolute_upload_url(extract_upload_relative_path(thumb_url)) if thumb_url else '',
         'name': original_name or filename,
         'stored_name': filename,
     }

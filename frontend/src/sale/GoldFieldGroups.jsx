@@ -54,17 +54,16 @@ function QuantityField({
         <div>
             <span style={S.label}>{label}</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 6 }}>
-                <input
+                <FormattedNumberInput
                     style={{ ...S.inp, ...inputStyle, opacity: disabled ? 0.72 : 1, background: disabled ? '#f8fafc' : S.inp.background }}
-                    type="number"
                     inputMode="decimal"
-                    min="0"
-                    step={step}
+                    allowDecimal
+                    maxDecimals={4}
                     value={value}
                     readOnly={disabled}
-                    onChange={e => {
+                    onValueChange={raw => {
                         if (disabled) return;
-                        onChange(e.target.value);
+                        onChange(raw);
                     }}
                 />
                 <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: 4 }}>

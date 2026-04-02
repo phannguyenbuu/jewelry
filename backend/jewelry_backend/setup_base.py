@@ -268,6 +268,34 @@ def _ensure_khach_hang_photo_gallery_column():
         db.session.rollback()
 
 
+def _ensure_khach_hang_ghi_chu_column():
+    table_name = KhachHang.__table__.name
+    try:
+        db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS ghi_chu TEXT DEFAULT ''"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _ensure_don_hang_extended_columns():
+    table_name = DonHang.__table__.name
+    columns = [
+        ("loai_don", "VARCHAR(20) DEFAULT 'Mua'"),
+        ("cccd", "VARCHAR(50) DEFAULT ''"),
+        ("dia_chi_kh", "TEXT DEFAULT ''"),
+        ("chung_tu", "JSON DEFAULT '[]'"),
+        ("hoa_don_tai_chinh", "JSON DEFAULT '{}'"),
+        ("da_hach_toan_so_quy", "INTEGER DEFAULT 0"),
+        ("cap_nhat_luc", "VARCHAR(30) DEFAULT ''"),
+    ]
+    for col, definition in columns:
+        try:
+            db.session.execute(text(f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col} {definition}'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
 def _parse_int_id(value):
     try:
         if value in (None, ''):

@@ -6,12 +6,13 @@ import os
 import random
 import string
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
-from flask import jsonify, request, send_from_directory
+from flask import has_request_context, jsonify, request, send_from_directory
 try:
     from pgcompat import flag_modified
 except ImportError:
@@ -31,12 +32,95 @@ from .utils import *
 EASYINVOICE_DEFAULTS = {
     'api_url': 'https://api.easyinvoice.vn',
     'username': '',   # set qua EASYINVOICE_USERNAME (env var) hoac DB config
+    'api_username': 'API',
     'password': '',   # set qua EASYINVOICE_PASSWORD (env var) hoac DB config
     'tax_code': '',   # set qua EASYINVOICE_TAX_CODE (env var) hoac DB config
     'pattern': '',    # set qua EASYINVOICE_PATTERN (env var) hoac DB config
     'serial': '',
     'book_code': '',
 }
+
+PUBLIC_ASSET_HOST = _clean_text(os.environ.get('PUBLIC_HOST') or 'jewelry.n-lux.com') or 'jewelry.n-lux.com'
+
+
+def _host_is_local_or_private(hostname):
+    host = _clean_text(hostname).split(':', 1)[0].lower()
+    if host in {'localhost', '127.0.0.1', '0.0.0.0', '::1'}:
+        return True
+    if host.startswith('192.168.') or host.startswith('10.'):
+        return True
+    parts = host.split('.')
+    if len(parts) == 4 and parts[0] == '172':
+        try:
+            second = int(parts[1])
+        except ValueError:
+            return False
+        return 16 <= second <= 31
+    return False
+
+
+def _public_asset_base():
+    proto = 'https'
+    host = PUBLIC_ASSET_HOST
+    if has_request_context():
+        req_proto = _clean_text(request.headers.get('X-Forwarded-Proto') or request.scheme or 'https') or 'https'
+        req_host = _clean_text(request.headers.get('X-Forwarded-Host') or request.host) or host
+        if not _host_is_local_or_private(req_host):
+            host = req_host
+            proto = req_proto
+        if proto == 'http':
+            proto = 'https'
+    return f'{proto}://{host}'
+
+
+def _normalize_public_upload_url(value):
+    text = _clean_text(value)
+    if not text:
+        return ''
+    lowered = text.lower()
+    if lowered.startswith('data:image/') or lowered.startswith('blob:'):
+        return text
+    base = _public_asset_base()
+    try:
+        candidate = text
+        if '://' not in text:
+            candidate = urllib.parse.urljoin(f'{base}/', text.lstrip('/'))
+        parsed = urllib.parse.urlparse(candidate)
+        if parsed.scheme not in {'http', 'https'}:
+            return text
+        if _host_is_local_or_private(parsed.hostname or parsed.netloc):
+            suffix = parsed.path or '/'
+            if parsed.query:
+                suffix = f'{suffix}?{parsed.query}'
+            if parsed.fragment:
+                suffix = f'{suffix}#{parsed.fragment}'
+            return urllib.parse.urljoin(f'{base}/', suffix.lstrip('/'))
+        return parsed.geturl()
+    except Exception:
+        return text
+
+
+def _build_customer_image_asset(value):
+    full_url = _normalize_public_upload_url(value)
+    thumb_url = _normalize_public_upload_url(ensure_upload_thumbnail(value))
+    return {
+        'url': full_url,
+        'thumb_url': thumb_url or full_url,
+    }
+
+
+def _build_customer_gallery_assets(values):
+    assets = []
+    seen = set()
+    raw_values = values if isinstance(values, list) else []
+    for item in raw_values:
+        asset = _build_customer_image_asset(item)
+        url = asset.get('url')
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        assets.append(asset)
+    return assets
 
 
 def don_json(d):
@@ -45,11 +129,23 @@ def don_json(d):
             'dia_chi_kh': getattr(d, 'dia_chi_kh', '') or '', 'dia_chi': d.dia_chi, 'ngay_dat': d.ngay_dat,
             'ngay_giao': d.ngay_giao, 'items': d.items or [], 'tong_tien': d.tong_tien,
             'dat_coc': d.dat_coc, 'trang_thai': d.trang_thai, 'ghi_chu': d.ghi_chu,
-            'chung_tu': getattr(d, 'chung_tu', []) or [], 'nguoi_tao': d.nguoi_tao, 'ngay_tao': d.ngay_tao}
+            'chung_tu': getattr(d, 'chung_tu', []) or [],
+            'hoa_don_tai_chinh': getattr(d, 'hoa_don_tai_chinh', {}) or {},
+            'da_hach_toan_so_quy': int(getattr(d, 'da_hach_toan_so_quy', 0) or 0),
+            'nguoi_tao': d.nguoi_tao, 'ngay_tao': d.ngay_tao,
+            'cap_nhat_luc': getattr(d, 'cap_nhat_luc', '') or ''}
 
 
 def khach_hang_json(obj):
-    photo_gallery = obj.anh_bo_suu_tap if isinstance(obj.anh_bo_suu_tap, list) else []
+    gallery_assets = _build_customer_gallery_assets(obj.anh_bo_suu_tap if isinstance(obj.anh_bo_suu_tap, list) else [])
+    photo_gallery = [asset['url'] for asset in gallery_assets if asset.get('url')]
+    photo_gallery_thumbs = [asset.get('thumb_url') or asset.get('url') for asset in gallery_assets if asset.get('url')]
+    front_asset = _build_customer_image_asset(obj.anh_mat_truoc)
+    back_asset = _build_customer_image_asset(obj.anh_mat_sau)
+    front_image = front_asset.get('url', '')
+    back_image = back_asset.get('url', '')
+    front_thumb = front_asset.get('thumb_url') or front_image
+    back_thumb = back_asset.get('thumb_url') or back_image
     return {
         'id': obj.id,
         'ten': obj.ten or '',
@@ -68,11 +164,21 @@ def khach_hang_json(obj):
         'yeu_thich': bool(obj.yeu_thich or 0),
         'favorite': bool(obj.yeu_thich or 0),
         'ocr_mat_sau': obj.ocr_mat_sau or '',
-        'anh_mat_truoc': obj.anh_mat_truoc or '',
-        'anh_mat_sau': obj.anh_mat_sau or '',
+        'anh_mat_truoc': front_image,
+        'anh_mat_truoc_thumb': front_thumb,
+        'anh_mat_sau': back_image,
+        'anh_mat_sau_thumb': back_thumb,
+        'frontThumb': front_thumb,
+        'backThumb': back_thumb,
         'anh_bo_suu_tap': photo_gallery,
+        'anh_bo_suu_tap_thumb': photo_gallery_thumbs,
         'photo_gallery': photo_gallery,
+        'photo_gallery_thumbs': photo_gallery_thumbs,
+        'photo_gallery_assets': gallery_assets,
         'photoGallery': photo_gallery,
+        'photoGalleryThumbs': photo_gallery_thumbs,
+        'photoGalleryAssets': gallery_assets,
+        'ghi_chu': obj.ghi_chu or '',
         'nguoi_tao': obj.nguoi_tao or '',
         'ngay_tao': obj.ngay_tao or '',
         'cap_nhat_luc': obj.cap_nhat_luc or '',
@@ -119,7 +225,7 @@ def _parse_customer_photo_gallery(value):
     cleaned = []
     seen = set()
     for item in raw_items:
-        text = _clean_text(item)
+        text = _normalize_public_upload_url(item) or _clean_text(item)
         if not text or text in seen:
             continue
         seen.add(text)
@@ -284,6 +390,116 @@ def _apply_sale_payment_bookings(
     return updated
 
 
+def _normalize_order_json_list(value):
+    return list(value) if isinstance(value, list) else []
+
+
+def _normalize_order_json_object(value):
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _upsert_order_financial_invoice(
+    order_id,
+    customer_info,
+    settlement,
+    invoice_data,
+    result,
+    extracted,
+    lookup_invoice,
+    lookup_payload,
+    state_payload,
+    issue_now,
+    chung_tu_record=None,
+    public_vat_bill=None,
+    public_vat_bill_error='',
+):
+    order_key = _clean_text(order_id)
+    if not order_key:
+        return None, False
+
+    now_value = now_str()
+    obj = DonHang.query.filter_by(ma_don=order_key).first()
+    created = obj is None
+    if created:
+        obj = DonHang(
+            ma_don=order_key,
+            trang_thai='Nháp POS',
+            nguoi_tao='POS Mobile',
+            ngay_tao=now_value,
+            cap_nhat_luc=now_value,
+        )
+        db.session.add(obj)
+
+    customer_payload = _normalize_order_json_object(customer_info)
+    settlement_payload = _normalize_order_json_object(settlement)
+    invoice_payload = _normalize_order_json_object(invoice_data)
+    extracted_payload = _normalize_order_json_object(extracted)
+    lookup_invoice_payload = _normalize_order_json_object(lookup_invoice)
+    lookup_payload_data = _normalize_order_json_object(lookup_payload)
+    state_payload_data = _normalize_order_json_object(state_payload)
+    doc_payload = _normalize_order_json_object(chung_tu_record)
+
+    if not _clean_text(obj.khach_hang):
+        obj.khach_hang = _clean_text(customer_payload.get('name') or customer_payload.get('buyer')) or 'Khach le'
+    if not _clean_text(getattr(obj, 'cccd', '')):
+        obj.cccd = _clean_text(customer_payload.get('cccd'))
+    if not _clean_text(obj.so_dien_thoai):
+        obj.so_dien_thoai = _clean_text(customer_payload.get('phone'))
+    if not _clean_text(getattr(obj, 'dia_chi_kh', '')):
+        obj.dia_chi_kh = _clean_text(customer_payload.get('address') or customer_payload.get('residence'))
+    if not _clean_text(obj.dia_chi):
+        obj.dia_chi = _clean_text(customer_payload.get('address') or customer_payload.get('residence'))
+
+    invoice_status = lookup_invoice_payload.get('InvoiceStatus')
+    obj.hoa_don_tai_chinh = {
+        'status': 'issued' if issue_now else 'draft',
+        'updated_at': now_value,
+        'order_id': order_key,
+        'customer_info': customer_payload,
+        'settlement': settlement_payload,
+        'invoice_data': invoice_payload,
+        'easyinvoice': {
+            'link_view': _clean_text(extracted_payload.get('link_view')),
+            'lookup_code': _clean_text(extracted_payload.get('lookup_code')),
+            'invoice_no': _clean_text(extracted_payload.get('invoice_no')),
+            'ikey': _clean_text(extracted_payload.get('ikey')),
+            'invoice_status': invoice_status,
+            'status_text': _easyinvoice_status_text(invoice_status),
+            'result': result,
+            'lookup': lookup_payload_data,
+            'invoice': lookup_invoice_payload,
+            'state': state_payload_data,
+            'public_vat_bill': public_vat_bill or None,
+            'public_vat_bill_error': _clean_text(public_vat_bill_error),
+        },
+        'record': doc_payload,
+    }
+    flag_modified(obj, 'hoa_don_tai_chinh')
+
+    next_docs = _normalize_order_json_list(getattr(obj, 'chung_tu', []))
+    next_entry = {
+        'source': 'easyinvoice',
+        'status': 'issued' if issue_now else 'draft',
+        'updated_at': now_value,
+        'ma_ct': _clean_text(doc_payload.get('ma_ct')),
+        'invoice_no': _clean_text(extracted_payload.get('invoice_no')),
+        'lookup_code': _clean_text(extracted_payload.get('lookup_code')),
+        'link_view': _clean_text(extracted_payload.get('link_view')),
+        'ikey': _clean_text(extracted_payload.get('ikey')),
+    }
+    next_docs = [
+        entry for entry in next_docs
+        if _clean_text((entry or {}).get('ma_ct')) != next_entry['ma_ct']
+    ]
+    next_docs.append(next_entry)
+    obj.chung_tu = next_docs
+    flag_modified(obj, 'chung_tu')
+    obj.cap_nhat_luc = now_value
+    db.session.add(obj)
+    db.session.commit()
+    return obj, created
+
+
 @app.route('/api/khach_hang', methods=['GET'])
 def get_khach_hang():
     rows = KhachHang.query.order_by(KhachHang.yeu_thich.desc(), KhachHang.id.desc()).all()
@@ -354,11 +570,12 @@ def save_khach_hang():
     obj.han_the = _clean_text(d.get('han_the') or d.get('expiry'))
     obj.sao = _parse_customer_rating(d.get('sao'))
     obj.yeu_thich = _parse_customer_favorite(d.get('yeu_thich') if 'yeu_thich' in d else d.get('favorite') if 'favorite' in d else d.get('favourite'))
-    obj.ocr_mat_sau = _clean_text(d.get('ocr_mat_sau') or d.get('back_text'))
+    obj.ocr_mat_sau = _clean_text(d.get('ocr_mat_sau') or d.get('back_text') or d.get('backText'))
+    obj.ghi_chu = _clean_text(d.get('ghi_chu') or d.get('note') or d.get('notes') or d.get('ghi_chu_nhanh'))
     if any(key in d for key in ('anh_mat_truoc', 'front_image', 'frontImage')):
-        obj.anh_mat_truoc = _clean_text(d.get('anh_mat_truoc') or d.get('front_image') or d.get('frontImage'))
+        obj.anh_mat_truoc = _normalize_public_upload_url(d.get('anh_mat_truoc') or d.get('front_image') or d.get('frontImage'))
     if any(key in d for key in ('anh_mat_sau', 'back_image', 'backImage')):
-        obj.anh_mat_sau = _clean_text(d.get('anh_mat_sau') or d.get('back_image') or d.get('backImage'))
+        obj.anh_mat_sau = _normalize_public_upload_url(d.get('anh_mat_sau') or d.get('back_image') or d.get('backImage'))
     if any(key in d for key in ('anh_bo_suu_tap', 'photo_gallery', 'photoGallery')):
         obj.anh_bo_suu_tap = _parse_customer_photo_gallery(
             d.get('anh_bo_suu_tap')
@@ -404,6 +621,7 @@ def _easyinvoice_config():
     return {
         'api_url': _easyinvoice_setting(config_data, 'EASYINVOICE_API_URL', 'api_url', default=EASYINVOICE_DEFAULTS['api_url']),
         'username': _easyinvoice_setting(config_data, 'EASYINVOICE_USERNAME', 'username', default=EASYINVOICE_DEFAULTS['username']),
+        'api_username': _easyinvoice_setting(config_data, 'EASYINVOICE_API_USERNAME', 'api_username', 'list_username', default=EASYINVOICE_DEFAULTS['api_username']),
         'password': _easyinvoice_setting(config_data, 'EASYINVOICE_PASSWORD', 'password', default=EASYINVOICE_DEFAULTS['password']),
         'tax_code': _easyinvoice_setting(config_data, 'EASYINVOICE_TAX_CODE', 'tax_code', 'mst', default=EASYINVOICE_DEFAULTS['tax_code']),
         'pattern': _easyinvoice_setting(config_data, 'EASYINVOICE_PATTERN', 'pattern', default=EASYINVOICE_DEFAULTS['pattern']),
@@ -691,6 +909,285 @@ def _easyinvoice_status_text(status_value):
         return _clean_text(status_value)
 
 
+def _easyinvoice_vat_bill_slug(value, fallback='hoa-don'):
+    text = _clean_text(value).lower()
+    if not text:
+        return fallback
+    text = re.sub(r'[^a-z0-9]+', '-', text)
+    text = re.sub(r'-{2,}', '-', text).strip('-')
+    return text or fallback
+
+
+def _easyinvoice_vat_bill_public_roots():
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    env_root = _clean_text(os.environ.get('VAT_BILL_PUBLIC_ROOT'))
+    dist_candidates = [candidate for candidate in (
+        env_root,
+        os.path.join(project_root, 'dist'),
+        os.path.join(project_root, 'frontend', 'dist'),
+    ) if candidate]
+    for candidate in dist_candidates:
+        if os.path.isdir(candidate):
+            return os.path.abspath(candidate), True
+
+    upload_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))
+    return upload_root, False
+
+
+def _easyinvoice_vat_bill_storage_dir():
+    public_root, is_static_dist = _easyinvoice_vat_bill_public_roots()
+    target_root = (
+        os.path.join(public_root, 'download', 'vat-bill')
+        if is_static_dist else
+        os.path.join(public_root, 'vat-bill')
+    )
+    os.makedirs(target_root, exist_ok=True)
+    return target_root, is_static_dist
+
+
+def _easyinvoice_vat_bill_relative_url(relative_path, is_static_dist):
+    normalized = str(relative_path or '').replace('\\', '/').strip('/')
+    if not normalized:
+        return ''
+    if is_static_dist:
+        return f'/download/vat-bill/{normalized}'
+    return f'/api/uploads/vat-bill/{normalized}'
+
+
+def _easyinvoice_vat_bill_absolute_url(relative_url):
+    relative_url = _clean_text(relative_url)
+    if not relative_url:
+        return ''
+    if relative_url.startswith('http://') or relative_url.startswith('https://'):
+        return relative_url
+
+    proto = 'https'
+    host = _clean_text(os.environ.get('PUBLIC_HOST') or 'jewelry.n-lux.com')
+    if has_request_context():
+        proto = _clean_text(request.headers.get('X-Forwarded-Proto') or request.scheme or 'https') or 'https'
+        host = _clean_text(request.headers.get('X-Forwarded-Host') or request.host) or host
+        host_name = host.split(':', 1)[0].lower()
+        if (
+            proto == 'http' and
+            host_name not in {'localhost', '127.0.0.1'} and
+            not host_name.startswith('192.168.') and
+            not host_name.startswith('10.')
+        ):
+            proto = 'https'
+    return f'{proto}://{host}{relative_url if relative_url.startswith("/") else "/" + relative_url}'
+
+
+def _easyinvoice_vat_bill_title(payload):
+    invoice_no = _clean_text((payload or {}).get('invoice_no'))
+    buyer = _clean_text((payload or {}).get('buyer'))
+    if invoice_no and buyer:
+        return f'Hoa don VAT {invoice_no} - {buyer}'
+    if invoice_no:
+        return f'Hoa don VAT {invoice_no}'
+    if buyer:
+        return f'Hoa don VAT - {buyer}'
+    return 'Hoa don VAT'
+
+
+def _easyinvoice_vat_bill_wrap_html(raw_html, title):
+    html_text = str(raw_html or '').strip()
+    if not html_text:
+        raise ValueError('Khong co HTML hoa don de luu.')
+    if '<html' in html_text.lower():
+        return html_text
+    return f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{escape(title)}</title>
+  <style>
+    html, body {{
+      margin: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      font-family: Arial, sans-serif;
+    }}
+    body {{
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      box-sizing: border-box;
+    }}
+    .vat-bill-shell {{
+      width: 100%;
+      max-width: 1120px;
+    }}
+  </style>
+</head>
+<body>
+  <div class="vat-bill-shell">{html_text}</div>
+</body>
+</html>"""
+
+
+def _easyinvoice_vat_bill_fetch_source_html(source_url):
+    source_url = _clean_text(source_url)
+    if not source_url:
+        raise ValueError('Thieu link hoa don de tai ve.')
+
+    parsed = urllib.parse.urlsplit(source_url)
+    host = (parsed.hostname or '').lower()
+    if parsed.scheme not in {'http', 'https'}:
+        raise ValueError('Link hoa don khong hop le.')
+    if host and not (
+        host.endswith('easyinvoice.com.vn') or
+        host.endswith('easyinvoice.vn') or
+        host.endswith('jewelry.n-lux.com')
+    ):
+        raise ValueError('Chi ho tro link hoa don EasyInvoice.')
+
+    request_obj = urllib.request.Request(
+        source_url,
+        headers={
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/135.0.0.0 Safari/537.36'
+            ),
+            'Accept': 'text/html,application/xhtml+xml',
+        },
+    )
+    with urllib.request.urlopen(request_obj, timeout=12) as response:
+        content_type = response.headers.get('Content-Type', 'text/html')
+        charset = response.headers.get_content_charset() or 'utf-8'
+        html_text = response.read().decode(charset, errors='replace')
+        final_url = response.geturl()
+
+    lowered = html_text.lower()
+    if 'text/html' not in content_type.lower() and not lowered.lstrip().startswith('<'):
+        raise ValueError('Link hoa don khong tra ve HTML de luu.')
+    if '/account/logon' in (final_url or '').lower() or ('name="password"' in lowered and 'name="captch"' in lowered):
+        raise ValueError('Link hoa don hien dang yeu cau dang nhap, chua the xuat public truc tiep.')
+    return html_text, final_url
+
+
+def _easyinvoice_vat_bill_file_name(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    month_key = datetime.date.today().strftime('%Y-%m')
+    stamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    stable_key = '|'.join([
+        _clean_text(payload.get('ikey')),
+        _clean_text(payload.get('invoice_no')),
+        _clean_text(payload.get('lookup_code')),
+        _clean_text(payload.get('order_id')),
+        _clean_text(payload.get('buyer')),
+    ])
+    hash_key = hashlib.md5(stable_key.encode('utf-8')).hexdigest()[:10]
+    parts = ['vat-bill']
+    invoice_no = _clean_text(payload.get('invoice_no'))
+    if invoice_no and 'chua cap so' not in invoice_no.lower():
+        parts.append(_easyinvoice_vat_bill_slug(invoice_no, 'so'))
+    elif _clean_text(payload.get('lookup_code')):
+        parts.append(_easyinvoice_vat_bill_slug(payload.get('lookup_code'), 'lookup'))
+    elif _clean_text(payload.get('ikey')):
+        parts.append(_easyinvoice_vat_bill_slug(payload.get('ikey'), 'ikey'))
+    elif _clean_text(payload.get('order_id')):
+        parts.append(_easyinvoice_vat_bill_slug(payload.get('order_id'), 'order'))
+    parts.append(stamp)
+    parts.append(hash_key)
+    return month_key, '-'.join(part for part in parts if part) + '.html'
+
+
+def _easyinvoice_attach_public_vat_bill(payload, vat_bill):
+    payload = payload if isinstance(payload, dict) else {}
+    vat_bill = vat_bill if isinstance(vat_bill, dict) else {}
+
+    doc = None
+    record_id = payload.get('record_id')
+    if record_id not in (None, ''):
+        try:
+            doc = ChungTu.query.filter_by(id=int(record_id)).first()
+        except (TypeError, ValueError):
+            doc = None
+
+    ma_ct = _clean_text(payload.get('ma_ct'))
+    if doc is None and ma_ct:
+        doc = ChungTu.query.filter_by(ma_ct=ma_ct).first()
+
+    order_id = _clean_text(payload.get('order_id'))
+    if doc is None and order_id:
+        doc = ChungTu.query.filter_by(ma_ct=f'EI-{order_id}').first()
+
+    if doc is None:
+        return None
+
+    attachments = list(doc.file_dinh_kem or [])
+    updated = False
+    for index, item in enumerate(attachments):
+        if not isinstance(item, dict):
+            continue
+        if item.get('source') != 'easyinvoice':
+            continue
+        attachments[index] = {**item, 'public_vat_bill': dict(vat_bill)}
+        updated = True
+        break
+
+    if not updated:
+        attachments.append({
+            'source': 'public_vat_bill',
+            'public_vat_bill': dict(vat_bill),
+        })
+
+    doc.file_dinh_kem = attachments
+    flag_modified(doc, 'file_dinh_kem')
+    db.session.commit()
+    return doc.id
+
+
+def _easyinvoice_save_vat_bill_snapshot(payload, persist_record=False):
+    payload = payload if isinstance(payload, dict) else {}
+    html_value = payload.get('html')
+    source_url = _clean_text(payload.get('source_url') or payload.get('sourceUrl') or payload.get('link_view'))
+    source_kind = 'html'
+    resolved_source_url = ''
+
+    if html_value in (None, '') and not source_url:
+        raise ValueError('Thieu html hoac link hoa don de luu.')
+
+    if html_value not in (None, ''):
+        document_html = _easyinvoice_vat_bill_wrap_html(html_value, _easyinvoice_vat_bill_title(payload))
+    else:
+        fetched_html, resolved_source_url = _easyinvoice_vat_bill_fetch_source_html(source_url)
+        document_html = _easyinvoice_vat_bill_wrap_html(fetched_html, _easyinvoice_vat_bill_title(payload))
+        source_kind = 'source_url'
+
+    storage_root, is_static_dist = _easyinvoice_vat_bill_storage_dir()
+    month_key, filename = _easyinvoice_vat_bill_file_name(payload)
+    target_dir = os.path.join(storage_root, month_key)
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, filename)
+
+    with open(target_path, 'w', encoding='utf-8') as handle:
+        handle.write(document_html)
+
+    relative_file = f'{month_key}/{filename}'
+    relative_url = _easyinvoice_vat_bill_relative_url(relative_file, is_static_dist)
+    result = {
+        'saved': True,
+        'source': source_kind,
+        'url': relative_url,
+        'absolute_url': _easyinvoice_vat_bill_absolute_url(relative_url),
+        'stored_name': filename,
+        'folder': month_key,
+        'source_url': resolved_source_url or source_url,
+        'saved_at': now_str(),
+        'title': _easyinvoice_vat_bill_title(payload),
+    }
+
+    if persist_record:
+        record_id = _easyinvoice_attach_public_vat_bill(payload, result)
+        if record_id:
+            result['record_id'] = record_id
+
+    return result
+
+
 def _easyinvoice_call_and_lookup(config, xml_data, issue_now):
     """Goi API EasyInvoice va lookup ket qua.
     Tra ve (result, extracted, lookup_invoice, lookup_payload, state_payload).
@@ -730,7 +1227,8 @@ def _easyinvoice_call_and_lookup(config, xml_data, issue_now):
 
 def _easyinvoice_upsert_chung_tu(order_id, customer, invoice, config,
                                    extracted, result, lookup_invoice,
-                                   lookup_payload, state_payload, issue_now):
+                                   lookup_payload, state_payload, issue_now,
+                                   public_vat_bill=None, public_vat_bill_error=''):
     """Tao hoac cap nhat buc ghi ChungTu cho hoa don EasyInvoice. Commit DB."""
     invoice_amount = int(invoice.get('amount') or 0)
     invoice_status = lookup_invoice.get('InvoiceStatus') if isinstance(lookup_invoice, dict) else None
@@ -771,6 +1269,8 @@ def _easyinvoice_upsert_chung_tu(order_id, customer, invoice, config,
         'invoice': lookup_invoice,
         'state': state_payload,
         'issued_at': now_str(),
+        'public_vat_bill': public_vat_bill or None,
+        'public_vat_bill_error': _clean_text(public_vat_bill_error),
     }]
     db.session.commit()
     return doc, created, invoice_status
@@ -807,16 +1307,63 @@ def _submit_easyinvoice(issue_now=False):
     except easyinvoice_client.EasyInvoiceApiError as exc:
         return jsonify({'error': exc.message, 'detail': exc.payload}), exc.status_code
 
+    public_vat_bill = None
+    public_vat_bill_error = ''
+    if extracted.get('link_view'):
+        try:
+            public_vat_bill = _easyinvoice_save_vat_bill_snapshot({
+                'source_url': extracted.get('link_view'),
+                'order_id': order_id,
+                'invoice_no': extracted.get('invoice_no'),
+                'lookup_code': extracted.get('lookup_code'),
+                'ikey': extracted.get('ikey'),
+                'buyer': _clean_text(
+                    lookup_invoice.get('Buyer') or lookup_invoice.get('CustomerName')
+                    or (invoice_data.get('customer') or {}).get('name')
+                    or (invoice_data.get('customer') or {}).get('buyer')
+                ),
+                'amount': lookup_invoice.get('Amount') or invoice_amount,
+            })
+        except Exception as exc:
+            public_vat_bill_error = _clean_text(exc)
+
     customer = invoice_data.get('customer') if isinstance(invoice_data.get('customer'), dict) else {}
     doc, created, invoice_status = _easyinvoice_upsert_chung_tu(
         order_id, customer, invoice, config,
         extracted, result, lookup_invoice, lookup_payload, state_payload, issue_now,
+        public_vat_bill=public_vat_bill,
+        public_vat_bill_error=public_vat_bill_error,
+    )
+    order_customer_info = d.get('customer_info') if isinstance(d.get('customer_info'), dict) else customer
+    order_settlement = d.get('settlement') if isinstance(d.get('settlement'), dict) else {}
+    order_record, order_created = _upsert_order_financial_invoice(
+        order_id=order_id,
+        customer_info=order_customer_info,
+        settlement=order_settlement,
+        invoice_data=invoice_data,
+        result=result,
+        extracted=extracted,
+        lookup_invoice=lookup_invoice,
+        lookup_payload=lookup_payload,
+        state_payload=state_payload,
+        issue_now=issue_now,
+        chung_tu_record={
+            'id': doc.id,
+            'ma_ct': doc.ma_ct,
+            'so_tien': doc.so_tien,
+            'trang_thai': doc.trang_thai,
+        },
+        public_vat_bill=public_vat_bill,
+        public_vat_bill_error=public_vat_bill_error,
     )
 
     return jsonify({
         'msg': 'Da phat hanh EasyInvoice thanh cong.' if issue_now else 'Da tao EasyInvoice thanh cong.',
         'issued': issue_now,
         'created': created,
+        'order_id': order_id,
+        'order_saved': bool(order_record),
+        'order_created': order_created,
         'record': {
             'id': doc.id,
             'ma_ct': doc.ma_ct,
@@ -838,9 +1385,29 @@ def _submit_easyinvoice(issue_now=False):
         'status_text': _easyinvoice_status_text(invoice_status),
         'invoice': lookup_invoice,
         'state': state_payload,
+        'vat_bill': public_vat_bill,
+        'vat_bill_url': (public_vat_bill or {}).get('url', ''),
+        'vat_bill_absolute_url': (public_vat_bill or {}).get('absolute_url', ''),
+        'vat_bill_error': public_vat_bill_error,
         'raw': result,
     })
 
+
+
+@app.route('/api/easyinvoice/vat-bill/save', methods=['POST'])
+def save_easyinvoice_vat_bill():
+    payload = request.json or {}
+    try:
+        result = _easyinvoice_save_vat_bill_snapshot(payload, persist_record=True)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except urllib.error.HTTPError as exc:
+        return jsonify({'error': f'EasyInvoice HTTP {exc.code}: {exc.reason}'}), 502
+    except urllib.error.URLError as exc:
+        return jsonify({'error': f'Khong ket noi duoc link hoa don: {exc.reason}'}), 502
+    except Exception as exc:
+        return jsonify({'error': f'Khong luu duoc hoa don cong khai: {exc}'}), 500
+    return jsonify(result)
 
 
 @app.route('/api/easyinvoice/export', methods=['POST'])
@@ -1082,23 +1649,38 @@ def add_don_hang():
     ma = d.get('ma_don') or f"DH{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
     obj = DonHang.query.filter_by(ma_don=ma).first()
     created = obj is None
+    now_value = now_str()
     if created:
-        obj = DonHang(ma_don=ma, ngay_tao=now_str())
+        obj = DonHang(ma_don=ma, ngay_tao=now_value)
         db.session.add(obj)
+    obj.loai_don = _clean_text(d.get('loai_don') or getattr(obj, 'loai_don', '') or 'Mua') or 'Mua'
     obj.khach_hang = d.get('khach_hang', '')
+    obj.cccd = _clean_text(d.get('cccd'))
     obj.so_dien_thoai = d.get('so_dien_thoai', '')
+    obj.dia_chi_kh = _clean_text(d.get('dia_chi_kh') or d.get('dia_chi'))
     obj.dia_chi = d.get('dia_chi', '')
     obj.ngay_dat = d.get('ngay_dat', '')
     obj.ngay_giao = d.get('ngay_giao', '')
-    obj.items = d.get('items', [])
+    obj.items = _normalize_order_json_list(d.get('items', []))
     obj.tong_tien = int(d.get('tong_tien') or 0)
     obj.dat_coc = int(d.get('dat_coc') or 0)
     obj.trang_thai = d.get('trang_thai', 'Mới')
     obj.ghi_chu = d.get('ghi_chu', '')
-    obj.nguoi_tao = d.get('nguoi_tao', '')
+    obj.nguoi_tao = d.get('nguoi_tao', '') or obj.nguoi_tao or 'POS Mobile'
+    if 'chung_tu' in d:
+        obj.chung_tu = _normalize_order_json_list(d.get('chung_tu'))
+        flag_modified(obj, 'chung_tu')
+    if 'hoa_don_tai_chinh' in d:
+        obj.hoa_don_tai_chinh = _normalize_order_json_object(d.get('hoa_don_tai_chinh'))
+        flag_modified(obj, 'hoa_don_tai_chinh')
+    obj.cap_nhat_luc = now_value
     db.session.commit()
 
-    if created:
+    should_apply_payment_bookings = _parse_overwrite_flag(
+        d.get('apply_payment_bookings') or d.get('finalize') or d.get('book_payment')
+    )
+    has_payment_values = _parse_bigint(d.get('cash_payment'), 0) != 0 or _parse_bigint(d.get('bank_payment'), 0) != 0
+    if should_apply_payment_bookings and has_payment_values and not int(getattr(obj, 'da_hach_toan_so_quy', 0) or 0):
         try:
             updated = _apply_sale_payment_bookings(
                 _normalize_so_quy_ngay(d.get('ngay_dat')),
@@ -1109,6 +1691,9 @@ def add_don_hang():
                 company_bank_account_no=d.get('company_bank_account_no'),
             )
             if updated:
+                obj.da_hach_toan_so_quy = 1
+                obj.cap_nhat_luc = now_str()
+                db.session.add(obj)
                 db.session.commit()
         except Exception as e:
             db.session.rollback()
@@ -1127,16 +1712,23 @@ def update_don_hang(did):
         db.session.commit()
         return jsonify({'msg': 'Deleted'})
     d = request.json or {}
-    for f in ['khach_hang', 'so_dien_thoai', 'dia_chi',
+    for f in ['loai_don', 'khach_hang', 'cccd', 'so_dien_thoai', 'dia_chi_kh', 'dia_chi',
                'ngay_dat', 'ngay_giao', 'trang_thai', 'ghi_chu', 'nguoi_tao']:
         if f in d:
             setattr(obj, f, d[f])
     if 'items' in d:
-        obj.items = d['items']
+        obj.items = _normalize_order_json_list(d['items'])
     if 'tong_tien' in d:
         obj.tong_tien = int(d['tong_tien'] or 0)
     if 'dat_coc' in d:
         obj.dat_coc = int(d['dat_coc'] or 0)
+    if 'chung_tu' in d:
+        obj.chung_tu = _normalize_order_json_list(d['chung_tu'])
+        flag_modified(obj, 'chung_tu')
+    if 'hoa_don_tai_chinh' in d:
+        obj.hoa_don_tai_chinh = _normalize_order_json_object(d['hoa_don_tai_chinh'])
+        flag_modified(obj, 'hoa_don_tai_chinh')
+    obj.cap_nhat_luc = now_str()
     db.session.commit()
     return jsonify({'msg': 'Updated'})
 

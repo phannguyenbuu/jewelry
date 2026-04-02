@@ -562,7 +562,36 @@ const buildReceiptRows = (lines, rates) => {
     };
 };
 
-const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
+const buildReceiptFormulaLine = (summary, paymentAmount) => {
+    const newGoldAmount = Math.max(0, Math.round(Number(summary?.newGold || 0)));
+    const oldGoldAmount = Math.max(0, Math.round(Number(summary?.oldGold || 0)));
+    const totalAmount = Math.max(0, Math.round(Number(paymentAmount || 0)));
+    const majorAmount = Math.max(newGoldAmount, oldGoldAmount);
+    const minorAmount = Math.min(newGoldAmount, oldGoldAmount);
+    const baseAmount = Math.abs(newGoldAmount - oldGoldAmount);
+    const adjustmentAmount = Math.abs(totalAmount - baseAmount);
+    const parts = [];
+
+    if (majorAmount > 0) parts.push(moneyText(majorAmount));
+    if (minorAmount > 0) parts.push('-', moneyText(minorAmount));
+    if (adjustmentAmount > 0) parts.push(totalAmount >= baseAmount ? '+' : '-', moneyText(adjustmentAmount));
+
+    if (!parts.length) {
+        if (totalAmount <= 0) return '';
+        return `${moneyText(totalAmount)} = ${moneyText(totalAmount)}`;
+    }
+
+    return `${parts.join(' ')} = ${moneyText(totalAmount)}`;
+};
+
+const buildDetailedReceiptFormulaLines = (formulaText = '') => (
+    String(formulaText || '')
+        .split(/\r?\n/)
+        .map(line => String(line || '').trim())
+        .filter(line => line && !/^TOTAL\s*:/i.test(line))
+);
+
+const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total, formula = '', printSourceLabel = '' }) => {
     const { rows, sections, summary, txDisplay, hasTrade } = buildReceiptRows(lines, rates);
     if (!rows.length) {
         throw new Error('Chưa có nội dung giao dịch để in.');
@@ -582,6 +611,8 @@ const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
         'Nhân viên: ---',
         `Giao dịch: ${txDisplay}`,
     ];
+    const normalizedPrintSourceLabel = safeText(printSourceLabel, '');
+    const detailedFormulaLines = buildDetailedReceiptFormulaLines(formula);
 
     return {
         orderId: orderCode,
@@ -594,7 +625,8 @@ const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total }) => {
             { label: 'Tổng cộng:', value: paymentAmount, bold: true },
         ].filter(Boolean),
         footerLines: FOOTER_LINES,
-        machineLine: `In từ máy tính: ${machineName}`,
+        formulaLines: detailedFormulaLines.length ? detailedFormulaLines : [buildReceiptFormulaLine(summary, paymentAmount)].filter(Boolean),
+        machineLine: normalizedPrintSourceLabel || `In từ máy tính: ${machineName}`,
     };
 };
 
@@ -632,10 +664,11 @@ const drawCellText = (
 };
 
 const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, rowMinHeight) => {
-    ctx.font = scaleFontSpec(`400 ${px(26)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE);
-    const bodyLineHeight = px(22);
-    const labelLines = wrapText(ctx, row.code, colWidths[0] - px(18), 2);
-    const rowHeight = Math.max(rowMinHeight, px(24) + labelLines.length * bodyLineHeight);
+    const goldAgeFont = scaleFontSpec(`700 ${px(56)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE);
+    ctx.font = goldAgeFont;
+    const goldAgeLineHeight = px(34);
+    const labelLines = wrapText(ctx, row.code, colWidths[0] - px(16), 2);
+    const rowHeight = Math.max(rowMinHeight, px(24) + Math.max(labelLines.length, 1) * goldAgeLineHeight);
 
     ctx.strokeRect(tableLeft, y, tableWidth, rowHeight);
     for (let index = 1; index < colXs.length; index += 1) {
@@ -646,19 +679,21 @@ const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, ro
     }
 
     ctx.save();
-    ctx.font = scaleFontSpec(`400 ${px(28)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE);
+    ctx.font = goldAgeFont;
     ctx.fillStyle = RECEIPT_TEXT_COLOR;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const goldAgeCenterY = y + rowHeight / 2;
+    const goldAgeOffsetY = ((labelLines.length - 1) * goldAgeLineHeight) / 2;
     labelLines.forEach((line, index) => {
-        ctx.fillText(line, colXs[0] + px(10), y + px(12) + index * bodyLineHeight);
+        ctx.fillText(line, colXs[0] + colWidths[0] / 2, goldAgeCenterY - goldAgeOffsetY + index * goldAgeLineHeight);
     });
     ctx.restore();
 
     const cellTextOptions = { allowEllipsis: false, clip: true };
-    drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
-    drawCellText(ctx, row.labor, colXs[2], y + rowHeight / 2, colWidths[2], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
-    drawCellText(ctx, row.price, colXs[3], y + rowHeight / 2, colWidths[3], 'center', scaleFontSpec(`400 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
+    drawCellText(ctx, row.qty, colXs[1], y + rowHeight / 2, colWidths[1], 'center', scaleFontSpec(`700 ${px(64)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
+    drawCellText(ctx, row.price, colXs[2], y + rowHeight / 2, colWidths[2], 'center', scaleFontSpec(`600 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
+    drawCellText(ctx, row.labor, colXs[3], y + rowHeight / 2, colWidths[3], 'center', scaleFontSpec(`600 ${px(32)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE), RECEIPT_TEXT_COLOR, cellTextOptions);
     drawCellText(
         ctx,
         `${row.amount < 0 ? '-' : ''}${moneyText(row.amount)}`,
@@ -666,7 +701,7 @@ const drawReceiptRow = (ctx, row, tableLeft, tableWidth, colWidths, colXs, y, ro
         y + rowHeight / 2,
         colWidths[4] - px(16),
         'right',
-        scaleFontSpec(`500 ${px(34)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE),
+        scaleFontSpec(`700 ${px(34)}px ${RECEIPT_NUMBER_FONT}`, RECEIPT_TABLE_FONT_SCALE),
         RECEIPT_TEXT_COLOR,
         cellTextOptions
     );
@@ -680,10 +715,10 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     const tableLeft = RECEIPT_PADDING;
     const tableWidth = width - RECEIPT_PADDING * 2;
     const colWidths = [
-        Math.round(tableWidth * 0.19),
+        Math.round(tableWidth * 0.22),
         Math.round(tableWidth * 0.17),
-        Math.round(tableWidth * 0.12),
         Math.round(tableWidth * 0.18),
+        Math.round(tableWidth * 0.09),
     ];
     colWidths.push(tableWidth - colWidths.reduce((sum, value) => sum + value, 0));
     const colXs = [
@@ -694,7 +729,7 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
         tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3],
     ];
     const headerHeight = px(74);
-    const rowMinHeight = px(78);
+    const rowMinHeight = px(92);
     const summaryRowHeight = px(66);
     const summaryLabelWidth = Math.round(tableWidth * 0.37);
     const sectionTitleHeight = px(52);
@@ -711,7 +746,10 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
 
     const headerX = qrX + qrSize + px(18);
     const headerWidth = width - headerX - RECEIPT_PADDING;
-    let headerY = qrY + px(26);
+    const receiptHeaderFontSize = px(30);
+    const receiptHeaderLineGap = px(38);
+    const headerBlockHeight = Math.max(0, (model.headerLines.length - 1) * receiptHeaderLineGap);
+    let headerY = qrY + qrSize / 2 - headerBlockHeight / 2;
     model.headerLines.forEach((line, index) => {
         drawCellText(
             ctx,
@@ -720,9 +758,9 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
             headerY,
             headerWidth,
             'left',
-            `400 ${px(index === model.headerLines.length - 1 ? 38 : 30)}px ${RECEIPT_FONT}`
+            `400 ${receiptHeaderFontSize}px ${RECEIPT_FONT}`
         );
-        headerY += px(index === model.headerLines.length - 1 ? 50 : 38);
+        headerY += receiptHeaderLineGap;
     });
 
     y = Math.max(qrY + qrSize, headerY) + px(42);
@@ -731,7 +769,7 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     ctx.strokeStyle = RECEIPT_BORDER_COLOR;
     ctx.lineWidth = 1;
 
-    const headers = ['Mã hàng', 'TL Vàng', 'Công', 'Giá', 'Thành tiền'];
+    const headers = ['Tuổi vàng', 'TL Vàng', 'Giá', 'Công', 'Thành tiền'];
     ctx.strokeRect(tableLeft, y, tableWidth, headerHeight);
     headers.forEach((header, index) => {
         if (index > 0) {
@@ -743,10 +781,10 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
         drawCellText(
             ctx,
             header,
-            index === 0 ? colXs[index] + px(14) : colXs[index],
+            colXs[index],
             y + headerHeight / 2,
-            index === 0 ? colWidths[index] - px(20) : colWidths[index],
-            index === 0 ? 'left' : 'center',
+            colWidths[index],
+            'center',
             scaleFontSpec(`600 ${px(28)}px ${RECEIPT_FONT}`, RECEIPT_TABLE_FONT_SCALE),
             RECEIPT_TEXT_COLOR,
             { allowEllipsis: false, clip: true }
@@ -825,7 +863,16 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     model.footerLines.forEach((line, index) => {
         ctx.fillText(line, width / 2, y + index * px(30));
     });
-    y += model.footerLines.length * px(30) + px(72);
+    y += model.footerLines.length * px(30) + px(52);
+    ctx.font = `600 ${px(23)}px ${RECEIPT_FONT}`;
+    const formulaLines = (Array.isArray(model.formulaLines) ? model.formulaLines : [])
+        .flatMap(line => wrapText(ctx, line, width - RECEIPT_PADDING * 2, 4))
+        .filter(Boolean)
+        .slice(0, 10);
+    formulaLines.forEach((line, index) => {
+        ctx.fillText(line, width / 2, y + index * px(28));
+    });
+    y += formulaLines.length ? (formulaLines.length * px(28) + px(24)) : px(12);
     ctx.font = `italic 400 ${px(28)}px ${RECEIPT_FONT}`;
     ctx.fillText(model.machineLine, width / 2, y);
     ctx.restore();
@@ -842,11 +889,11 @@ const ensureFontsReady = async () => {
     }
 };
 
-const createSaleReceiptPreview = async ({ orderId, customerInfo, lines, rates, total }) => {
+const createSaleReceiptPreview = async ({ orderId, customerInfo, lines, rates, total, formula = '', printSourceLabel = '' }) => {
     if (typeof document === 'undefined') {
         throw new Error('Chỉ hỗ trợ preview receipt trong trình duyệt.');
     }
-    const model = buildReceiptModel({ orderId, customerInfo, lines, rates, total });
+    const model = buildReceiptModel({ orderId, customerInfo, lines, rates, total, formula, printSourceLabel });
     await ensureFontsReady();
 
     const createCanvas = (logicalHeight, renderScale) => {

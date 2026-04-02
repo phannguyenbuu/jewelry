@@ -14,6 +14,7 @@ from jewelry_backend import loans_routes as _loans_routes  # noqa: F401
 from jewelry_backend import nhap_vang_routes as _nhap_vang_routes  # noqa: F401
 from jewelry_backend import ocr_routes as _ocr_routes  # noqa: F401
 from jewelry_backend import orders_routes as _orders_routes  # noqa: F401
+from jewelry_backend import easyinvoice_cache as _easyinvoice_cache  # noqa: F401
 from jewelry_backend import easyinvoice_web_routes as _easyinvoice_web_routes  # noqa: F401
 from jewelry_backend import print_routes as _print_routes  # noqa: F401
 from jewelry_backend import scale_routes as _scale_routes  # noqa: F401
@@ -21,6 +22,8 @@ from jewelry_backend import upload_routes as _upload_routes  # noqa: F401
 
 
 bootstrap_database()
+_easyinvoice_cache.bootstrap_easyinvoice_cache()
+_easyinvoice_cache.ensure_easyinvoice_cache_worker_started()
 
 
 if __name__ == '__main__':

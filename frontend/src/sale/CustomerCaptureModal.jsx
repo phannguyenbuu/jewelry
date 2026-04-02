@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { IoCameraOutline, IoCheckmarkCircle, IoCloseOutline, IoDocumentTextOutline, IoImagesOutline, IoQrCodeOutline } from 'react-icons/io5';
+import { IoCameraOutline, IoCheckmarkCircle, IoCloseOutline, IoDocumentTextOutline, IoImagesOutline, IoQrCodeOutline, IoTrashOutline } from 'react-icons/io5';
 import { S } from './shared';
+import { ConfirmDialog } from './Dialogs';
 
 const PHOTO_TAB = 'photo';
 const QR_TAB = 'qr';
@@ -8,10 +9,10 @@ const OCR_FRONT_TAB = 'ocr_front';
 const OCR_BACK_TAB = 'ocr_back';
 
 const TAB_OPTIONS = [
-    { key: PHOTO_TAB,     label: 'Chụp hình',       icon: IoCameraOutline },
-    { key: QR_TAB,        label: 'QR',               icon: IoQrCodeOutline },
     { key: OCR_FRONT_TAB, label: 'CCCD mặt trước',   icon: IoDocumentTextOutline },
     { key: OCR_BACK_TAB,  label: 'CCCD mặt sau',     icon: IoDocumentTextOutline },
+    { key: QR_TAB,        label: 'QR',               icon: IoQrCodeOutline },
+    { key: PHOTO_TAB,     label: 'Chụp hình',       icon: IoCameraOutline },
 ];
 
 const PHOTO_HELPER_TEXT    = 'Chụp nhiều ảnh nếu cần. Tất cả ảnh sẽ được giữ lại trong hồ sơ khách hàng.';
@@ -69,14 +70,27 @@ function buildPhotoPreviewItems(files) {
     });
 }
 
-function buildSavedPhotoItems(urls) {
-    return Array.from(urls || [])
+function buildSavedPhotoItems(items) {
+    return Array.from(items || [])
         .filter(Boolean)
-        .map((url, index) => ({
-            id: `saved-${index}-${url}`,
-            url,
-            label: `Ảnh ${index + 1}`,
-        }));
+        .map((item, index) => {
+            if (item && typeof item === 'object') {
+                const fullUrl = item.url || item.fullUrl || item.imageUrl || '';
+                const thumbUrl = item.thumbUrl || item.thumb_url || item.thumbnailUrl || item.thumbnail_url || fullUrl;
+                return {
+                    id: `saved-${index}-${fullUrl || thumbUrl}`,
+                    url: thumbUrl || fullUrl,
+                    fullUrl: fullUrl || thumbUrl,
+                    label: item.label || `Ảnh ${index + 1}`,
+                };
+            }
+            return {
+                id: `saved-${index}-${item}`,
+                url: item,
+                fullUrl: item,
+                label: `Ảnh ${index + 1}`,
+            };
+        });
 }
 
 function resolveHelperColor(message, loading) {
@@ -101,6 +115,8 @@ export default function CustomerCaptureModal({
     onOcrPickFile,
     onPhotoCapture,
     onPhotoPickFiles,
+    onPhotoDelete,
+    onClearTab,
     tabsDone = {},
 }) {
     const videoRef = useRef(null);
@@ -115,6 +131,7 @@ export default function CustomerCaptureModal({
     const [cameraReady, setCameraReady] = useState(false);
     const [cameraError, setCameraError] = useState('');
     const [photoShots, setPhotoShots] = useState(() => buildSavedPhotoItems(initialPhotos));
+    const [deleteConfirm, setDeleteConfirm] = useState(null); // { label, onConfirm }
 
     useEffect(() => {
         qrDetectedRef.current = onQrDetected;
@@ -224,6 +241,8 @@ export default function CustomerCaptureModal({
 
     if (!open) return null;
 
+    const askDelete = (label, onConfirm) => setDeleteConfirm({ label, onConfirm });
+
     const currentTab = TAB_OPTIONS.some((option) => option.key === activeTab) ? activeTab : PHOTO_TAB;
     const isOcrTab = currentTab === OCR_FRONT_TAB || currentTab === OCR_BACK_TAB;
     const derivedSide = currentTab === OCR_FRONT_TAB ? 'front' : 'back';
@@ -305,7 +324,6 @@ export default function CustomerCaptureModal({
                                 <button
                                     key={option.key}
                                     type="button"
-                                    disabled={done}
                                     onClick={() => !done && onTabChange?.(option.key)}
                                     style={{
                                         border: done
@@ -320,7 +338,8 @@ export default function CustomerCaptureModal({
                                                 : 'rgba(255,255,255,.08)',
                                         color: done ? '#4ade80' : 'white',
                                         fontSize: 11,
-                                        fontWeight: 800,
+                                        fontWeight: 500,
+                                        whiteSpace: 'nowrap',
                                         cursor: done ? 'not-allowed' : 'pointer',
                                         display: 'flex',
                                         flexDirection: 'column',
@@ -342,6 +361,25 @@ export default function CustomerCaptureModal({
                                         <>
                                             <IoCheckmarkCircle style={{ fontSize: 22, color: '#4ade80', flexShrink: 0 }} />
                                             <span style={{ lineHeight: 1.3, textAlign: 'center', fontSize: 9, color: '#86efac' }}>Xong</span>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    askDelete('Xóa dữ liệu CCCD này?', () => onClearTab?.(option.key));
+                                                }}
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: -6, right: -6,
+                                                    width: 22, height: 22,
+                                                    borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                                    boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                                                    zIndex: 2
+                                                }}
+                                                title="Xóa và chụp lại"
+                                            >
+                                                <IoCloseOutline style={{ fontSize: 16 }} />
+                                            </button>
                                         </>
                                     ) : (
                                         <>
@@ -410,10 +448,29 @@ export default function CustomerCaptureModal({
                     {currentTab === PHOTO_TAB && photoShots.length ? (
                         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingTop: 12 }}>
                             {photoShots.map((shot) => (
-                                <div key={shot.id} style={{ flex: '0 0 auto', width: 72 }}>
+                                <div key={shot.id} style={{ flex: '0 0 auto', width: 72, position: 'relative' }}>
                                     <div style={{ width: 72, height: 72, borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.06)' }}>
-                                        <img src={shot.url} alt={shot.label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                <img src={shot.url} alt={shot.label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                                     </div>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            askDelete('Xóa ảnh này?', () => {
+                                                setPhotoShots(prev => prev.filter(s => s.id !== shot.id));
+                                                onPhotoDelete?.(shot.fullUrl || shot.url);
+                                            });
+                                        }}
+                                        style={{
+                                            position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: '50%',
+                                            background: '#ef4444', color: 'white', border: 'none',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                            boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 2
+                                        }}
+                                        title="Xóa ảnh"
+                                    >
+                                        <IoCloseOutline style={{ fontSize: 16 }} />
+                                    </button>
                                     <div style={{ marginTop: 6, fontSize: 9, color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shot.label}</div>
                                 </div>
                             ))}
@@ -525,6 +582,18 @@ export default function CustomerCaptureModal({
                     />
                 </div>
             </div>
+            <ConfirmDialog
+                open={Boolean(deleteConfirm)}
+                title="Xác nhận xóa"
+                message={deleteConfirm?.label || 'Bạn có chắc muốn xóa không?'}
+                confirmLabel="Xóa"
+                cancelLabel="Hủy"
+                onClose={() => setDeleteConfirm(null)}
+                onConfirm={() => {
+                    deleteConfirm?.onConfirm?.();
+                    setDeleteConfirm(null);
+                }}
+            />
         </div>
     );
 }

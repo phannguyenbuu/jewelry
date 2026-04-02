@@ -208,6 +208,23 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
     }, [isTrade, goldProducts.join('|')]);
 
     useEffect(() => {
+        const added = parseWeight(line.sellAddedGold || 0);
+        const cut = parseWeight(line.sellCutGold || 0);
+        if (added <= 0 || cut <= 0) return;
+        const net = added - cut;
+        if (net > 0) {
+            onChange({ sellAddedGold: formatWeight(net), sellCutGold: '' });
+            return;
+        }
+        if (net < 0) {
+            onChange({ sellAddedGold: '', sellCutGold: formatWeight(Math.abs(net)) });
+            return;
+        }
+        onChange({ sellAddedGold: '', sellCutGold: '' });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [line.sellAddedGold, line.sellCutGold]);
+
+    useEffect(() => {
         const normalizedLine = sanitizeLineInventoryState(line);
         const patch = {};
         if ((normalizedLine.entryMode || '') !== (line.entryMode || '')) patch.entryMode = normalizedLine.entryMode;
@@ -563,14 +580,13 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                         </div>
                         <div>
                             <span style={S.label}>{isGold ? 'Số lượng' : 'Số tiền'}</span>
-                            <input
+                            <FormattedNumberInput
                                 style={S.inp}
-                                type="number"
                                 inputMode="decimal"
-                                min="0"
-                                step={quantityStep}
+                                allowDecimal
+                                maxDecimals={4}
                                 value={line.qty}
-                                onChange={e => set('qty', normalizeNonNegativeNumberInput(e.target.value))}
+                                onValueChange={raw => set('qty', normalizeNonNegativeNumberInput(raw))}
                             />
                         </div>
                         <div>

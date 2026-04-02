@@ -44,7 +44,7 @@
     "poll_interval_seconds": 1,
     "heartbeat_interval_seconds": 15,
     "scan_interval_seconds": 30,
-    "scan_network_shares": false,
+    "scan_network_shares": true,
     "network_host_limit": 0
   }
 }

@@ -22,6 +22,55 @@ const serializeOrderLines = (saleLines = []) => saleLines.map((line, index) => (
     thanh_tien: Math.round(Number(line.value || 0)),
 }));
 
+const resolveOrderTypeFromLines = (saleLines = []) => {
+    const txs = [...new Set((saleLines || []).map(line => String(line?.tx || '').trim().toLowerCase()).filter(Boolean))];
+    if (txs.includes('trade')) return 'Đổi';
+    if (txs.length > 1) return 'Tổng hợp POS';
+    if (txs.includes('sell')) return 'Bán';
+    if (txs.includes('buy')) return 'Mua';
+    return 'POS';
+};
+
+const ORDER_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+
+const formatDatePartsInTimeZone = (value = new Date(), timeZone = ORDER_TIME_ZONE) => {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+    const parts = {};
+    for (const part of formatter.formatToParts(date)) {
+        if (part.type !== 'literal') parts[part.type] = part.value;
+    }
+    if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute || !parts.second) {
+        return null;
+    }
+    return parts;
+};
+
+const formatOrderDateTimeForStorage = (value = new Date()) => {
+    const raw = String(value ?? '').trim();
+    if (raw) {
+        const normalized = raw.replace('T', ' ').replace(/\.\d+$/, '');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return `${normalized} 00:00:00`;
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized)) return `${normalized}:00`;
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(normalized)) return normalized;
+    }
+    const parts = formatDatePartsInTimeZone(value);
+    if (!parts) {
+        return raw || '';
+    }
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+};
+
 export default function SalePosMobile() {
     const [screen, setScreen] = useState('order'); // 'order' | 'payment' | 'repair' | 'inventory' | 'list'
     const [navMenuOpen, setNavMenuOpen] = useState(false);
@@ -33,6 +82,7 @@ export default function SalePosMobile() {
     const [repairLoading, setRepairLoading] = useState(false);
     const [orders, setOrders] = useState([]);
     const [orderId, setOrderId] = useState(genOrderId);
+    const [orderCreatedAt, setOrderCreatedAt] = useState(() => formatOrderDateTimeForStorage(new Date()));
     const [repairId, setRepairId] = useState(genRepairId);
     const [repairMode, setRepairMode] = useState('sua');
     const [repairLines, setRepairLines] = useState([createRepairLine()]);
@@ -232,6 +282,7 @@ export default function SalePosMobile() {
             id: orderId,
             orderId,
             savedAt: new Date().toISOString(),
+            orderCreatedAt,
             total,
             formula,
             lines: lines.map(line => ({ ...line })),
@@ -252,6 +303,7 @@ export default function SalePosMobile() {
         setCustomerInfo(nextCustomerInfo);
         setCustomerInfoOpen(hasCustomerInfo(nextCustomerInfo));
         setOrderId(draft.orderId || genOrderId());
+        setOrderCreatedAt(formatOrderDateTimeForStorage(draft.orderCreatedAt || draft.savedAt || new Date()));
         deleteSavedDraft(draft.id || draft.orderId);
         setSavedModalOpen(false);
         setScreen('order');
@@ -288,6 +340,7 @@ export default function SalePosMobile() {
 
     const handleResetOrderForm = useCallback(() => {
         setOrderId(genOrderId());
+        setOrderCreatedAt(formatOrderDateTimeForStorage(new Date()));
         setLines([createDefaultLine(rates, { qty: '0' })]);
         setCustomerInfo(createEmptyCustomerInfo());
         setCustomerInfoOpen(false);
@@ -351,15 +404,30 @@ export default function SalePosMobile() {
         }
     };
 
-    const persistOrderToBackend = useCallback(async (payload, options = {}) => {
+    const persistOrderToBackend = useCallback(async (payload = {}, options = {}) => {
         const nextCustomerInfo = {
             ...createEmptyCustomerInfo(),
             ...customerInfo,
             ...(options.customerInfoOverride || {}),
         };
+        const rawTotal = Number.isFinite(Number(payload.totalRaw)) ? Number(payload.totalRaw) : Number(total || 0);
+        const totalSign = rawTotal > 0 ? 1 : rawTotal < 0 ? -1 : 0;
+        const cashValue = Math.max(
+            0,
+            Math.round(Math.abs(parseFmt(
+                payload.cash ?? payload.cashRaw ?? payload.cashText ?? 0,
+            ))),
+        );
+        const bankValue = Math.max(
+            0,
+            Math.round(Math.abs(parseFmt(
+                payload.bank ?? payload.bankcashRaw ?? payload.bankcash ?? 0,
+            ))),
+        );
         const frontImageRef = nextCustomerInfo.frontImage.trim().startsWith('data:') ? '' : nextCustomerInfo.frontImage.trim();
         const backImageRef = nextCustomerInfo.backImage.trim().startsWith('data:') ? '' : nextCustomerInfo.backImage.trim();
         const customerName = nextCustomerInfo.name.trim() || payload.frombank || 'POS Customer';
+        const contactAddress = nextCustomerInfo.address.trim() || nextCustomerInfo.residence.trim();
         const customerNote = [
             nextCustomerInfo.name.trim() ? `Khách hàng: ${nextCustomerInfo.name.trim()}` : '',
             nextCustomerInfo.cccd.trim() ? `CCCD: ${nextCustomerInfo.cccd.trim()}` : '',
@@ -378,35 +446,65 @@ export default function SalePosMobile() {
             backImageRef ? `Ảnh CCCD mặt sau: ${backImageRef}` : '',
             nextCustomerInfo.backText.trim() ? `OCR mặt sau:\n${nextCustomerInfo.backText.trim()}` : '',
         ].filter(Boolean);
+        const requestBody = {
+            ma_don: orderId,
+            loai_don: options.orderType || resolveOrderTypeFromLines(lines),
+            khach_hang: customerName,
+            cccd: nextCustomerInfo.cccd.trim(),
+            so_dien_thoai: nextCustomerInfo.phone.trim(),
+            dia_chi_kh: contactAddress,
+            dia_chi: contactAddress,
+            ngay_dat: formatOrderDateTimeForStorage(options.orderDate || orderCreatedAt),
+            tong_tien: Math.abs(Math.round(rawTotal)),
+            dat_coc: cashValue,
+            cash_payment: cashValue * totalSign,
+            bank_payment: bankValue * totalSign,
+            company_bank_account_id: payload.companyBankAccountId || '',
+            company_bank_ledger_key: payload.companyBankLedgerKey || '',
+            company_bank_account_no: payload.companyBankAccountNo || '',
+            items: serializeOrderLines(lines),
+            trang_thai: options.status || (options.finalize ? 'Đã ghi nhận POS' : 'Nháp POS'),
+            ghi_chu: [...customerNote, payload.formula || formula, payload.note || options.note].filter(Boolean).join('\n').trim(),
+            nguoi_tao: 'POS Mobile',
+            apply_payment_bookings: Boolean(options.finalize),
+        };
+        if (options.documents !== undefined) {
+            requestBody.chung_tu = options.documents;
+        }
+        if (options.financialInvoiceData !== undefined) {
+            requestBody.hoa_don_tai_chinh = options.financialInvoiceData;
+        }
         const response = await fetch(`${API}/api/don_hang`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ma_don: orderId,
-                khach_hang: customerName,
-                so_dien_thoai: nextCustomerInfo.phone.trim(),
-                dia_chi: nextCustomerInfo.address.trim() || nextCustomerInfo.residence.trim(),
-                ngay_dat: new Date().toISOString().slice(0, 10),
-                tong_tien: Math.abs(parseFmt(payload.total)),
-                dat_coc: Math.abs(parseFmt(payload.cash || '0')),
-                cash_payment: parseFmt(payload.cash || '0') * Math.sign(parseFmt(payload.total || '0')),
-                bank_payment: parseFmt(payload.bank || '0') * Math.sign(parseFmt(payload.total || '0')),
-                company_bank_account_id: payload.companyBankAccountId || '',
-                company_bank_ledger_key: payload.companyBankLedgerKey || '',
-                company_bank_account_no: payload.companyBankAccountNo || '',
-                items: serializeOrderLines(lines),
-                trang_thai: 'New',
-                ghi_chu: [...customerNote, payload.formula, payload.note].filter(Boolean).join('\n').trim(),
-                nguoi_tao: 'POS Mobile',
-            }),
+            body: JSON.stringify(requestBody),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
             throw new Error(data.error || `HTTP ${response.status}`);
         }
-        await loadOrders();
-        return { data, customerInfoUsed: nextCustomerInfo };
-    }, [customerInfo, lines, loadOrders, orderId]);
+        if (options.refreshOrders !== false) {
+            await loadOrders();
+        }
+        return { data, customerInfoUsed: nextCustomerInfo, requestBody };
+    }, [customerInfo, formula, lines, loadOrders, orderCreatedAt, orderId, total]);
+
+    const ensureOrderPersisted = useCallback(async (payload = {}, options = {}) => {
+        setLoading(true);
+        try {
+            return await persistOrderToBackend(payload, {
+                ...options,
+                refreshOrders: options.refreshOrders ?? false,
+            });
+        } catch (error) {
+            if (!options.silent) {
+                alert('Error: ' + error.message);
+            }
+            throw error;
+        } finally {
+            setLoading(false);
+        }
+    }, [persistOrderToBackend]);
 
     /* send order */
     const handleSend = async (payload, options = {}) => {
@@ -414,11 +512,15 @@ export default function SalePosMobile() {
         const markSold = options.markSold !== undefined ? options.markSold : finalize;
         setLoading(true);
         try {
-            const { data } = await persistOrderToBackend(payload, options);
+            const { data } = await persistOrderToBackend(payload, {
+                ...options,
+                finalize,
+            });
             const soldUpdate = markSold ? await markSoldInventoryItems(lines) : { updatedCount: 0, failedCount: 0 };
             if (finalize) {
                 persistSavedDrafts(savedDrafts.filter(item => item.id !== orderId));
                 setOrderId(genOrderId());
+                setOrderCreatedAt(formatOrderDateTimeForStorage(new Date()));
                 setLines([createDefaultLine(rates)]);
                 setCustomerInfo(createEmptyCustomerInfo());
                 setCustomerInfoOpen(false);
@@ -454,6 +556,11 @@ export default function SalePosMobile() {
         }
         setScreen(nextScreen);
     };
+
+    const handleOpenPaymentScreen = useCallback(async () => {
+        await ensureOrderPersisted({}, { refreshOrders: false });
+        setScreen('payment');
+    }, [ensureOrderPersisted]);
 
     const showFloatingMenu = screen === 'order' || screen === 'repair' || screen === 'inventory';
     return (
@@ -503,8 +610,9 @@ export default function SalePosMobile() {
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 {screen === 'order' && (
                     <OrderScreen rates={rates} inventoryItems={inventoryItems} lines={lines} setLines={setLines}
-                        total={total} orderId={orderId}
-                        onNext={() => setScreen('payment')}
+                        total={total} formula={formula} orderId={orderId}
+                        onNext={handleOpenPaymentScreen}
+                        onEnsureOrder={ensureOrderPersisted}
                         onSaveDraft={saveDraft}
                         onResetForm={handleResetOrderForm}
                         draftMessage={draftMessage}
@@ -522,7 +630,8 @@ export default function SalePosMobile() {
                         setCustomerInfo={setCustomerInfo}
                         loading={loading}
                         onBack={() => setScreen('order')}
-                        onSend={handleSend} />
+                        onSend={handleSend}
+                        onEnsureOrder={ensureOrderPersisted} />
                 )}
                 {screen === 'repair' && (
                     <RepairJobScreen

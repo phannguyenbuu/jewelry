@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { IoAddOutline, IoCameraOutline, IoChevronDownOutline, IoChevronForward, IoHeart, IoHeartOutline, IoPrintOutline, IoRefreshOutline, IoSaveOutline } from 'react-icons/io5';
+import { IoAddOutline, IoCameraOutline, IoChevronDownOutline, IoChevronForward, IoHeart, IoHeartOutline, IoPrintOutline, IoRefreshOutline, IoSaveOutline, IoInformationCircleOutline, IoCloseOutline } from 'react-icons/io5';
 import TxLine from './TxLine';
-import { ConfirmDialog } from './Dialogs';
+import { ConfirmDialog, ImageViewerModal } from './Dialogs';
 import CustomerCaptureModal from './CustomerCaptureModal';
 import SaleReceiptPreviewModal from './SaleReceiptPreviewModal';
 import { copySaleReceiptImageToClipboard, createSaleReceiptPreview, downloadSaleReceiptImage, printSaleReceiptImage } from './printSaleReceipt';
@@ -14,12 +14,46 @@ function dispatchNotif(title, body) {
 const DEFAULT_RED_INVOICE_CUSTOMER_NAME = 'PHAN NGUYEN BUU';
 const trimCustomerText = (value) => String(value || '').trim();
 const isDataImageUrl = (value) => /^data:image\//i.test(String(value || '').trim());
+const PUBLIC_WEB_ORIGIN = 'https://jewelry.n-lux.com';
+const isLocalOrPrivateHost = (hostname) => {
+    const host = String(hostname || '').trim().toLowerCase();
+    return host === 'localhost'
+        || host === '127.0.0.1'
+        || host === '0.0.0.0'
+        || host === '::1'
+        || host.startsWith('192.168.')
+        || host.startsWith('10.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+};
+const getPublicAssetBase = () => {
+    const candidates = [
+        API,
+        typeof window !== 'undefined' ? window.location.origin : '',
+        PUBLIC_WEB_ORIGIN,
+    ];
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        try {
+            const parsed = new URL(candidate, PUBLIC_WEB_ORIGIN);
+            if (!isLocalOrPrivateHost(parsed.hostname)) {
+                return parsed.origin;
+            }
+        } catch {
+            // Ignore malformed bases and continue to the next candidate.
+        }
+    }
+    return PUBLIC_WEB_ORIGIN;
+};
 const resolveApiAssetUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
     try {
-        const base = API || (typeof window !== 'undefined' ? window.location.origin : '');
-        return new URL(raw, base || 'http://localhost').toString();
+        const publicBase = getPublicAssetBase();
+        const parsed = new URL(raw, publicBase);
+        if (isLocalOrPrivateHost(parsed.hostname)) {
+            return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, publicBase).toString();
+        }
+        return parsed.toString();
     } catch {
         return raw;
     }
@@ -59,6 +93,20 @@ const RECEIPT_PRINT_TARGETS = {
         printerName: 'EPSON TM-T81III Receipt6',
         uncPath: '\\\\LAPTOP_PHAT\\EPSON TM-T81III Receipt6',
     },
+    3: {
+        machineName: 'DESKTOP-563MTH4',
+        hostName: '192.168.1.57',
+        deviceName: 'DESKTOP-563MTH4',
+        printerName: 'EPSON TM-T81III Receipt',
+        uncPath: '\\\\DESKTOP-563MTH4\\EPSON TM-T81III Receipt',
+    },
+    4: {
+        machineName: 'MAY01',
+        hostName: '192.168.1.67',
+        deviceName: 'MAY01',
+        printerName: 'EPSON TM-T81III Receipt via MAY01',
+        uncPath: '\\\\MAY01\\T81III Receipt',
+    },
     5: {
         machineName: 'MAY05',
         hostName: '192.168.1.110',
@@ -72,18 +120,55 @@ const normalizeCustomerPhotoValue = (value) => {
     if (!raw) return '';
     return isDataImageUrl(raw) ? raw : resolveApiAssetUrl(raw);
 };
-const buildCustomerPhotoGallery = (customer = {}) => {
+const buildCustomerPhotoAssets = (customer = {}) => {
+    const galleryAssets = Array.isArray(customer?.photoGalleryAssets)
+        ? customer.photoGalleryAssets
+        : Array.isArray(customer?.photo_gallery_assets)
+            ? customer.photo_gallery_assets
+            : [];
     const gallery = Array.isArray(customer?.photoGallery) ? customer.photoGallery : [];
-    const candidates = [...gallery, customer?.frontImage, customer?.backImage];
+    const galleryThumbs = Array.isArray(customer?.photoGalleryThumbs)
+        ? customer.photoGalleryThumbs
+        : Array.isArray(customer?.photo_gallery_thumbs)
+            ? customer.photo_gallery_thumbs
+            : [];
+    const storedThumbMap = customer?.photoThumbMap && typeof customer.photoThumbMap === 'object'
+        ? customer.photoThumbMap
+        : {};
+    const assets = [];
     const seen = new Set();
-    return candidates
-        .map(normalizeCustomerPhotoValue)
-        .filter((item) => {
-            if (!item || seen.has(item)) return false;
-            seen.add(item);
-            return true;
+
+    const pushAsset = (url, thumbUrl = '') => {
+        const fullUrl = normalizeCustomerPhotoValue(url);
+        if (!fullUrl || seen.has(fullUrl)) return;
+        seen.add(fullUrl);
+        const normalizedThumb = normalizeCustomerPhotoValue(thumbUrl);
+        const mappedThumb = normalizeCustomerPhotoValue(storedThumbMap[fullUrl] || storedThumbMap[url] || '');
+        assets.push({
+            url: fullUrl,
+            thumbUrl: normalizedThumb || mappedThumb || fullUrl,
         });
+    };
+
+    galleryAssets.forEach((asset) => {
+        if (!asset || typeof asset !== 'object') return;
+        pushAsset(
+            asset.url || asset.fullUrl || asset.absolute_url || asset.imageUrl || '',
+            asset.thumb_url || asset.thumbUrl || asset.thumbnail_url || asset.thumbnailUrl || '',
+        );
+    });
+    gallery.forEach((url, index) => pushAsset(url, galleryThumbs[index] || ''));
+    pushAsset(customer?.frontImage, customer?.frontThumb);
+    pushAsset(customer?.backImage, customer?.backThumb);
+    return assets;
 };
+const buildCustomerPhotoGallery = (customer = {}) => buildCustomerPhotoAssets(customer).map((asset) => asset.url);
+const buildCustomerPhotoThumbMap = (customer = {}) => buildCustomerPhotoAssets(customer).reduce((map, asset) => {
+    if (asset?.url) {
+        map[asset.url] = asset.thumbUrl || asset.url;
+    }
+    return map;
+}, {});
 const DUPLICATE_FIELD_LABELS = {
     ten: 'tên khách hàng',
     cccd: 'CCCD',
@@ -114,7 +199,9 @@ export default function OrderScreen({
     lines,
     setLines,
     total,
+    formula,
     onNext,
+    onEnsureOrder,
     onSaveDraft,
     onResetForm,
     orderId,
@@ -143,7 +230,11 @@ export default function OrderScreen({
     const [receiptPreviewUrl, setReceiptPreviewUrl] = useState('');
     const [receiptPreviewError, setReceiptPreviewError] = useState('');
     const [receiptActionMessage, setReceiptActionMessage] = useState('');
+    const [backTextModalOpen, setBackTextModalOpen] = useState(false);
+    const [imagePreview, setImagePreview] = useState(null);
     const [receiptActionError, setReceiptActionError] = useState(false);
+    const [photoDeleteConfirm, setPhotoDeleteConfirm] = useState(null); // { label, onConfirm }
+    const askDeletePhoto = (label, onConfirm) => setPhotoDeleteConfirm({ label, onConfirm });
     const hideBottomBar = lines.length === 1 && parseFmt(lines[0]?.qty || 0) === 0;
     const addLine = () => {
         setLines(ls => [...ls, createDefaultLine(rates)]);
@@ -168,24 +259,44 @@ export default function OrderScreen({
         if (!imageBase64) return;
         const dataUrl = `data:${mimeType};base64,${imageBase64}`;
         let nextMessage = 'Đã thêm ảnh vào bộ sưu tập khách hàng.';
-        // Generate thumbnail async then update gallery thumbs
         generateThumbnail(imageBase64, mimeType).then(thumbUrl => {
             setCustomerInfo(prev => {
                 const hasFrontImage = trimCustomerText(prev?.frontImage);
                 const hasBackImage  = trimCustomerText(prev?.backImage);
+                const nextThumbMap = {
+                    ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}),
+                    [dataUrl]: thumbUrl || dataUrl,
+                };
                 const nextGallery = buildCustomerPhotoGallery({
                     ...prev,
                     photoGallery: [...(Array.isArray(prev?.photoGallery) ? prev.photoGallery : []), dataUrl],
+                    photoThumbMap: nextThumbMap,
                 });
                 if (!hasFrontImage) {
                     nextMessage = 'Đã thêm ảnh và gán vào mặt trước.';
-                    return { ...prev, frontImage: dataUrl, frontThumb: thumbUrl, photoGallery: nextGallery };
+                    return {
+                        ...prev,
+                        frontImage: dataUrl,
+                        frontThumb: thumbUrl || dataUrl,
+                        photoGallery: nextGallery,
+                        photoThumbMap: nextThumbMap,
+                    };
                 }
                 if (!hasBackImage) {
                     nextMessage = 'Đã thêm ảnh và gán vào mặt sau.';
-                    return { ...prev, backImage: dataUrl, backThumb: thumbUrl, photoGallery: nextGallery };
+                    return {
+                        ...prev,
+                        backImage: dataUrl,
+                        backThumb: thumbUrl || dataUrl,
+                        photoGallery: nextGallery,
+                        photoThumbMap: nextThumbMap,
+                    };
                 }
-                return { ...prev, photoGallery: nextGallery };
+                return {
+                    ...prev,
+                    photoGallery: nextGallery,
+                    photoThumbMap: nextThumbMap,
+                };
             });
             setCustomerInfoOpen(true);
             setCccdOcrMessage(nextMessage);
@@ -209,16 +320,24 @@ export default function OrderScreen({
             throw new Error(payload.error || `HTTP ${response.status}`);
         }
         const resolvedUrl = resolveApiAssetUrl(payload.url || payload.absolute_url || '');
+        const resolvedThumbUrl = resolveApiAssetUrl(payload.thumb_url || payload.thumb_absolute_url || '');
         if (!resolvedUrl) {
             throw new Error('Server chưa trả URL ảnh CCCD.');
         }
-        return resolvedUrl;
+        return {
+            url: resolvedUrl,
+            thumbUrl: resolvedThumbUrl || resolvedUrl,
+        };
     };
     const ensureCustomerIdentityImagesUploaded = async (sourceCustomerInfo = customerInfo) => {
         const nextCustomerInfo = { ...sourceCustomerInfo };
-        const uploadCustomerImageValue = async ({ value, fileName, side }) => {
+        const sourceThumbMap = sourceCustomerInfo?.photoThumbMap && typeof sourceCustomerInfo.photoThumbMap === 'object'
+            ? sourceCustomerInfo.photoThumbMap
+            : {};
+        const uploadCustomerImageValue = async ({ value, thumbValue = '', fileName, side }) => {
             const normalizedValue = normalizeCustomerPhotoValue(value);
-            if (!normalizedValue) return '';
+            const normalizedThumbValue = normalizeCustomerPhotoValue(thumbValue);
+            if (!normalizedValue) return { url: '', thumbUrl: '' };
             if (isDataImageUrl(normalizedValue)) {
                 const parsed = parseImageDataUrl(normalizedValue);
                 if (parsed?.imageBase64) {
@@ -230,41 +349,68 @@ export default function OrderScreen({
                     });
                 }
             }
-            return resolveApiAssetUrl(normalizedValue);
+            const resolvedUrl = resolveApiAssetUrl(normalizedValue);
+            return {
+                url: resolvedUrl,
+                thumbUrl: normalizedThumbValue || resolveApiAssetUrl(sourceThumbMap[resolvedUrl] || sourceThumbMap[normalizedValue] || '') || resolvedUrl,
+            };
         };
 
-        nextCustomerInfo.frontImage = await uploadCustomerImageValue({
+        const frontAsset = await uploadCustomerImageValue({
             value: sourceCustomerInfo?.frontImage,
+            thumbValue: sourceCustomerInfo?.frontThumb,
             fileName: 'cccd-front-upload.jpg',
             side: 'front',
         });
+        nextCustomerInfo.frontImage = frontAsset.url;
+        nextCustomerInfo.frontThumb = frontAsset.thumbUrl;
 
-        nextCustomerInfo.backImage = await uploadCustomerImageValue({
+        const backAsset = await uploadCustomerImageValue({
             value: sourceCustomerInfo?.backImage,
+            thumbValue: sourceCustomerInfo?.backThumb,
             fileName: 'cccd-back-upload.jpg',
             side: 'back',
         });
+        nextCustomerInfo.backImage = backAsset.url;
+        nextCustomerInfo.backThumb = backAsset.thumbUrl;
 
-        const uploadedGallery = [];
-        for (const [index, imageValue] of buildCustomerPhotoGallery(sourceCustomerInfo).entries()) {
-            const uploadedValue = await uploadCustomerImageValue({
-                value: imageValue,
+        const sourceAssets = buildCustomerPhotoAssets(sourceCustomerInfo);
+        const uploadedGalleryAssets = [];
+        for (const [index, asset] of sourceAssets.entries()) {
+            const uploadedAsset = await uploadCustomerImageValue({
+                value: asset.url,
+                thumbValue: asset.thumbUrl,
                 fileName: `customer-gallery-${index + 1}.jpg`,
                 side: 'gallery',
             });
-            if (uploadedValue) uploadedGallery.push(uploadedValue);
+            if (uploadedAsset?.url) uploadedGalleryAssets.push(uploadedAsset);
         }
         nextCustomerInfo.photoGallery = buildCustomerPhotoGallery({
-            photoGallery: uploadedGallery,
+            photoGallery: uploadedGalleryAssets.map((asset) => asset.url),
+            photoGalleryAssets: uploadedGalleryAssets,
             frontImage: nextCustomerInfo.frontImage,
             backImage: nextCustomerInfo.backImage,
+        });
+        nextCustomerInfo.photoGalleryAssets = uploadedGalleryAssets;
+        nextCustomerInfo.photoGalleryThumbs = uploadedGalleryAssets.map((asset) => asset.thumbUrl || asset.url);
+        nextCustomerInfo.photoThumbMap = buildCustomerPhotoThumbMap({
+            photoGalleryAssets: uploadedGalleryAssets,
+            frontImage: nextCustomerInfo.frontImage,
+            frontThumb: nextCustomerInfo.frontThumb,
+            backImage: nextCustomerInfo.backImage,
+            backThumb: nextCustomerInfo.backThumb,
         });
 
         setCustomerInfo(prev => ({
             ...prev,
             frontImage: nextCustomerInfo.frontImage || '',
+            frontThumb: nextCustomerInfo.frontThumb || '',
             backImage: nextCustomerInfo.backImage || '',
+            backThumb: nextCustomerInfo.backThumb || '',
             photoGallery: nextCustomerInfo.photoGallery || [],
+            photoGalleryAssets: nextCustomerInfo.photoGalleryAssets || [],
+            photoGalleryThumbs: nextCustomerInfo.photoGalleryThumbs || [],
+            photoThumbMap: nextCustomerInfo.photoThumbMap || {},
         }));
         return nextCustomerInfo;
     };
@@ -293,6 +439,7 @@ export default function OrderScreen({
             photo_gallery: buildCustomerPhotoGallery(sourceCustomerInfo),
             photoGallery: buildCustomerPhotoGallery(sourceCustomerInfo),
             nguoi_tao: 'POS Mobile',
+            ghi_chu: sourceCustomerInfo?.note || sourceCustomerInfo?.ghi_chu || '',
         };
     };
     const describeDuplicateCustomer = (result = {}) => {
@@ -339,11 +486,36 @@ export default function OrderScreen({
                 favorite: Boolean(savedRecord.favorite ?? savedRecord.yeu_thich ?? prev.favorite),
                 backText: savedRecord.ocr_mat_sau || prev.backText,
                 frontImage: resolveApiAssetUrl(savedRecord.anh_mat_truoc || prev.frontImage || ''),
+                frontThumb: resolveApiAssetUrl(savedRecord.frontThumb || savedRecord.anh_mat_truoc_thumb || prev.frontThumb || ''),
                 backImage: resolveApiAssetUrl(savedRecord.anh_mat_sau || prev.backImage || ''),
+                backThumb: resolveApiAssetUrl(savedRecord.backThumb || savedRecord.anh_mat_sau_thumb || prev.backThumb || ''),
                 photoGallery: buildCustomerPhotoGallery({
                     photoGallery: savedRecord.photoGallery || savedRecord.photo_gallery || savedRecord.anh_bo_suu_tap || prev.photoGallery || [],
+                    photoGalleryAssets: savedRecord.photoGalleryAssets || savedRecord.photo_gallery_assets || prev.photoGalleryAssets || [],
+                    photoGalleryThumbs: savedRecord.photoGalleryThumbs || savedRecord.photo_gallery_thumbs || savedRecord.anh_bo_suu_tap_thumb || prev.photoGalleryThumbs || [],
                     frontImage: savedRecord.anh_mat_truoc || prev.frontImage || '',
+                    frontThumb: savedRecord.frontThumb || savedRecord.anh_mat_truoc_thumb || prev.frontThumb || '',
                     backImage: savedRecord.anh_mat_sau || prev.backImage || '',
+                    backThumb: savedRecord.backThumb || savedRecord.anh_mat_sau_thumb || prev.backThumb || '',
+                }),
+                photoGalleryAssets: buildCustomerPhotoAssets({
+                    photoGallery: savedRecord.photoGallery || savedRecord.photo_gallery || savedRecord.anh_bo_suu_tap || prev.photoGallery || [],
+                    photoGalleryAssets: savedRecord.photoGalleryAssets || savedRecord.photo_gallery_assets || prev.photoGalleryAssets || [],
+                    photoGalleryThumbs: savedRecord.photoGalleryThumbs || savedRecord.photo_gallery_thumbs || savedRecord.anh_bo_suu_tap_thumb || prev.photoGalleryThumbs || [],
+                    frontImage: savedRecord.anh_mat_truoc || prev.frontImage || '',
+                    frontThumb: savedRecord.frontThumb || savedRecord.anh_mat_truoc_thumb || prev.frontThumb || '',
+                    backImage: savedRecord.anh_mat_sau || prev.backImage || '',
+                    backThumb: savedRecord.backThumb || savedRecord.anh_mat_sau_thumb || prev.backThumb || '',
+                }),
+                photoGalleryThumbs: (savedRecord.photoGalleryThumbs || savedRecord.photo_gallery_thumbs || savedRecord.anh_bo_suu_tap_thumb || prev.photoGalleryThumbs || []).map(normalizeCustomerPhotoValue).filter(Boolean),
+                photoThumbMap: buildCustomerPhotoThumbMap({
+                    photoGallery: savedRecord.photoGallery || savedRecord.photo_gallery || savedRecord.anh_bo_suu_tap || prev.photoGallery || [],
+                    photoGalleryAssets: savedRecord.photoGalleryAssets || savedRecord.photo_gallery_assets || prev.photoGalleryAssets || [],
+                    photoGalleryThumbs: savedRecord.photoGalleryThumbs || savedRecord.photo_gallery_thumbs || savedRecord.anh_bo_suu_tap_thumb || prev.photoGalleryThumbs || [],
+                    frontImage: savedRecord.anh_mat_truoc || prev.frontImage || '',
+                    frontThumb: savedRecord.frontThumb || savedRecord.anh_mat_truoc_thumb || prev.frontThumb || '',
+                    backImage: savedRecord.anh_mat_sau || prev.backImage || '',
+                    backThumb: savedRecord.backThumb || savedRecord.anh_mat_sau_thumb || prev.backThumb || '',
                 }),
             }));
         }
@@ -375,11 +547,36 @@ export default function OrderScreen({
             favorite: Boolean(record.favorite ?? record.yeu_thich),
             backText: record.ocr_mat_sau || '',
             frontImage: resolveApiAssetUrl(record.anh_mat_truoc || ''),
+            frontThumb: resolveApiAssetUrl(record.frontThumb || record.anh_mat_truoc_thumb || ''),
             backImage: resolveApiAssetUrl(record.anh_mat_sau || ''),
+            backThumb: resolveApiAssetUrl(record.backThumb || record.anh_mat_sau_thumb || ''),
             photoGallery: buildCustomerPhotoGallery({
                 photoGallery: record.photoGallery || record.photo_gallery || record.anh_bo_suu_tap || [],
+                photoGalleryAssets: record.photoGalleryAssets || record.photo_gallery_assets || [],
+                photoGalleryThumbs: record.photoGalleryThumbs || record.photo_gallery_thumbs || record.anh_bo_suu_tap_thumb || [],
                 frontImage: record.anh_mat_truoc || '',
+                frontThumb: record.frontThumb || record.anh_mat_truoc_thumb || '',
                 backImage: record.anh_mat_sau || '',
+                backThumb: record.backThumb || record.anh_mat_sau_thumb || '',
+            }),
+            photoGalleryAssets: buildCustomerPhotoAssets({
+                photoGallery: record.photoGallery || record.photo_gallery || record.anh_bo_suu_tap || [],
+                photoGalleryAssets: record.photoGalleryAssets || record.photo_gallery_assets || [],
+                photoGalleryThumbs: record.photoGalleryThumbs || record.photo_gallery_thumbs || record.anh_bo_suu_tap_thumb || [],
+                frontImage: record.anh_mat_truoc || '',
+                frontThumb: record.frontThumb || record.anh_mat_truoc_thumb || '',
+                backImage: record.anh_mat_sau || '',
+                backThumb: record.backThumb || record.anh_mat_sau_thumb || '',
+            }),
+            photoGalleryThumbs: (record.photoGalleryThumbs || record.photo_gallery_thumbs || record.anh_bo_suu_tap_thumb || []).map(normalizeCustomerPhotoValue).filter(Boolean),
+            photoThumbMap: buildCustomerPhotoThumbMap({
+                photoGallery: record.photoGallery || record.photo_gallery || record.anh_bo_suu_tap || [],
+                photoGalleryAssets: record.photoGalleryAssets || record.photo_gallery_assets || [],
+                photoGalleryThumbs: record.photoGalleryThumbs || record.photo_gallery_thumbs || record.anh_bo_suu_tap_thumb || [],
+                frontImage: record.anh_mat_truoc || '',
+                frontThumb: record.frontThumb || record.anh_mat_truoc_thumb || '',
+                backImage: record.anh_mat_sau || '',
+                backThumb: record.backThumb || record.anh_mat_sau_thumb || '',
             }),
         });
         setCustomerInfoOpen(true);
@@ -424,22 +621,32 @@ export default function OrderScreen({
         if (!imageBase64) return;
         setCccdOcrLoading(true);
         setCccdOcrMessage('Đang lưu ảnh CCCD lên server...');
-        // Generate thumbnail client-side truoc khi upload (hien thi nhanh, khong can doi server)
         const thumbKey = side === 'back' ? 'backThumb' : 'frontThumb';
         generateThumbnail(imageBase64, mimeType).then(thumbUrl => {
-            setCustomerInfo(prev => ({ ...prev, [thumbKey]: thumbUrl }));
+            setCustomerInfo(prev => ({ ...prev, [thumbKey]: thumbUrl || prev?.[thumbKey] || '' }));
         });
         try {
-            const storedImageUrl = await uploadCustomerIdentityImage({ imageBase64, mimeType, fileName, side });
-            setCustomerInfo(prev => ({
-                ...prev,
-                [side === 'back' ? 'backImage' : 'frontImage']: storedImageUrl,
-                photoGallery: buildCustomerPhotoGallery({
+            const storedAsset = await uploadCustomerIdentityImage({ imageBase64, mimeType, fileName, side });
+            setCustomerInfo(prev => {
+                const imageKey = side === 'back' ? 'backImage' : 'frontImage';
+                const nextThumbMap = {
+                    ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}),
+                    [storedAsset.url]: storedAsset.thumbUrl || storedAsset.url,
+                };
+                const nextGallery = buildCustomerPhotoGallery({
                     ...prev,
-                    [side === 'back' ? 'backImage' : 'frontImage']: storedImageUrl,
-                    photoGallery: [...(Array.isArray(prev?.photoGallery) ? prev.photoGallery : []), storedImageUrl],
-                }),
-            }));
+                    [imageKey]: storedAsset.url,
+                    photoGallery: [...(Array.isArray(prev?.photoGallery) ? prev.photoGallery : []), storedAsset.url],
+                    photoThumbMap: nextThumbMap,
+                });
+                return {
+                    ...prev,
+                    [imageKey]: storedAsset.url,
+                    [thumbKey]: storedAsset.thumbUrl || storedAsset.url,
+                    photoGallery: nextGallery,
+                    photoThumbMap: nextThumbMap,
+                };
+            });
             const response = await fetch(`${API}/api/ocr`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -617,6 +824,38 @@ export default function OrderScreen({
         }
     };
     const isCustomerInfoSuccessMessage = /^(OCR|QR CCCD xong|Đã )/.test(cccdOcrMessage || '');
+    const buildReceiptSourceLabel = (posNo = null) => (
+        posNo ? `In từ máy in ${Number(posNo || 1)}` : ''
+    );
+    const ensureOrderSaved = async ({ previewError = false } = {}) => {
+        if (!onEnsureOrder) return true;
+        try {
+            await onEnsureOrder({}, { refreshOrders: false, silent: true });
+            return true;
+        } catch (error) {
+            const message = error.message || 'Không ghi được đơn hàng vào backend.';
+            setReceiptActionMessage(message);
+            setReceiptActionError(true);
+            if (previewError) {
+                setReceiptPreviewError(message);
+            }
+            return false;
+        }
+    };
+    const renderReceiptPreviewImage = async (posNo = null) => {
+        const { imageUrl } = await createSaleReceiptPreview({
+            orderId,
+            customerInfo,
+            lines,
+            rates,
+            total,
+            formula,
+            printSourceLabel: buildReceiptSourceLabel(posNo),
+        });
+        setReceiptPreviewUrl(imageUrl);
+        setReceiptPreviewError('');
+        return imageUrl;
+    };
 
     const handleOpenPrintPreview = async () => {
         setReceiptPreviewOpen(true);
@@ -626,14 +865,11 @@ export default function OrderScreen({
         setReceiptActionMessage('');
         setReceiptActionError(false);
         try {
-            const { imageUrl } = await createSaleReceiptPreview({
-                orderId,
-                customerInfo,
-                lines,
-                rates,
-                total,
-            });
-            setReceiptPreviewUrl(imageUrl);
+            if (!(await ensureOrderSaved({ previewError: true }))) {
+                setReceiptPreviewUrl('');
+                return;
+            }
+            await renderReceiptPreviewImage();
         } catch (error) {
             setReceiptPreviewUrl('');
             setReceiptPreviewError(error.message || 'Không tạo được preview POS.');
@@ -641,9 +877,12 @@ export default function OrderScreen({
             setReceiptPreviewLoading(false);
         }
     };
-    const handlePrintReceipt = (posNo) => {
-        if (!receiptPreviewUrl) return;
-        const success = printSaleReceiptImage(receiptPreviewUrl, `${orderId || 'Phiếu giao dịch POS'} · POS ${posNo || 1}`);
+    const handlePrintReceipt = async (posNo, preparedImageUrl = '') => {
+        let imageUrl = preparedImageUrl || receiptPreviewUrl;
+        if (!imageUrl || posNo) {
+            imageUrl = await renderReceiptPreviewImage(posNo || null);
+        }
+        const success = printSaleReceiptImage(imageUrl, `${orderId || 'Phiếu giao dịch POS'} · POS ${posNo || 1}`);
         if (success) {
             setReceiptActionMessage(`Đã mở lệnh in cho POS ${posNo || 1}.`);
             setReceiptActionError(false);
@@ -702,20 +941,30 @@ export default function OrderScreen({
         }
     };
     const handlePosReceiptPrintSafe = async (posNo) => {
-        if (!receiptPreviewUrl) return;
         const currentPosNo = Number(posNo || 1);
         const target = RECEIPT_PRINT_TARGETS[currentPosNo];
-        if (!target) {
-            handlePrintReceipt(currentPosNo);
-            return;
-        }
         const printOptions = {
             paper_width_mm: 76,
             margin_mm: 0,
             fit_width: true,
             print_strategy: 'gdi_image',
         };
-        const imageData = parseImageDataUrl(receiptPreviewUrl);
+        let imageUrl = '';
+        if (!(await ensureOrderSaved())) {
+            return;
+        }
+        try {
+            imageUrl = await renderReceiptPreviewImage(currentPosNo);
+        } catch (error) {
+            setReceiptActionMessage(error.message || `Khong tao duoc PNG cho may in ${currentPosNo}.`);
+            setReceiptActionError(true);
+            return;
+        }
+        if (!target) {
+            await handlePrintReceipt(currentPosNo, imageUrl);
+            return;
+        }
+        const imageData = parseImageDataUrl(imageUrl);
         if (!imageData?.imageBase64) {
             setReceiptActionMessage('Khong doc duoc PNG de gui may in.');
             setReceiptActionError(true);
@@ -791,11 +1040,18 @@ export default function OrderScreen({
                 actionMessage={receiptActionMessage}
                 actionError={receiptActionError}
             />
+            <ImageViewerModal
+                open={Boolean(imagePreview?.url)}
+                imageUrl={imagePreview?.url || ''}
+                title={imagePreview?.title || 'Xem ảnh lớn'}
+                caption={imagePreview?.caption || ''}
+                onClose={() => setImagePreview(null)}
+            />
             <CustomerCaptureModal
                 key={customerCaptureOpen ? 'capture-open' : 'capture-closed'}
                 open={customerCaptureOpen}
                 activeTab={customerCaptureTab}
-                initialPhotos={buildCustomerPhotoGallery(customerInfo)}
+                initialPhotos={buildCustomerPhotoAssets(customerInfo)}
                 onTabChange={setCustomerCaptureTab}
                 message={cccdOcrMessage}
                 qrLoading={cccdQrLoading}
@@ -808,6 +1064,56 @@ export default function OrderScreen({
                 onOcrPickFile={handleCccdOcrFile}
                 onPhotoCapture={handleCustomerPhotoCapture}
                 onPhotoPickFiles={handleCustomerPhotoFiles}
+                onPhotoDelete={(url) => setCustomerInfo(prev => {
+                    const targetUrl = normalizeCustomerPhotoValue(url);
+                    const nextPhotoThumbMap = { ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}) };
+                    if (targetUrl) delete nextPhotoThumbMap[targetUrl];
+                    const nextPhotoGallery = (Array.isArray(prev?.photoGallery) ? prev.photoGallery : []).filter(u => normalizeCustomerPhotoValue(u) !== targetUrl);
+                    const nextPhotoGalleryAssets = (Array.isArray(prev?.photoGalleryAssets) ? prev.photoGalleryAssets : []).filter(asset => normalizeCustomerPhotoValue(asset?.url) !== targetUrl);
+                    return {
+                        ...prev,
+                        photoGallery: nextPhotoGallery,
+                        photoGalleryAssets: buildCustomerPhotoAssets({
+                            ...prev,
+                            photoGallery: nextPhotoGallery,
+                            photoGalleryAssets: nextPhotoGalleryAssets,
+                            photoThumbMap: nextPhotoThumbMap,
+                        }).filter(asset => asset.url !== normalizeCustomerPhotoValue(prev?.frontImage) && asset.url !== normalizeCustomerPhotoValue(prev?.backImage)),
+                        photoThumbMap: nextPhotoThumbMap,
+                    };
+                })}
+                onClearTab={(key) => {
+                    const side = key === 'ocr_front' ? 'front' : key === 'ocr_back' ? 'back' : null;
+                    if (side) {
+                        setCaptureTabsDone(prev => {
+                            const next = { ...prev };
+                            delete next[key];
+                            return next;
+                        });
+                        setCustomerInfo(prev => {
+                            const imageKey = side === 'front' ? 'frontImage' : 'backImage';
+                            const thumbKey = side === 'front' ? 'frontThumb' : 'backThumb';
+                            const currentImage = normalizeCustomerPhotoValue(prev?.[imageKey]);
+                            const nextPhotoThumbMap = { ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}) };
+                            if (currentImage) delete nextPhotoThumbMap[currentImage];
+                            const nextPhotoGalleryAssets = (Array.isArray(prev?.photoGalleryAssets) ? prev.photoGalleryAssets : []).filter(asset => normalizeCustomerPhotoValue(asset?.url) !== currentImage);
+                            return {
+                                ...prev,
+                                [imageKey]: '',
+                                [thumbKey]: '',
+                                photoGalleryAssets: nextPhotoGalleryAssets,
+                                photoThumbMap: nextPhotoThumbMap,
+                                ...(side === 'back' ? { backText: '' } : null),
+                            };
+                        });
+                    } else if (key === 'qr') {
+                        setCaptureTabsDone(prev => {
+                            const next = { ...prev };
+                            delete next[key];
+                            return next;
+                        });
+                    }
+                }}
             />
             <div style={{ height: 8, flexShrink: 0 }} />
 
@@ -824,7 +1130,7 @@ export default function OrderScreen({
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={onResetForm}
+                                    onClick={() => window.location.reload()}
                                     style={{
                                         ...S.iconBtn('linear-gradient(135deg,#111827,#334155)'),
                                         width: 38,
@@ -835,8 +1141,8 @@ export default function OrderScreen({
                                         cursor: 'pointer',
                                         flexShrink: 0,
                                     }}
-                                    title="Làm mới biểu mẫu"
-                                    aria-label="Làm mới biểu mẫu"
+                                    title="Tải lại trang"
+                                    aria-label="Tải lại trang"
                                 >
                                     <IoRefreshOutline />
                                 </button>
@@ -874,14 +1180,17 @@ export default function OrderScreen({
                                     placeholder="Tìm kiếm nhanh bằng tên, số điện thoại, cccd"
                                     aria-label="Tìm kiếm nhanh bằng tên, số điện thoại, cccd"
                                 />
-                                <input
-                                    className="sale-pos-catalog-input"
-                                    style={{ ...S.inp, textAlign: 'left', fontWeight: 400, height: 38, minHeight: 38 }}
-                                    value={customerInfo?.name || ''}
-                                    onChange={e => updateCustomerInfo('name', e.target.value)}
-                                    onFocus={() => setCustomerInfoOpen(true)}
-                                    placeholder="Tên khách hàng"
-                                />
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        className="sale-pos-catalog-input"
+                                        style={{ ...S.inp, textAlign: 'left', fontWeight: 400, height: 38, minHeight: 38, paddingRight: 30 }}
+                                        value={customerInfo?.name || ''}
+                                        onChange={e => updateCustomerInfo('name', e.target.value)}
+                                        onFocus={() => setCustomerInfoOpen(true)}
+                                        placeholder="Tên khách hàng"
+                                    />
+                                    {customerInfo?.name ? <button type="button" onClick={() => updateCustomerInfo('name', '')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
+                                </div>
                             </div>
                             <button
                                 type="button"
@@ -889,20 +1198,20 @@ export default function OrderScreen({
                                 disabled={cccdQrLoading || cccdOcrLoading}
                                 style={{
                                     ...S.pillBtn('linear-gradient(135deg,#0f766e,#14b8a6)'),
-                                    width: 68,
-                                    height: 68,
-                                    minHeight: 68,
+                                    width: 38,
+                                    height: 38,
+                                    minHeight: 38,
                                     padding: 0,
                                     justifyContent: 'center',
                                     opacity: cccdQrLoading || cccdOcrLoading ? 0.7 : 1,
-                                    boxShadow: '0 12px 24px rgba(15,23,42,.16)',
+                                    boxShadow: '0 8px 16px rgba(15,23,42,.12)',
                                     flexShrink: 0,
                                     alignSelf: 'center',
                                 }}
                                 title="Mở camera QR / OCR / chụp hình"
                                 aria-label="Mở camera QR / OCR / chụp hình"
                             >
-                                <IoCameraOutline style={{ fontSize: 28 }} />
+                                <IoCameraOutline style={{ fontSize: 18 }} />
                             </button>
                             <button
                                 type="button"
@@ -973,20 +1282,26 @@ export default function OrderScreen({
                         )}
                         {customerInfoOpen && (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 10 }}>
-                                <input
-                                    className="sale-pos-catalog-input"
-                                    style={{ ...S.inp, textAlign: 'left', fontWeight: 400 }}
-                                    value={customerInfo?.phone || ''}
-                                    onChange={e => updateCustomerInfo('phone', e.target.value)}
-                                    placeholder="Nhập số điện thoại"
-                                />
-                                <input
-                                    className="sale-pos-catalog-input"
-                                    style={{ ...S.inp, textAlign: 'left', fontWeight: 400 }}
-                                    value={customerInfo?.cccd || ''}
-                                    onChange={e => updateCustomerInfo('cccd', e.target.value)}
-                                    placeholder="Nhập CCCD"
-                                />
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        className="sale-pos-catalog-input"
+                                        style={{ ...S.inp, textAlign: 'left', fontWeight: 400, paddingRight: 30 }}
+                                        value={customerInfo?.phone || ''}
+                                        onChange={e => updateCustomerInfo('phone', e.target.value)}
+                                        placeholder="Nhập số điện thoại"
+                                    />
+                                    {customerInfo?.phone ? <button type="button" onClick={() => updateCustomerInfo('phone', '')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
+                                </div>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        className="sale-pos-catalog-input"
+                                        style={{ ...S.inp, textAlign: 'left', fontWeight: 400, paddingRight: 30 }}
+                                        value={customerInfo?.cccd || ''}
+                                        onChange={e => updateCustomerInfo('cccd', e.target.value)}
+                                        placeholder="Nhập CCCD"
+                                    />
+                                    {customerInfo?.cccd ? <button type="button" onClick={() => updateCustomerInfo('cccd', '')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
+                                </div>
                                 <div
                                     role="radiogroup"
                                     aria-label="Giới tính"
@@ -1027,30 +1342,53 @@ export default function OrderScreen({
                                         );
                                     })}
                                 </div>
-                                <input
-                                    className="sale-pos-catalog-input"
-                                    style={{ ...S.inp, textAlign: 'left', fontWeight: 400 }}
-                                    value={customerInfo?.dob || ''}
-                                    onChange={e => updateCustomerInfo('dob', e.target.value)}
-                                    placeholder="Nhập ngày sinh (không bắt buộc)"
-                                />
-                                <input
-                                    className="sale-pos-catalog-input"
-                                    style={{ ...S.inp, gridColumn: '1 / -1', textAlign: 'left', fontWeight: 400 }}
-                                    value={customerInfo?.address || customerInfo?.residence || ''}
-                                    onChange={e => updateCustomerInfo('address', e.target.value)}
-                                    placeholder="Nhập địa chỉ"
-                                />
-                                <div style={{ gridColumn: '1 / -1' }}>
-                                    <div style={{ position: 'relative', minWidth: 0 }}>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        className="sale-pos-catalog-input"
+                                        style={{ ...S.inp, textAlign: 'left', fontWeight: 400, paddingRight: 30 }}
+                                        value={customerInfo?.dob || ''}
+                                        onChange={e => updateCustomerInfo('dob', e.target.value)}
+                                        placeholder="Nhập ngày sinh (không bắt buộc)"
+                                    />
+                                    {customerInfo?.dob ? <button type="button" onClick={() => updateCustomerInfo('dob', '')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
+                                </div>
+                                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10 }}>
+                                    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                                        <input
+                                            className="sale-pos-catalog-input"
+                                            style={{ ...S.inp, width: '100%', textAlign: 'left', fontWeight: 400, paddingRight: 30 }}
+                                            value={customerInfo?.address || customerInfo?.residence || ''}
+                                            onChange={e => updateCustomerInfo('address', e.target.value)}
+                                            placeholder="Nhập địa chỉ"
+                                        />
+                                        {(customerInfo?.address || customerInfo?.residence) ? <button type="button" onClick={() => { updateCustomerInfo('address', ''); updateCustomerInfo('residence', ''); }} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBackTextModalOpen(true)}
+                                        style={{
+                                            ...S.iconBtn('linear-gradient(135deg,#f8fafc,#f1f5f9)'),
+                                            width: 38,
+                                            height: 38,
+                                            border: '1px solid #dbe4ee',
+                                            color: customerInfo?.backText ? '#0f766e' : '#64748b',
+                                            flexShrink: 0,
+                                        }}
+                                        title="Chỉnh sửa OCR mặt sau"
+                                    >
+                                        <IoInformationCircleOutline style={{ fontSize: 22 }} />
+                                    </button>
+                                </div>
+                                <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'stretch', gap: 10 }}>
+                                    <div style={{ position: 'relative', minWidth: 0, flex: 1 }}>
                                         <textarea
                                             className="sale-pos-catalog-input"
-                                            style={{ ...S.inp, textAlign: 'left', fontWeight: 400, minHeight: 96, resize: 'vertical', paddingTop: 10, paddingBottom: 72, height: '100%' }}
-                                            value={customerInfo?.backText || ''}
-                                            onChange={e => updateCustomerInfo('backText', e.target.value)}
+                                            style={{ ...S.inp, textAlign: 'left', fontWeight: 400, minHeight: 96, resize: 'vertical', paddingTop: 10, paddingBottom: 48, height: '100%' }}
+                                            value={customerInfo?.note || ''}
+                                            onChange={e => updateCustomerInfo('note', e.target.value)}
                                             placeholder="Ghi chú nhanh"
                                         />
-                                        <div style={{ position: 'absolute', left: 10, right: 10, bottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                        <div style={{ position: 'absolute', left: 10, right: 10, bottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                                                 <StarRating value={Number(customerInfo?.sao || 0)} onChange={(value) => updateCustomerInfo('sao', value)} size={30} />
                                                 <button
@@ -1076,20 +1414,33 @@ export default function OrderScreen({
                                                     {customerInfo?.favorite ? <IoHeart style={{ fontSize: 15 }} /> : <IoHeartOutline style={{ fontSize: 15 }} />}
                                                 </button>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={saveCustomerToBackend}
-                                                disabled={customerSaveLoading}
-                                                style={{
-                                                    ...S.pillBtn('linear-gradient(135deg,#2563eb,#3b82f6)'),
-                                                    height: 30, padding: '0 12px', fontSize: 11, minHeight: 30,
-                                                    opacity: customerSaveLoading ? 0.7 : 1,
-                                                }}
-                                            >
-                                                {customerSaveLoading ? 'Đang lưu...' : (customerInfo?.id ? 'Cập nhật KH' : 'Lưu KH')}
-                                            </button>
                                         </div>
                                     </div>
+                                    <button
+                                        type="button"
+                                        onClick={saveCustomerToBackend}
+                                        disabled={customerSaveLoading}
+                                        style={{
+                                            ...S.pillBtn('linear-gradient(135deg,#0f766e,#14b8a6)'),
+                                            width: 68,
+                                            height: 'auto',
+                                            minHeight: 96,
+                                            padding: '8px',
+                                            flexDirection: 'column',
+                                            gap: 6,
+                                            justifyContent: 'center',
+                                            opacity: customerSaveLoading ? 0.7 : 1,
+                                            boxShadow: '0 8px 16px rgba(15,118,110,.16)',
+                                            flexShrink: 0,
+                                            alignSelf: 'stretch',
+                                            borderRadius: 16,
+                                        }}
+                                        title={customerSaveLoading ? 'Đang lưu...' : (customerInfo?.id ? 'Cập nhật' : 'Lưu KH')}
+                                        aria-label={customerSaveLoading ? 'Đang lưu...' : (customerInfo?.id ? 'Cập nhật' : 'Lưu KH')}
+                                    >
+                                        <IoSaveOutline style={{ fontSize: 24, color: 'white' }} />
+                                        <span style={{ fontSize: 10, textAlign: 'center', fontWeight: 600, lineHeight: 1.2, color: 'white' }}>{customerSaveLoading ? 'Đang lưu' : (customerInfo?.id ? 'Cập nhật' : 'Lưu KH')}</span>
+                                    </button>
                                 </div>
                                 {cccdOcrMessage && (
                                     <div style={{ gridColumn: '1 / -1', fontSize: 10, color: isCustomerInfoSuccessMessage ? '#0f766e' : '#dc2626', lineHeight: 1.45 }}>
@@ -1108,12 +1459,52 @@ export default function OrderScreen({
                                             <div key={imgKey} style={{ flex: '0 0 auto', width: 80, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                                 <span style={{ fontSize: 8, color: '#94a3b8', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{label}</span>
                                                 {fullUrl ? (
-                                                    <a href={fullUrl} target="_blank" rel="noreferrer"
-                                                        title="Click để xem ảnh đầy đủ"
-                                                        style={{ display: 'block', borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '1/1', boxShadow: '0 2px 8px rgba(15,23,42,.06)' }}>
-                                                        <img src={thumbUrl || fullUrl} alt={label} loading="lazy"
-                                                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                                                    </a>
+                                                    <div style={{ position: 'relative' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setImagePreview({ url: fullUrl, title: label, caption: 'Ảnh gốc từ hồ sơ khách hàng' })}
+                                                            title="Xem ảnh lớn"
+                                                            style={{ display: 'block', width: '100%', padding: 0, borderRadius: 12, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', aspectRatio: '1/1', boxShadow: '0 2px 8px rgba(15,23,42,.06)', cursor: 'pointer' }}>
+                                                            <img src={thumbUrl || fullUrl} alt={label} loading="lazy"
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                askDeletePhoto(`Xóa ảnh ${label}?`, () => {
+                                                                    setCustomerInfo(prev => {
+                                                                        const currentImage = normalizeCustomerPhotoValue(prev?.[imgKey]);
+                                                                        const nextPhotoThumbMap = { ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}) };
+                                                                        if (currentImage) delete nextPhotoThumbMap[currentImage];
+                                                                        const nextPhotoGalleryAssets = (Array.isArray(prev?.photoGalleryAssets) ? prev.photoGalleryAssets : []).filter(asset => normalizeCustomerPhotoValue(asset?.url) !== currentImage);
+                                                                        return {
+                                                                            ...prev,
+                                                                            [imgKey]: '',
+                                                                            [thumbKey]: '',
+                                                                            photoGalleryAssets: nextPhotoGalleryAssets,
+                                                                            photoThumbMap: nextPhotoThumbMap,
+                                                                            ...(tabKey === 'ocr_back' ? { backText: '' } : null),
+                                                                        };
+                                                                    });
+                                                                    setCaptureTabsDone(prev => {
+                                                                        const next = { ...prev };
+                                                                        delete next[tabKey];
+                                                                        return next;
+                                                                    });
+                                                                });
+                                                            }}
+                                                            style={{
+                                                                position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: '50%',
+                                                                background: '#ef4444', color: 'white', border: 'none',
+                                                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                                                boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 2
+                                                            }}
+                                                            title="Xóa ảnh"
+                                                        >
+                                                            <IoCloseOutline style={{ fontSize: 16 }} />
+                                                        </button>
+                                                    </div>
                                                 ) : (
                                                     <button
                                                         type="button"
@@ -1140,21 +1531,59 @@ export default function OrderScreen({
                                 </div>
                                 {/* Extra gallery photos - scroll strip */}
                                 {(() => {
-                                    const front = customerInfo?.frontImage;
-                                    const back  = customerInfo?.backImage;
-                                    const extra = (Array.isArray(customerInfo?.photoGallery) ? customerInfo.photoGallery : [])
-                                        .filter(u => u && u !== front && u !== back);
+                                    const front = normalizeCustomerPhotoValue(customerInfo?.frontImage);
+                                    const back  = normalizeCustomerPhotoValue(customerInfo?.backImage);
+                                    const extra = buildCustomerPhotoAssets(customerInfo)
+                                        .filter(asset => asset.url && asset.url !== front && asset.url !== back);
                                     if (!extra.length) return null;
                                     return (
-                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin' }}>
-                                            {extra.map((url, idx) => (
-                                                <a key={idx} href={url} target="_blank" rel="noreferrer"
-                                                    style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                                                    <div style={{ width: 56, height: 56, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9' }}>
-                                                        <img src={url} alt={`Ảnh ${idx + 1}`} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                                                    </div>
+                                        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', paddingTop: 6 }}>
+                                            {extra.map((asset, idx) => (
+                                                <div key={asset.url || idx} style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, position: 'relative' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setImagePreview({ url: asset.url, title: `Ảnh ${idx + 1}`, caption: 'Ảnh gốc từ bộ sưu tập khách hàng' })}
+                                                        style={{ width: 56, height: 56, padding: 0, borderRadius: 10, overflow: 'hidden', border: '1px solid #dbe4ee', background: '#f1f5f9', cursor: 'pointer' }}
+                                                    >
+                                                        <img src={asset.thumbUrl || asset.url} alt={`Ảnh ${idx + 1}`} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                                    </button>
                                                     <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>Ảnh {idx + 1}</span>
-                                                </a>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            askDeletePhoto(`Xóa Ảnh ${idx + 1}?`, () => {
+                                                                setCustomerInfo(prev => {
+                                                                    const targetUrl = normalizeCustomerPhotoValue(asset.url);
+                                                                    const nextPhotoThumbMap = { ...(prev?.photoThumbMap && typeof prev.photoThumbMap === 'object' ? prev.photoThumbMap : {}) };
+                                                                    if (targetUrl) delete nextPhotoThumbMap[targetUrl];
+                                                                    const nextPhotoGallery = (Array.isArray(prev?.photoGallery) ? prev.photoGallery : []).filter(u => normalizeCustomerPhotoValue(u) !== targetUrl);
+                                                                    const nextPhotoGalleryAssets = (Array.isArray(prev?.photoGalleryAssets) ? prev.photoGalleryAssets : []).filter(entry => normalizeCustomerPhotoValue(entry?.url) !== targetUrl);
+                                                                    return {
+                                                                        ...prev,
+                                                                        photoGallery: nextPhotoGallery,
+                                                                        photoGalleryAssets: buildCustomerPhotoAssets({
+                                                                            ...prev,
+                                                                            photoGallery: nextPhotoGallery,
+                                                                            photoGalleryAssets: nextPhotoGalleryAssets,
+                                                                            photoThumbMap: nextPhotoThumbMap,
+                                                                        }).filter(entry => entry.url !== normalizeCustomerPhotoValue(prev?.frontImage) && entry.url !== normalizeCustomerPhotoValue(prev?.backImage)),
+                                                                        photoThumbMap: nextPhotoThumbMap,
+                                                                    };
+                                                                });
+                                                            });
+                                                        }}
+                                                        style={{
+                                                            position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%',
+                                                            background: '#ef4444', color: 'white', border: 'none',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                                            boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 2
+                                                        }}
+                                                        title="Xóa ảnh"
+                                                    >
+                                                        <IoCloseOutline style={{ fontSize: 14 }} />
+                                                    </button>
+                                                </div>
                                             ))}
                                         </div>
                                     );
@@ -1228,20 +1657,30 @@ export default function OrderScreen({
                             <IoPrintOutline style={{ fontSize: 18 }} />
                             <span>In Pos</span>
                         </button>
-                        <button
-                            onClick={onNext}
-                            title="Tính tiền"
-                            aria-label="Tính tiền"
-                            style={{
-                                ...S.iconBtn(sellTheme.gradient),
-                                width: 52,
-                                height: 52,
-                                color: 'white',
-                                fontSize: 22,
-                            }}
-                        >
-                            <IoChevronForward />
-                        </button>
+                        {Boolean(
+                            total !== 0 &&
+                            trimCustomerText(customerInfo?.name) &&
+                            trimCustomerText(customerInfo?.cccd) &&
+                            trimCustomerText(customerInfo?.phone) &&
+                            (trimCustomerText(customerInfo?.address) || trimCustomerText(customerInfo?.residence)) &&
+                            customerInfo?.frontImage &&
+                            customerInfo?.backImage
+                        ) && (
+                            <button
+                                onClick={onNext}
+                                title="Tính tiền"
+                                aria-label="Tính tiền"
+                                style={{
+                                    ...S.iconBtn(sellTheme.gradient),
+                                    width: 52,
+                                    height: 52,
+                                    color: 'white',
+                                    fontSize: 22,
+                                }}
+                            >
+                                <IoChevronForward />
+                            </button>
+                        )}
                     </div>
                 </div>
             ) : null}
@@ -1255,6 +1694,39 @@ export default function OrderScreen({
                 onClose={() => !customerSaveLoading && setCustomerOverwritePrompt(null)}
                 onConfirm={confirmCustomerOverwrite}
             />
+            <ConfirmDialog
+                open={Boolean(photoDeleteConfirm)}
+                title="Xác nhận xóa ảnh"
+                message={photoDeleteConfirm?.label || 'Bạn có chắc muốn xóa ảnh này không?'}
+                confirmLabel="Xóa"
+                cancelLabel="Hủy"
+                onClose={() => setPhotoDeleteConfirm(null)}
+                onConfirm={() => {
+                    photoDeleteConfirm?.onConfirm?.();
+                    setPhotoDeleteConfirm(null);
+                }}
+            />
+            {backTextModalOpen && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.8)', padding: 16 }}>
+                    <div style={{ background: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 400, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Thông tin mặt sau CCCD</div>
+                        <textarea
+                            className="sale-pos-catalog-input"
+                            style={{ ...S.inp, textAlign: 'left', fontWeight: 400, minHeight: 180, resize: 'vertical', padding: 12 }}
+                            value={customerInfo?.backText || ''}
+                            onChange={e => updateCustomerInfo('backText', e.target.value)}
+                            placeholder="Văn bản nhận diện từ mặt sau CCCD rỗng..."
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setBackTextModalOpen(false)}
+                            style={{ ...S.pillBtn('linear-gradient(135deg,#0f766e,#14b8a6)'), justifyContent: 'center', height: 44 }}
+                        >
+                            <span style={{ color: 'white', fontWeight: 700 }}>Đóng</span>
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

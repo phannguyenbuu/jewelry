@@ -23,6 +23,37 @@ function ConfirmDialog({ open, title, message, confirmLabel, cancelLabel = 'Hủ
     );
 }
 
+function ImageViewerModal({ open, imageUrl, title = 'Xem ảnh', caption = '', onClose }) {
+    if (!open || !imageUrl) return null;
+
+    return (
+        <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1680, background: 'rgba(2,6,23,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 920, maxHeight: '92vh', borderRadius: 28, background: '#0f172a', border: '1px solid rgba(255,255,255,.08)', boxShadow: '0 28px 60px rgba(15,23,42,.38)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div data-sale-title="true" style={{ fontSize: 15, fontWeight: 900, color: '#f8fafc' }}>{title}</div>
+                        {caption ? <div style={{ marginTop: 4, fontSize: 11, color: '#cbd5e1', lineHeight: 1.45 }}>{caption}</div> : null}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid rgba(255,255,255,.12)', background: 'rgba(255,255,255,.06)', color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                    >
+                        <IoCloseOutline />
+                    </button>
+                </div>
+                <div style={{ padding: 16, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(15,23,42,.96), rgba(2,6,23,.98))' }}>
+                    <img
+                        src={imageUrl}
+                        alt={title}
+                        style={{ maxWidth: '100%', maxHeight: 'calc(92vh - 110px)', objectFit: 'contain', display: 'block', borderRadius: 18, background: '#020617', boxShadow: '0 18px 40px rgba(0,0,0,.28)' }}
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function CustomerIdOcrModal({ open, loading, message, side, onSideChange, onClose, onCapture, onPickFile }) {
     const previewAspect = 16 / 9;
     const videoRef = useRef(null);
@@ -443,4 +474,4 @@ function CustomerQrScanModal({ open, loading, message, onClose, onDetected, onPi
 
 /* â”€â”€ Screen 1: ORDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-export { ConfirmDialog, CustomerIdOcrModal, CustomerQrScanModal };
+export { ConfirmDialog, ImageViewerModal, CustomerIdOcrModal, CustomerQrScanModal };

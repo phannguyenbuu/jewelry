@@ -9,7 +9,9 @@ from .state import app, db
 from .models import *
 from .setup_base import *
 from .setup_base import (
+    _ensure_don_hang_extended_columns,
     _ensure_item_tuoi_vang_column,
+    _ensure_khach_hang_ghi_chu_column,
     _ensure_quay_nho_thu_ngan_column,
     _ensure_search_indexes,
     _ensure_thu_ngan_password_hash_column,
@@ -446,6 +448,7 @@ def _sync_tuoi_vang_from_loai_vang_record(loai, old_ma_loai=None, old_ten_loai=N
 
 def bootstrap_database():
     db.create_all()
+    _ensure_don_hang_extended_columns()
     _ensure_item_tuoi_vang_column()
     _ensure_tuoi_vang_columns()
     _ensure_quay_nho_thu_ngan_column()
@@ -455,6 +458,7 @@ def bootstrap_database():
     _ensure_khach_hang_favorite_column()
     _ensure_khach_hang_cccd_image_columns()
     _ensure_khach_hang_photo_gallery_column()
+    _ensure_khach_hang_ghi_chu_column()
     _ensure_search_indexes()
     _migrate_thu_ngan_so_quy_amount_scale()
     if Kho.query.count() == 0:

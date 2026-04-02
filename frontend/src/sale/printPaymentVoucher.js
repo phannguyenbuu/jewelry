@@ -1,4 +1,4 @@
-import { fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldLineEffectiveQuantity, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, normalizeTradeRate, parseFmt, parseWeight } from './shared';
+import { API, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldLineEffectiveQuantity, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, normalizeTradeRate, parseFmt, parseWeight } from './shared';
 
 const SALE_PAGE = {
     width: 1240,
@@ -13,21 +13,28 @@ const BUY_PAGE = {
     cssSize: 'A5 landscape',
     imageWidthMm: '190mm',
     imageMaxHeightMm: '132mm',
+    renderScale: 4,
 };
 const PADDING_X = 72;
 const UI_FONT = "'Times New Roman', 'Be Vietnam Pro', serif";
 const NUMBER_FONT = "'Roboto Condensed', 'Be Vietnam Pro', sans-serif";
+const BUY_VOUCHER_FONT = UI_FONT;
+const PUBLIC_WEB_ORIGIN = 'https://jewelry.n-lux.com';
+const BUY_VOUCHER_TOTAL_LABEL = 'C\u1ed9ng';
+const BUY_VOUCHER_PAYMENT_NOTE = 'Chuy\u1ec3n kho\u1ea3n c\u00f4ng ty';
+const BUY_VOUCHER_BANK_TRANSFER_LABEL = '+ S\u1ed1 ti\u1ec1n thanh to\u00e1n chuy\u1ec3n kho\u1ea3n: ';
+const BUY_VOUCHER_MANUAL_SERIAL = '........';
 const COMPANY_NAME = 'CONG TY TNHH VANG BAC DA QUY VAN KIM';
 const COMPANY_TAX_CODE = '5800884170';
 const BUY_APPROVER_NAME = 'LÊ THỊ MỸ HẠNH';
 const BUY_VOUCHER_FALLBACK_CUSTOMER = {
-    name: 'PHAN NGUYEN BUU',
-    cccd: '056086010108',
-    phone: '0968974186',
-    address: 'Bảo Lộc',
-    residence: 'Bảo Lộc',
-    frontImage: '/mattruoc.jpg',
-    backImage: '/matsau.jpg',
+    name: 'Khách lẻ',
+    cccd: '',
+    phone: '',
+    address: '',
+    residence: '',
+    frontImage: '',
+    backImage: '',
 };
 
 const moneyText = (value) => fmtCalc(Math.round(Math.abs(Number(value || 0))));
@@ -103,12 +110,52 @@ const fitColumnWidths = (totalWidth, baseWidths) => {
     widths[widths.length - 1] = totalWidth - widths.slice(0, -1).reduce((acc, width) => acc + width, 0);
     return widths;
 };
+const isLocalOrPrivateHost = (hostname) => {
+    const host = String(hostname || '').trim().toLowerCase();
+    return host === 'localhost'
+        || host === '127.0.0.1'
+        || host === '0.0.0.0'
+        || host === '::1'
+        || host.startsWith('192.168.')
+        || host.startsWith('10.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+};
+const getPublicAssetBase = () => {
+    const candidates = [
+        API,
+        typeof window !== 'undefined' ? window.location.origin : '',
+        PUBLIC_WEB_ORIGIN,
+    ];
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        try {
+            const parsed = new URL(candidate, PUBLIC_WEB_ORIGIN);
+            if (!isLocalOrPrivateHost(parsed.hostname)) {
+                return parsed.origin;
+            }
+        } catch {
+            // Ignore malformed bases and continue to the next candidate.
+        }
+    }
+    return PUBLIC_WEB_ORIGIN;
+};
 const normalizeDataUrl = (value) => {
     const text = String(value || '').trim();
     if (!text) return '';
-    if (text.startsWith('data:image/')) return text;
-    if (text.startsWith('/')) return text;
-    return '';
+    if (/^data:image\//i.test(text) || /^blob:/i.test(text)) return text;
+    try {
+        const publicBase = getPublicAssetBase();
+        const parsed = new URL(text, publicBase);
+        if (/^https?:$/i.test(parsed.protocol) && isLocalOrPrivateHost(parsed.hostname)) {
+            return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, publicBase).toString();
+        }
+        if (/^https?:$/i.test(parsed.protocol)) {
+            return parsed.toString();
+        }
+        return '';
+    } catch {
+        return '';
+    }
 };
 const resolveBuyVoucherCustomerInfo = (customerInfo = {}) => ({
     ...customerInfo,
@@ -152,15 +199,15 @@ const drawContainedImage = (ctx, image, x, y, width, height) => {
 };
 const drawIdentityBox = (ctx, image, x, y, width, height, label) => {
     drawTextLine(ctx, label, x, y - 18, width, 'left', `700 24px ${UI_FONT}`);
+    if (image) {
+        drawContainedImage(ctx, image, x, y, width, height);
+        return;
+    }
     ctx.save();
     ctx.strokeStyle = '#111827';
     ctx.lineWidth = 1.3;
     ctx.strokeRect(x, y, width, height);
     ctx.restore();
-    if (image) {
-        drawContainedImage(ctx, image, x, y, width, height);
-        return;
-    }
     drawTextLine(ctx, label, x, y + height / 2, width, 'center', `400 24px ${UI_FONT}`, '#64748b');
 };
 const padLeft = (value, width) => String(value || '').padStart(width, '0');
@@ -421,13 +468,12 @@ const buildBuyVoucherModel = ({ orderId, customerInfo, lines, rates, settlement,
     const { rows, offsetAmount, totalAmount } = getBuyVoucherRows(lines, rates);
     if (!rows.length) throw new Error('Chưa có mua dẻ hoặc đổi dẻ để xuất bill mua.');
     const today = new Date();
-    const note = safeText(settlement?.note, settlement?.paymentMethod || '');
     const resolvedCustomerInfo = resolveBuyVoucherCustomerInfo(customerInfo);
     return {
         mode: 'buy',
         page: BUY_PAGE,
         orderId: safeText(orderId, 'PHIEU-TAM'),
-        serialNo: safeText(serialNoOverride, safeText(String(orderId || '').split('-').pop(), padLeft(rows.length, 2))),
+        serialNo: safeText(serialNoOverride, BUY_VOUCHER_MANUAL_SERIAL),
         createdAt: today,
         title: 'PHIẾU KÊ MUA HÀNG',
         buyerName: BUY_APPROVER_NAME,
@@ -440,7 +486,7 @@ const buildBuyVoucherModel = ({ orderId, customerInfo, lines, rates, settlement,
         rows,
         totalAmount,
         totalInWords: moneyToVietnamese(totalAmount),
-        paymentNote: note,
+        paymentNote: BUY_VOUCHER_PAYMENT_NOTE,
         bankAmount: Math.max(0, Math.round(Number(settlement?.bank || 0))),
         offsetAmount: Math.max(0, offsetAmount),
         frontImage: normalizeDataUrl(resolvedCustomerInfo?.frontImage),
@@ -842,11 +888,12 @@ const drawBuyVoucher = (ctx, model, assets) => {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, pageWidth, pageHeight);
     ctx.fillStyle = '#111827';
+    const buyFont = BUY_VOUCHER_FONT;
 
     let y = pagePaddingY + 8;
-    drawTextLine(ctx, COMPANY_NAME, leftX, y, leftWidth, 'left', `700 22px ${UI_FONT}`);
+    drawTextLine(ctx, COMPANY_NAME, leftX, y, leftWidth, 'left', `700 22px ${buyFont}`);
     y += 28;
-    drawTextLine(ctx, `MST: ${COMPANY_TAX_CODE}`, leftX, y, 320, 'left', `700 20px ${UI_FONT}`);
+    drawTextLine(ctx, `MST: ${COMPANY_TAX_CODE}`, leftX, y, 320, 'left', `700 20px ${buyFont}`);
 
     drawTextLine(ctx, model.title, leftX, pagePaddingY + 74, leftWidth, 'center', `700 44px ${UI_FONT}`);
     drawTextLine(ctx, `Ngày ${model.createdAt.getDate()} tháng ${model.createdAt.getMonth() + 1} năm ${model.createdAt.getFullYear()}`, leftX, pagePaddingY + 108, leftWidth, 'center', `400 22px ${UI_FONT}`);
@@ -917,14 +964,20 @@ const drawBuyVoucher = (ctx, model, assets) => {
             drawTextLine(ctx, line, columnXs[1] + 7, rowTop + 16 + lineIndex * 16, columnWidths[1] - 14, 'left', rowFont);
         });
         drawTextLine(ctx, row.unit, columnXs[2], rowTop + rowHeight / 2, columnWidths[2], 'center', rowFont);
-        drawTextLine(ctx, row.qty, columnXs[3], rowTop + rowHeight / 2, columnWidths[3], 'center', `400 18px ${NUMBER_FONT}`);
-        drawTextLine(ctx, row.price, columnXs[4] + 6, rowTop + rowHeight / 2, columnWidths[4] - 12, 'right', `400 18px ${NUMBER_FONT}`);
-        drawTextLine(ctx, moneyText(row.amount), columnXs[5] + 8, rowTop + rowHeight / 2, columnWidths[5] - 16, 'right', `400 20px ${NUMBER_FONT}`);
+        drawTextLine(ctx, row.qty, columnXs[3], rowTop + rowHeight / 2, columnWidths[3], 'center', `400 18px ${buyFont}`);
+        drawTextLine(ctx, row.price, columnXs[4] + 6, rowTop + rowHeight / 2, columnWidths[4] - 12, 'right', `400 18px ${buyFont}`);
+        drawTextLine(ctx, moneyText(row.amount), columnXs[5] + 8, rowTop + rowHeight / 2, columnWidths[5] - 16, 'right', `400 20px ${buyFont}`);
     });
 
     const totalRowTop = tableTop + headerHeight + rowHeight * visibleRows;
     drawTextLine(ctx, 'Cộng', tableLeft, totalRowTop + rowHeight / 2, columnXs[5] - tableLeft, 'center', `700 22px ${UI_FONT}`);
     drawTextLine(ctx, moneyText(model.totalAmount), columnXs[5] + 8, totalRowTop + rowHeight / 2, columnWidths[5] - 16, 'right', `700 24px ${NUMBER_FONT}`);
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(tableLeft + 1, totalRowTop + 1, columnXs[5] - tableLeft - 2, rowHeight - 2);
+    ctx.restore();
+    drawTextLine(ctx, BUY_VOUCHER_TOTAL_LABEL, columnXs[1] + 7, totalRowTop + rowHeight / 2, columnXs[5] - columnXs[1] - 7, 'left', `700 22px ${buyFont}`);
+    drawTextLine(ctx, moneyText(model.totalAmount), columnXs[5] + 8, totalRowTop + rowHeight / 2, columnWidths[5] - 16, 'right', `700 24px ${buyFont}`);
 
     let footerY = totalRowTop + rowHeight + 46;
     drawTextLine(ctx, `- Tổng số tiền bằng chữ: ${model.totalInWords}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
@@ -935,6 +988,12 @@ const drawBuyVoucher = (ctx, model, assets) => {
     footerY += 34;
     drawTextLine(ctx, `+ Số tiền bù trừ khoản vàng mua lại: ${model.offsetAmount ? moneyText(model.offsetAmount) : '........................................'}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
 
+    const bankLineY = footerY - 34;
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(leftX, bankLineY - 16, leftWidth, 32);
+    ctx.restore();
+    drawTextLine(ctx, `${BUY_VOUCHER_BANK_TRANSFER_LABEL}${model.bankAmount ? `${moneyText(model.bankAmount)} VND` : '........................................'}`, leftX, bankLineY, leftWidth, 'left', `400 20px ${buyFont}`);
     const signatureTop = Math.max(footerY + 84, pageHeight - 250);
     drawTextLine(ctx, 'Người duyệt mua', leftX + 44, signatureTop, 260, 'center', `700 24px ${UI_FONT}`);
     drawTextLine(ctx, 'Người bán', leftX + leftWidth - 304, signatureTop, 260, 'center', `700 24px ${UI_FONT}`);
@@ -962,11 +1021,17 @@ const createPaymentVoucherPreview = async ({ orderId, total, customerInfo, lines
     if (typeof document === 'undefined') throw new Error('Chỉ hỗ trợ tạo preview trong trình duyệt.');
     await ensureFontsReady();
     const model = buildVoucherModel({ orderId, total, customerInfo, lines, rates, settlement, serialNoOverride, modeOverride });
+    const renderScale = Math.max(1, Number(model.page?.renderScale || 1));
     const canvas = document.createElement('canvas');
-    canvas.width = model.page.width;
-    canvas.height = model.page.height;
+    canvas.width = Math.round(model.page.width * renderScale);
+    canvas.height = Math.round(model.page.height * renderScale);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Không tạo được bill preview.');
+    if (renderScale !== 1) {
+        ctx.scale(renderScale, renderScale);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+    }
     if (model.mode === 'buy') {
         const [frontImage, backImage] = await Promise.all([loadImage(model.frontImage), loadImage(model.backImage)]);
         drawBuyVoucher(ctx, model, { frontImage, backImage });

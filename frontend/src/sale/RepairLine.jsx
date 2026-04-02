@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { IoCloseOutline, IoQrCodeOutline } from 'react-icons/io5';
+import FormattedNumberInput from './FormattedNumberInput';
 import { APP_GRADIENT_BRIGHT, S, filterInventoryItems, normalizeGoldEntryMode, computeRepairNextWeight, scanCodeFromFile, findInventoryByCode, isUnavailableInventoryItem, inventoryStatusLabel } from './shared';
 
 export default function RepairLine({ line, inventoryItems, repairMode, onChange, onRemove, showRemove }) {
@@ -175,27 +176,25 @@ export default function RepairLine({ line, inventoryItems, repairMode, onChange,
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
                     <div>
                         <span style={S.label}>Thêm TL vàng</span>
-                        <input
+                        <FormattedNumberInput
                             style={{ ...S.inp, textAlign: 'left' }}
-                            type="number"
                             inputMode="decimal"
-                            min="0"
-                            step="0.0001"
+                            allowDecimal
+                            maxDecimals={4}
                             value={line.them_tl_vang || ''}
-                            onChange={e => onChange({ them_tl_vang: e.target.value })}
+                            onValueChange={raw => onChange({ them_tl_vang: raw })}
                             placeholder="0.0000"
                         />
                     </div>
                     <div>
                         <span style={S.label}>Bớt TL vàng</span>
-                        <input
+                        <FormattedNumberInput
                             style={{ ...S.inp, textAlign: 'left' }}
-                            type="number"
                             inputMode="decimal"
-                            min="0"
-                            step="0.0001"
+                            allowDecimal
+                            maxDecimals={4}
                             value={line.bot_tl_vang || ''}
-                            onChange={e => onChange({ bot_tl_vang: e.target.value })}
+                            onValueChange={raw => onChange({ bot_tl_vang: raw })}
                             placeholder="0.0000"
                         />
                     </div>

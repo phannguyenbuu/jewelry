@@ -1,4 +1,5 @@
 import { IoAddOutline, IoTrashOutline } from 'react-icons/io5';
+import FormattedNumberInput from './FormattedNumberInput';
 import { S } from './shared';
 
 const CORNER_SVG_URL = '/border.svg';
@@ -89,10 +90,22 @@ function PaperField({ label, en, value, onChange, type = 'text', align = 'left' 
 }
 
 function CellField({ label, value, onChange, align = 'left', inputMode = undefined }) {
+    const isNumericField = inputMode === 'numeric' || inputMode === 'decimal';
     return (
         <div>
             <span style={UI.cellLabel}>{label}</span>
-            <input style={{ ...UI.cellInput, textAlign: align }} type="text" inputMode={inputMode} value={value ?? ''} onChange={onChange} />
+            {isNumericField ? (
+                <FormattedNumberInput
+                    style={{ ...UI.cellInput, textAlign: align }}
+                    inputMode={inputMode}
+                    allowDecimal={inputMode === 'decimal'}
+                    maxDecimals={inputMode === 'decimal' ? 4 : undefined}
+                    value={value ?? ''}
+                    onValueChange={(nextValue) => onChange({ target: { value: nextValue } })}
+                />
+            ) : (
+                <input style={{ ...UI.cellInput, textAlign: align }} type="text" inputMode={inputMode} value={value ?? ''} onChange={onChange} />
+            )}
         </div>
     );
 }

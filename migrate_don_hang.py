@@ -11,9 +11,12 @@ with app.app_context():
         cur = conn.cursor()
         cols = [
             ("loai_don", "VARCHAR(20) DEFAULT 'Mua'"),
-            ("cccd", "VARCHAR(20) DEFAULT ''"),
+            ("cccd", "VARCHAR(50) DEFAULT ''"),
             ("dia_chi_kh", "TEXT DEFAULT ''"),
             ("chung_tu", "JSON DEFAULT '[]'"),
+            ("hoa_don_tai_chinh", "JSON DEFAULT '{}'"),
+            ("da_hach_toan_so_quy", "INTEGER DEFAULT 0"),
+            ("cap_nhat_luc", "VARCHAR(30) DEFAULT ''"),
         ]
         for col, definition in cols:
             try:

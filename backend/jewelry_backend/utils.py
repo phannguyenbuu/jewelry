@@ -2,11 +2,18 @@ import datetime
 import os
 import re
 import unicodedata
+import urllib.parse
 import uuid
 from decimal import Decimal, InvalidOperation
 
 from .state import db
 from .models import *
+
+try:
+    from PIL import Image, ImageOps
+except Exception:  # pragma: no cover - optional runtime dependency
+    Image = None
+    ImageOps = None
 
 
 IMPORT_HEADER_ALIASES = {
@@ -23,6 +30,9 @@ IMPORT_HEADER_ALIASES = {
 
 
 _VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
+UPLOAD_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))
+UPLOAD_THUMB_SUBDIR = '_thumbs'
+UPLOAD_THUMB_SIZE = (240, 240)
 
 
 def now_str():
@@ -43,6 +53,113 @@ def _clean_text(value):
     if value is None:
         return ''
     return re.sub(r'\s+', ' ', str(value)).strip()
+
+
+def upload_relative_url(relative_path):
+    normalized = _clean_text(relative_path).replace('\\', '/').lstrip('/')
+    if not normalized:
+        return ''
+    return f'/api/uploads/{normalized}'
+
+
+def extract_upload_relative_path(value):
+    raw = _clean_text(value)
+    if not raw:
+        return ''
+    lowered = raw.lower()
+    if lowered.startswith('data:') or lowered.startswith('blob:'):
+        return ''
+
+    candidate = raw.replace('\\', '/')
+    if '://' in candidate:
+        try:
+            candidate = urllib.parse.urlparse(candidate).path or ''
+        except Exception:
+            return ''
+
+    if '/api/uploads/' in candidate:
+        candidate = candidate.split('/api/uploads/', 1)[1]
+    elif candidate.startswith('api/uploads/'):
+        candidate = candidate[len('api/uploads/'):]
+    else:
+        candidate = candidate.lstrip('/')
+
+    normalized = os.path.normpath(candidate).replace('\\', '/').lstrip('/')
+    if not normalized or normalized in {'.', '..'}:
+        return ''
+    if normalized.startswith('../') or '/..' in normalized:
+        return ''
+    return normalized
+
+
+def resolve_upload_absolute_path(relative_path):
+    normalized = extract_upload_relative_path(relative_path)
+    if not normalized:
+        return ''
+    root = os.path.abspath(UPLOAD_FOLDER)
+    absolute = os.path.abspath(os.path.join(root, normalized))
+    try:
+        if os.path.commonpath([absolute, root]) != root:
+            return ''
+    except ValueError:
+        return ''
+    return absolute
+
+
+def upload_thumbnail_relative_path(value):
+    relative_path = extract_upload_relative_path(value)
+    if not relative_path:
+        return ''
+    normalized = relative_path.replace('\\', '/')
+    if normalized.startswith(f'{UPLOAD_THUMB_SUBDIR}/'):
+        return normalized
+    base, _ = os.path.splitext(normalized)
+    if not base:
+        return ''
+    return f'{UPLOAD_THUMB_SUBDIR}/{base}.jpg'
+
+
+def ensure_upload_thumbnail(value, size=UPLOAD_THUMB_SIZE, force=False):
+    relative_path = extract_upload_relative_path(value)
+    if not relative_path:
+        return ''
+    if relative_path.startswith(f'{UPLOAD_THUMB_SUBDIR}/'):
+        return upload_relative_url(relative_path)
+    if Image is None or ImageOps is None:
+        return ''
+
+    source_path = resolve_upload_absolute_path(relative_path)
+    if not source_path or not os.path.isfile(source_path):
+        return ''
+
+    thumb_relative_path = upload_thumbnail_relative_path(relative_path)
+    if not thumb_relative_path:
+        return ''
+    thumb_path = resolve_upload_absolute_path(thumb_relative_path)
+    if not thumb_path:
+        return ''
+    if os.path.isfile(thumb_path) and not force:
+        return upload_relative_url(thumb_relative_path)
+
+    try:
+        with Image.open(source_path) as image:
+            image = ImageOps.exif_transpose(image)
+            if image.mode not in {'RGB', 'L'}:
+                rgba_image = image.convert('RGBA')
+                background = Image.new('RGB', rgba_image.size, (255, 255, 255))
+                background.paste(rgba_image, mask=rgba_image.getchannel('A'))
+                image = background
+            else:
+                image = image.convert('RGB')
+
+            resampling = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS
+            thumb_image = ImageOps.fit(image, size, method=resampling, centering=(0.5, 0.5))
+            os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+            thumb_image.save(thumb_path, format='JPEG', quality=78, optimize=True)
+    except Exception:
+        return ''
+
+    return upload_relative_url(thumb_relative_path)
 
 
 def _format_decimal(value, max_decimals=None):

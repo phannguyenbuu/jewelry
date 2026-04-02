@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+import datetime
 from html.parser import HTMLParser
 from http.cookiejar import Cookie, CookieJar
 from urllib.error import HTTPError, URLError
@@ -15,6 +16,8 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from flask import Response, jsonify, request, session
 
+from .easyinvoice_cache import query_easyinvoice_cache_response
+from . import easyinvoice_client
 from .orders_routes import _easyinvoice_config
 from .state import app
 
@@ -1403,3 +1406,9 @@ def easyinvoice_web_viewer():
     response = Response(html, mimetype='text/html')
     response.headers['Cache-Control'] = 'no-store, max-age=0'
     return response
+
+
+
+@app.route('/api/easyinvoice/list', methods=['GET'])
+def api_easyinvoice_list():
+    return query_easyinvoice_cache_response(request.args)

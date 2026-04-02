@@ -1,10 +1,11 @@
 ﻿import { useEffect, useState } from 'react';
 
-import { IoChevronDownOutline, IoChevronForward, IoChevronUpOutline, IoDocumentTextOutline, IoQrCodeOutline } from 'react-icons/io5';
+import { IoChevronDownOutline, IoChevronForward, IoChevronUpOutline, IoDocumentTextOutline, IoPrintOutline, IoQrCodeOutline } from 'react-icons/io5';
 
 import { buildEasyInvoicePayload, createEasyInvoiceDraft, createPaymentVoucherPreview, getBuyVoucherRows, hasBuyVoucherRows, resolveBuyVoucherCustomerInfo } from './printPaymentVoucher';
 
 import { copySaleReceiptImageToClipboard, downloadSaleReceiptImage } from './printSaleReceipt';
+import FormattedNumberInput from './FormattedNumberInput';
 
 import DocumentPreviewModal from './DocumentPreviewModal';
 
@@ -19,6 +20,8 @@ import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogo
 
 
 const FIXED_QR_NOTE = 'Mua hang tai cong ty van kim';
+const DIRECT_ISSUE_DISABLED_REASON = 'Tạm khóa phát hành trực tiếp, vui lòng xuất HĐ nháp.';
+const BUY_VOUCHER_MANUAL_SERIAL = '........';
 
 const REQUIRED_EASY_INVOICE_FIELDS = [
 
@@ -205,18 +208,9 @@ const normalizeInvoiceItem = (item) => {
 };
 
 function EditableNumericInput({ value, onValueChange, style, readOnly = false, showStepper = false, step = 1000, min = 0, commitOnBlur = false }) {
-
-    const [text, setText] = useState(null);
-
-    const [focused, setFocused] = useState(false);
-
-    const displayValue = focused ? (text ?? fmtMoneyDisplay(value)) : fmtMoneyDisplay(value);
-
     const applyNextValue = (nextValue) => {
 
         const safeValue = Math.max(min, Math.round(Number(nextValue || 0)));
-
-        setText(fmtMoneyDisplay(safeValue));
 
         onValueChange?.(String(safeValue));
 
@@ -235,47 +229,13 @@ function EditableNumericInput({ value, onValueChange, style, readOnly = false, s
     return (
 
         <div style={{ position: 'relative', width: '100%' }}>
-
-            <input
-
+            <FormattedNumberInput
                 style={showStepper ? { ...style, paddingRight: 32 } : style}
-
-                type="text"
-
+                value={value}
+                onValueChange={onValueChange}
                 inputMode="numeric"
-
-                value={displayValue}
-
-                onFocus={() => setFocused(true)}
-
-                onChange={e => {
-
-                    const nextText = e.target.value;
-
-                    setText(nextText);
-
-                    if (!commitOnBlur) {
-
-                        onValueChange?.(nextText);
-
-                    }
-
-                }}
-
-                onBlur={() => {
-
-                    if (commitOnBlur) {
-
-                        onValueChange?.(text ?? String(value || 0));
-
-                    }
-
-                    setFocused(false);
-
-                    setText(null);
-
-                }}
-
+                commitOnBlur={commitOnBlur}
+                emptyWhenZero={false}
             />
 
             {showStepper ? (
@@ -288,7 +248,7 @@ function EditableNumericInput({ value, onValueChange, style, readOnly = false, s
 
                         onMouseDown={e => e.preventDefault()}
 
-                        onClick={() => applyNextValue((focused ? parseFmt(text ?? String(value || 0)) : Number(value || 0)) + step)}
+                        onClick={() => applyNextValue(Number(value || 0) + step)}
 
                         style={{ flex: 1, borderRadius: 7, border: '1px solid #dbe4ee', background: '#f8fafc', color: '#475569', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}
 
@@ -308,7 +268,7 @@ function EditableNumericInput({ value, onValueChange, style, readOnly = false, s
 
                         onMouseDown={e => e.preventDefault()}
 
-                        onClick={() => applyNextValue((focused ? parseFmt(text ?? String(value || 0)) : Number(value || 0)) - step)}
+                        onClick={() => applyNextValue(Number(value || 0) - step)}
 
                         style={{ flex: 1, borderRadius: 7, border: '1px solid #dbe4ee', background: '#f8fafc', color: '#475569', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}
 
@@ -396,7 +356,7 @@ const mergeEasyInvoiceDraft = (baseDraft, previousDraft) => {
 
 };
 
-export default function PaymentScreen({ total, orderId, formula, lines, setLines, rates, customerInfo, setCustomerInfo, onBack, onSend, loading }) {
+export default function PaymentScreen({ total, orderId, formula, lines, setLines, rates, customerInfo, setCustomerInfo, onBack, onSend, onEnsureOrder, loading }) {
 
     const isIn = total >= 0;
 
@@ -535,15 +495,15 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const exportInvoiceReason = !hasEasyInvoiceItems ? 'Chưa có sản phẩm có tem để xuất hóa đơn đỏ.' : easyInvoiceTotal <= 0 ? 'Tổng giá trị phần bán phải lớn hơn 0.' : '';
 
-    const issueInvoiceReason = !hasEasyInvoiceItems ? 'Chưa có sản phẩm có tem để xuất hóa đơn đỏ.' : easyInvoiceTotal <= 0 ? 'Tổng giá trị phần bán phải lớn hơn 0.' : '';
-
     const createOrderReason = isIn ? requiredCustomerReason : '';
 
-    const effectiveIssueInvoiceReason = requiredCustomerReason || issueInvoiceReason;
+    const showInvoiceTab = hasEasyInvoiceItems;
 
-    const effectiveExportInvoiceReason = effectiveIssueInvoiceReason || exportInvoiceReason;
+    const effectiveExportInvoiceReason = requiredCustomerReason || exportInvoiceReason;
 
-    const canIssueEasyInvoice = effectiveIssueInvoiceReason.length === 0;
+    const effectiveIssueInvoiceReason = DIRECT_ISSUE_DISABLED_REASON;
+
+    const canIssueEasyInvoice = false;
 
     const canExportEasyInvoice = effectiveExportInvoiceReason.length === 0;
 
@@ -879,11 +839,11 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
-    const getVoucherFileName = (serialNo) => {
+    const getVoucherFileName = () => {
 
         const normalizedOrderId = String(orderId || 'sale').trim().replace(/[^a-zA-Z0-9_-]+/g, '-');
 
-        return `phieu-ke-mua-hang-${normalizedOrderId}${serialNo ? `-${serialNo}` : ''}.png`;
+        return `phieu-ke-mua-hang-${normalizedOrderId}.png`;
 
     };
 
@@ -1003,15 +963,13 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const applyBuyVoucherPreviewState = ({ imageUrl, model }, options = {}) => {
 
-        const serialNo = String(options.serialNoOverride || model?.serialNo || '').trim();
-
         const documentTitle = model?.title || 'Phiếu kê mua hàng';
 
         setVoucherPreviewTitle(documentTitle);
 
-        setVoucherPreviewSubtitle(serialNo ? `PNG preview. Số phiếu: ${serialNo}.` : 'PNG preview cho phiếu kê mua hàng.');
+        setVoucherPreviewSubtitle(`PNG preview. Số phiếu: ${BUY_VOUCHER_MANUAL_SERIAL}`);
 
-        setVoucherPreviewFileName(getVoucherFileName(serialNo));
+        setVoucherPreviewFileName(getVoucherFileName());
 
         setVoucherPreviewDocumentName(documentTitle);
 
@@ -1036,7 +994,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             settlement,
 
-            serialNoOverride: options.serialNoOverride,
+            serialNoOverride: BUY_VOUCHER_MANUAL_SERIAL,
 
             modeOverride: options.modeOverride || 'buy',
 
@@ -1049,6 +1007,20 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
     };
 
     const openBuyVoucherPreview = async (options = {}) => {
+
+        if (!options.skipOrderPersist) {
+            try {
+                await persistCurrentOrder({
+                    customerInfoOverride: buildBuyVoucherCustomerInfo(),
+                });
+            } catch (error) {
+                const message = error.message || 'Không ghi được đơn hàng vào backend.';
+                setVoucherPreviewError(message);
+                setVoucherPreviewActionError(true);
+                setVoucherPreviewActionMessage(message);
+                return null;
+            }
+        }
 
         setVoucherPreviewOpen(true);
 
@@ -1220,6 +1192,26 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const buildBuyVoucherCustomerInfo = () => resolveBuyVoucherCustomerInfo(sharedCustomerInfo);
 
+    const persistCurrentOrder = async (options = {}) => {
+        if (!onEnsureOrder) return null;
+        const settlement = options.settlement || buildSettlementPayload();
+        const customerInfoOverride = options.customerInfoOverride === undefined
+            ? (isIn ? buildEasyInvoiceCustomerInfo() : sharedCustomerInfo)
+            : options.customerInfoOverride;
+        try {
+            return await onEnsureOrder(settlement, {
+                ...options,
+                customerInfoOverride,
+                refreshOrders: options.refreshOrders ?? false,
+                silent: true,
+            });
+        } catch (error) {
+            const message = error.message || 'Không ghi được đơn hàng vào backend.';
+            setActionMessage(message);
+            throw error;
+        }
+    };
+
     const applyDefaultRedInvoiceCustomer = () => {
 
         setEasyInvoiceEditorError('');
@@ -1282,18 +1274,6 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
-    const claimBuyVoucherSerial = async () => {
-
-        const response = await fetch(`${API}/api/payment-voucher/buy-serial`, { method: 'POST' });
-
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-
-        return payload;
-
-    };
-
     const handleExportEasyInvoice = async () => {
 
         try {
@@ -1321,6 +1301,8 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
                 amount_text: `${fmtMoneyDisplay(amountValue)} VND`,
 
                 buyer: result.buyer || easyInvoiceCustomerInfo.name || 'Khách lẻ',
+
+                order_id: result.order_id || orderId,
 
             };
 
@@ -1374,6 +1356,8 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 markSold: false,
 
+                refreshOrders: false,
+
                 silent: true,
 
             });
@@ -1384,9 +1368,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             if (hasBuyVoucherData) {
 
-                const serialData = await claimBuyVoucherSerial();
-
-                const preview = await openBuyVoucherPreview({ serialNoOverride: serialData.serial_no, modeOverride: 'buy' });
+                const preview = await openBuyVoucherPreview({ modeOverride: 'buy', skipOrderPersist: true });
 
                 if (preview?.imageUrl) {
 
@@ -1424,7 +1406,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
-    const openInvoiceConfirm = (action) => {
+    const openInvoiceConfirm = async (action) => {
 
         const reason = action === 'draft' ? effectiveExportInvoiceReason : effectiveIssueInvoiceReason;
 
@@ -1443,6 +1425,14 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
         setEasyInvoiceEditorError('');
 
         setActionMessage('');
+
+        try {
+            await persistCurrentOrder({
+                customerInfoOverride: buildEasyInvoiceCustomerInfo(),
+            });
+        } catch {
+            return;
+        }
 
         setPendingInvoiceAction(action);
 
@@ -1508,6 +1498,8 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 markSold: false,
 
+                refreshOrders: false,
+
                 silent: true,
 
             });
@@ -1526,13 +1518,22 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
 
+            const amountValue = Math.round(Number(result?.amount ?? invoiceData?.invoice?.amount ?? 0));
+            const modalPayload = {
+                ...result,
+                message: result.msg || 'Đã phát hành EasyInvoice thành công.',
+                amount_text: `${fmtMoneyDisplay(amountValue)} VND`,
+                buyer: result.buyer || easyInvoiceCustomerInfo.name || 'Khách lẻ',
+                order_id: result.order_id || orderId,
+            };
+            setEasyInvoiceResult(modalPayload);
+            setEasyInvoiceResultOpen(true);
+
             setIssueConfirmOpen(false);
 
             if (hasBuyVoucherData) {
 
-                const serialData = await claimBuyVoucherSerial();
-
-                const preview = await openBuyVoucherPreview({ serialNoOverride: serialData.serial_no, modeOverride: 'buy' });
+                const preview = await openBuyVoucherPreview({ modeOverride: 'buy', skipOrderPersist: true });
 
                 if (preview?.imageUrl) {
 
@@ -1574,15 +1575,136 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
 
 
+    const handleTabChange = async (nextTab) => {
+
+        if (nextTab === activePanel) return;
+
+        const customerInfoOverride = nextTab === 'voucher'
+
+            ? buildBuyVoucherCustomerInfo()
+
+            : (isIn ? buildEasyInvoiceCustomerInfo() : sharedCustomerInfo);
+
+        try {
+
+            await persistCurrentOrder({ customerInfoOverride });
+
+            setActivePanel(nextTab);
+
+        } catch {
+
+            // persistCurrentOrder already shows error
+
+        }
+
+    };
+
+    const handleVoucherPreviewAction = async () => {
+
+        try {
+
+            await persistCurrentOrder({
+
+                customerInfoOverride: buildBuyVoucherCustomerInfo(),
+
+            });
+
+        } catch {
+
+            return;
+
+        }
+
+        if (voucherPreviewUrl) {
+
+            setVoucherPreviewOpen(true);
+
+            return;
+
+        }
+
+        await openBuyVoucherPreview({ modeOverride: 'buy', skipOrderPersist: true });
+
+    };
+
+    const handleVoucherPrintAction = async () => {
+
+        try {
+
+            await persistCurrentOrder({
+
+                customerInfoOverride: buildBuyVoucherCustomerInfo(),
+
+            });
+
+        } catch {
+
+            return;
+
+        }
+
+        setVoucherPreviewActionMessage('');
+
+        setVoucherPreviewActionError(false);
+
+        setVoucherPreviewError('');
+
+        setVoucherPreviewLoading(true);
+
+        try {
+
+            const preview = await createBuyVoucherPreviewData({ modeOverride: 'buy' });
+
+            await queueVoucherToAgent(preview?.imageUrl || voucherPreviewUrl);
+
+        } catch (error) {
+
+            const message = error.message || 'Không gửi được phiếu kê tới máy in.';
+
+            setVoucherPreviewActionError(true);
+
+            setVoucherPreviewActionMessage(message);
+
+            if (!voucherPreviewUrl) {
+
+                setVoucherPreviewError(message);
+
+            }
+
+        } finally {
+
+            setVoucherPreviewLoading(false);
+
+        }
+
+    };
+
+ 
     const screenTabs = [
 
         { key: 'payment', label: isIn ? 'Thanh toán' : 'Chi trả' },
 
-        { key: 'invoice', label: 'Hóa Đơn Đỏ' },
+        ...(showInvoiceTab ? [{ key: 'invoice', label: 'Hóa Đơn Đỏ' }] : []),
 
-        { key: 'voucher', label: 'Phiếu Kê MH' },
+        ...(hasBuyVoucherData ? [{ key: 'voucher', label: 'Phiếu Kê MH' }] : []),
 
     ];
+
+    useEffect(() => {
+
+        if (activePanel === 'invoice' && !showInvoiceTab) {
+
+            setActivePanel('payment');
+
+            return;
+
+        }
+
+        if (hasBuyVoucherData || activePanel !== 'voucher') return;
+
+        setActivePanel('payment');
+
+    }, [activePanel, hasBuyVoucherData, showInvoiceTab]);
 
     const normalizedActionMessage = String(actionMessage || '')
         .normalize('NFD')
@@ -1643,57 +1765,59 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                     </div>
 
-                    <div>
+                    {isIn ? (
+                        <div>
 
-                        <span style={S.label}>{isIn ? 'Tài khoản công ty nhận' : 'Tài khoản công ty chi'}</span>
+                            <span style={S.label}>Tài khoản công ty nhận</span>
 
-                        <select
-                            style={{ ...S.inp, width: '100%', height: 56, minHeight: 56, padding: '8px 14px', textAlign: 'left', fontWeight: 400 }}
-                            value={selectedCompanyBankAccount?.id || ''}
-                            onChange={(event) => setSelectedCompanyBankAccountId(event.target.value)}
-                        >
-                            {effectiveCompanyBankAccounts.map((account) => {
-                                const maxText = Number(account?.max_incoming_amount || 0) > 0
-                                    ? ` · max ${fmtMoneyDisplay(account.max_incoming_amount)}`
-                                    : '';
-                                return (
-                                    <option key={account.id || account.ledger_key} value={account.id || ''}>
-                                        {buildCompanyBankLabel(account)}{maxText}
-                                    </option>
-                                );
-                            })}
-                        </select>
+                            <select
+                                style={{ ...S.inp, width: '100%', height: 56, minHeight: 56, padding: '8px 14px', textAlign: 'left', fontWeight: 400 }}
+                                value={selectedCompanyBankAccount?.id || ''}
+                                onChange={(event) => setSelectedCompanyBankAccountId(event.target.value)}
+                            >
+                                {effectiveCompanyBankAccounts.map((account) => {
+                                    const maxText = Number(account?.max_incoming_amount || 0) > 0
+                                        ? ` · max ${fmtMoneyDisplay(account.max_incoming_amount)}`
+                                        : '';
+                                    return (
+                                        <option key={account.id || account.ledger_key} value={account.id || ''}>
+                                            {buildCompanyBankLabel(account)}{maxText}
+                                        </option>
+                                    );
+                                })}
+                            </select>
 
-                        {selectedCompanyBankAccount ? (
-                            <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 14, border: `1px solid ${companyBankOverLimit ? '#fecaca' : '#dbe4ee'}`, background: companyBankOverLimit ? '#fff1f2' : '#f8fafc' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                    {selectedCompanyBankBank ? (
-                                        <img src={getVietQrBankLogoUrl(selectedCompanyBankBank)} alt={selectedCompanyBankBank.shortName} style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
-                                    ) : (
-                                        <span style={{ fontSize: 18, flexShrink: 0 }}>🏦</span>
-                                    )}
-                                    <div style={{ minWidth: 0, flex: 1 }}>
-                                        <div style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {selectedCompanyBankLabel}
-                                        </div>
-                                        <div style={{ fontSize: 11, color: '#64748b' }}>
-                                            {selectedCompanyBankAccount.account_no || 'Chưa có số tài khoản'}
-                                            {companyBankLimit > 0 ? ` · Nhận tối đa ${fmtMoneyDisplay(companyBankLimit)}` : ' · Không giới hạn'}
+                            {selectedCompanyBankAccount ? (
+                                <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 14, border: `1px solid ${companyBankOverLimit ? '#fecaca' : '#dbe4ee'}`, background: companyBankOverLimit ? '#fff1f2' : '#f8fafc' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                        {selectedCompanyBankBank ? (
+                                            <img src={getVietQrBankLogoUrl(selectedCompanyBankBank)} alt={selectedCompanyBankBank.shortName} style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
+                                        ) : (
+                                            <span style={{ fontSize: 18, flexShrink: 0 }}>🏦</span>
+                                        )}
+                                        <div style={{ minWidth: 0, flex: 1 }}>
+                                            <div style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {selectedCompanyBankLabel}
+                                            </div>
+                                            <div style={{ fontSize: 11, color: '#64748b' }}>
+                                                {selectedCompanyBankAccount.account_no || 'Chưa có số tài khoản'}
+                                                {companyBankLimit > 0 ? ` · Nhận tối đa ${fmtMoneyDisplay(companyBankLimit)}` : ' · Không giới hạn'}
+                                            </div>
                                         </div>
                                     </div>
+                                    {companyBankLoadError ? (
+                                        <div style={{ marginTop: 8, fontSize: 11, color: '#9a3412' }}>{companyBankLoadError}</div>
+                                    ) : null}
+                                    {companyBankOverLimit ? (
+                                        <div style={{ marginTop: 8, fontSize: 11, color: '#b91c1c' }}>
+                                            So tien chuyen khoan dang vuot muc nhan toi da {fmtMoneyDisplay(companyBankLimit)} cua tai khoan nay.
+                                        </div>
+                                    ) : null}
                                 </div>
-                                {companyBankLoadError ? (
-                                    <div style={{ marginTop: 8, fontSize: 11, color: '#9a3412' }}>{companyBankLoadError}</div>
-                                ) : null}
-                                {companyBankOverLimit ? (
-                                    <div style={{ marginTop: 8, fontSize: 11, color: '#b91c1c' }}>
-                                        So tien chuyen khoan dang vuot muc nhan toi da {fmtMoneyDisplay(companyBankLimit)} cua tai khoan nay.
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
+                            ) : null}
 
-                    </div>
+                        </div>
+                    ) : null}
 
                     {!isIn ? (
 
@@ -1963,7 +2087,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                         type="button"
 
-                        onClick={() => openInvoiceConfirm('draft')}
+                        onClick={() => { void openInvoiceConfirm('draft'); }}
 
                         disabled={invoiceLoading || loading || !canExportEasyInvoice}
 
@@ -1985,7 +2109,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                         type="button"
 
-                        onClick={() => openInvoiceConfirm('issue')}
+                        onClick={() => { void openInvoiceConfirm('issue'); }}
 
                         disabled={invoiceLoading || loading || !canIssueEasyInvoice}
 
@@ -2092,7 +2216,10 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                         </div>
 
-                        <div
+                        <button
+                            type="button"
+                            onClick={() => { void handleVoucherPreviewAction(); }}
+                            disabled={voucherPreviewLoading || (!voucherPreviewUrl && !hasBuyVoucherData)}
                             style={{
                                 minHeight: 220,
                                 borderRadius: 22,
@@ -2103,6 +2230,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
                                 justifyContent: 'center',
                                 overflow: 'hidden',
                                 padding: 12,
+                                width: '100%',
+                                cursor: voucherPreviewLoading || (!voucherPreviewUrl && !hasBuyVoucherData) ? 'default' : 'pointer',
+                                appearance: 'none',
                             }}
                         >
                             {voucherPreviewLoading ? (
@@ -2114,7 +2244,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
                             ) : (
                                 <div style={{ fontSize: 11, color: '#64748b' }}>Chưa có preview PNG.</div>
                             )}
-                        </div>
+                        </button>
 
                         {voucherPreviewActionMessage ? (
                             <div style={{ fontSize: 10, lineHeight: 1.45, color: voucherPreviewActionError ? '#dc2626' : '#0f766e', textAlign: 'center' }}>
@@ -2125,22 +2255,23 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
 
                             <button
+                                type="button"
 
-                                onClick={() => (voucherPreviewUrl ? setVoucherPreviewOpen(true) : openBuyVoucherPreview({ modeOverride: 'buy' }))}
+                                onClick={() => { void handleVoucherPrintAction(); }}
 
-                                disabled={voucherPreviewLoading || !hasBuyVoucherData}
+                                disabled={loading || voucherPreviewLoading || voucherSending || !hasBuyVoucherData}
 
-                                style={{ ...compactActionPillStyle('linear-gradient(135deg,#0f766e,#14b8a6)', voucherPreviewLoading || !hasBuyVoucherData), minWidth: 214, height: 40, minHeight: 40, borderRadius: 20, padding: '0 18px' }}
+                                style={{ ...compactActionPillStyle('linear-gradient(135deg,#0f766e,#14b8a6)', loading || voucherPreviewLoading || voucherSending || !hasBuyVoucherData), minWidth: 214, height: 40, minHeight: 40, borderRadius: 20, padding: '0 18px' }}
 
-                                title={hasBuyVoucherData ? 'Mở lớn / tải / copy / gửi agent' : 'Chưa có dữ liệu phiếu kê mua hàng'}
+                                title={hasBuyVoucherData ? 'Gửi phiếu kê mua hàng tới máy in' : 'Chưa có dữ liệu phiếu kê mua hàng'}
 
-                                aria-label={hasBuyVoucherData ? 'Mở lớn / tải / copy / gửi agent' : 'Chưa có dữ liệu phiếu kê mua hàng'}
+                                aria-label={hasBuyVoucherData ? 'Gửi phiếu kê mua hàng tới máy in' : 'Chưa có dữ liệu phiếu kê mua hàng'}
 
                             >
 
-                                <IoDocumentTextOutline style={{ fontSize: 18 }} />
+                                <IoPrintOutline style={{ fontSize: 18 }} />
 
-                                <span>{voucherPreviewLoading ? 'Đang tạo phiếu kê...' : 'Mở Lớn / Tác Vụ PNG'}</span>
+                                <span>{voucherPreviewLoading || voucherSending ? 'Đang in phiếu...' : 'In Phiếu'}</span>
 
                             </button>
 
@@ -2180,7 +2311,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                     {screenTabs.map(tab => (
 
-                        <button key={tab.key} type="button" onClick={() => setActivePanel(tab.key)} style={tabButtonStyle(activePanel === tab.key)}>
+                        <button key={tab.key} type="button" onClick={() => { void handleTabChange(tab.key); }} style={tabButtonStyle(activePanel === tab.key)} disabled={loading || invoiceLoading}>
 
                             {tab.label}
 

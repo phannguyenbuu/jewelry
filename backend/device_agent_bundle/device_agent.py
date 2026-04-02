@@ -174,7 +174,7 @@ def normalize_config(raw):
     config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 1)
     config['printer']['heartbeat_interval_seconds'] = coerce_float(config['printer'].get('heartbeat_interval_seconds'), 15)
     config['printer']['scan_interval_seconds'] = coerce_float(config['printer'].get('scan_interval_seconds'), 90)
-    config['printer']['scan_network_shares'] = coerce_bool(config['printer'].get('scan_network_shares'), True)
+    config['printer']['scan_network_shares'] = True
     config['printer']['network_host_limit'] = coerce_int(config['printer'].get('network_host_limit'), 24)
     config['scale']['serial'] = normalize_serial_settings(config['scale'].get('serial') or {})
     return config
@@ -227,7 +227,7 @@ def parse_request_config(payload):
             'poll_interval_seconds': payload.get('printer_poll_interval_seconds'),
             'heartbeat_interval_seconds': payload.get('printer_heartbeat_interval_seconds'),
             'scan_interval_seconds': payload.get('printer_scan_interval_seconds'),
-            'scan_network_shares': payload.get('printer_scan_network_shares'),
+            'scan_network_shares': True,
             'network_host_limit': payload.get('printer_network_host_limit'),
         },
     })
@@ -705,11 +705,10 @@ def scan_all_printers(scan_network_shares=True, limit=24):
         printers.extend(scan_local_printers())
     except Exception as exc:
         errors.append(f'local scan failed: {exc}')
-    if scan_network_shares:
-        try:
-            printers.extend(scan_network_shared_printers(limit=limit))
-        except Exception as exc:
-            errors.append(f'network scan failed: {exc}')
+    try:
+        printers.extend(scan_network_shared_printers(limit=limit))
+    except Exception as exc:
+        errors.append(f'network scan failed: {exc}')
     printers = dedupe_printers(printers)
     if errors and not printers:
         raise RuntimeError(' ; '.join(errors))
@@ -1245,7 +1244,7 @@ class DeviceAgentService:
         printer_config = config['printer']
         try:
             printers = scan_all_printers(
-                scan_network_shares=printer_config.get('scan_network_shares', True),
+                scan_network_shares=True,
                 limit=printer_config.get('network_host_limit', 24),
             )
             with STATE_LOCK:
@@ -1673,7 +1672,7 @@ DASHBOARD_HTML = """
           <div class="field"><label>Printer poll s</label><input name="printer_poll_interval_seconds" /></div>
           <div class="field"><label>Printer heartbeat s</label><input name="printer_heartbeat_interval_seconds" /></div>
           <div class="field"><label>Printer scan s</label><input name="printer_scan_interval_seconds" /></div>
-          <div class="field"><label>Scan network shares</label><select name="printer_scan_network_shares"><option value="true">true</option><option value="false">false</option></select></div>
+          <div class="field"><label>Scan network shares</label><input name="printer_scan_network_shares" value="true" readonly /></div>
           <div class="field"><label>Network host limit</label><input name="printer_network_host_limit" /></div>
         </div>
         <div class="toolbar" style="margin-top:14px;">

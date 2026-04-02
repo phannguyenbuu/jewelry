@@ -4,8 +4,10 @@ import ChungTuTab from './keToan/ChungTuTab';
 import DanhMucTab from './keToan/DanhMucTab';
 import ThuChiTab from './keToan/ThuChiTab';
 import { loadDM } from './keToan/shared';
+import HoaDonTab from './keToan/HoaDonTab';
 
 const TABS = [
+    { key: 'hoa_don', label: 'Hóa Đơn Tài Chính' },
     { key: 'thu_chi', label: 'Thu Chi Hằng Ngày' },
     { key: 'chung_tu', label: 'Chứng Từ KT' },
     { key: 'bao_cao', label: 'Báo Cáo Thuế' },
@@ -13,7 +15,7 @@ const TABS = [
 ];
 
 export default function KeToanPage() {
-    const [tab, setTab] = useState('thu_chi');
+    const [tab, setTab] = useState('hoa_don');
     const [dm, setDm] = useState(loadDM);
     return (
         <div>
@@ -25,6 +27,7 @@ export default function KeToanPage() {
                     </button>
                 ))}
             </div>
+            {tab === 'hoa_don' && <HoaDonTab />}
             {tab === 'thu_chi' && <ThuChiTab dm={dm} />}
             {tab === 'chung_tu' && <ChungTuTab />}
             {tab === 'bao_cao' && <BaoCaoThueTab />}

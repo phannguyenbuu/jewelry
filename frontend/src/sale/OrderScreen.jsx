@@ -249,6 +249,19 @@ export default function OrderScreen({
             ...(field === 'address' ? { residence: value } : {}),
         }));
     };
+    const customerNameInputValue = customerLookupQuery !== ''
+        ? customerLookupQuery
+        : (customerInfo?.name || '');
+    const handleCustomerNameInputChange = (value) => {
+        setCustomerLookupQuery(value);
+        updateCustomerInfo('name', value);
+    };
+    const clearCustomerNameInput = () => {
+        setCustomerLookupQuery('');
+        setCustomerLookupResults([]);
+        setCustomerLookupLoading(false);
+        updateCustomerInfo('name', '');
+    };
     const openCustomerCapture = (tab = 'photo') => {
         setCustomerInfoOpen(true);
         setCustomerCaptureTab(tab);
@@ -1174,23 +1187,12 @@ export default function OrderScreen({
                                 <input
                                     className="sale-pos-catalog-input"
                                     style={{ ...S.inp, textAlign: 'left', fontWeight: 400, height: 38, minHeight: 38 }}
-                                    value={customerLookupQuery}
-                                    onChange={e => setCustomerLookupQuery(e.target.value)}
+                                    value={customerNameInputValue}
+                                    onChange={e => handleCustomerNameInputChange(e.target.value)}
                                     onFocus={() => setCustomerInfoOpen(true)}
-                                    placeholder="Tìm kiếm nhanh bằng tên, số điện thoại, cccd"
-                                    aria-label="Tìm kiếm nhanh bằng tên, số điện thoại, cccd"
+                                    placeholder="Tìm/tạo khách hàng theo tên, số điện thoại, CCCD"
+                                    aria-label="Tìm/tạo khách hàng theo tên, số điện thoại, CCCD"
                                 />
-                                <div style={{ position: 'relative' }}>
-                                    <input
-                                        className="sale-pos-catalog-input"
-                                        style={{ ...S.inp, textAlign: 'left', fontWeight: 400, height: 38, minHeight: 38, paddingRight: 30 }}
-                                        value={customerInfo?.name || ''}
-                                        onChange={e => updateCustomerInfo('name', e.target.value)}
-                                        onFocus={() => setCustomerInfoOpen(true)}
-                                        placeholder="Tên khách hàng"
-                                    />
-                                    {customerInfo?.name ? <button type="button" onClick={() => updateCustomerInfo('name', '')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2, display: 'flex' }}><IoCloseOutline style={{ fontSize: 16 }} /></button> : null}
-                                </div>
                             </div>
                             <button
                                 type="button"
@@ -1242,6 +1244,29 @@ export default function OrderScreen({
                                 />
                             </button>
                         </div>
+                        {(customerNameInputValue || '').trim() ? (
+                            <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8 }}>
+                                <button
+                                    type="button"
+                                    onClick={clearCustomerNameInput}
+                                    style={{
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: '#94a3b8',
+                                        padding: 0,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    <IoCloseOutline style={{ fontSize: 16 }} />
+                                    Xóa tên khách
+                                </button>
+                            </div>
+                        ) : null}
                         {customerLookupQuery.trim() && (
                             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {customerLookupLoading ? (

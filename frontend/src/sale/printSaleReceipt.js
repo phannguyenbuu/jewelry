@@ -2,6 +2,13 @@ import {
     BUY_GOLD_OTHER_OPTION,
     fmtCalc,
     formatWeight,
+    getLineSellAddedGoldWeight,
+    getLineSellCutGoldWeight,
+    getLineSellLaborAmount,
+    getTradeCompensationAmount,
+    getTradeCompensationQuantity,
+    getTradeCompensationUnitAmount,
+    getTradeOldGoldQuantity,
     INVENTORY_TXS,
     normalizeTradeRate,
     parseFmt,
@@ -9,19 +16,28 @@ import {
 } from './shared';
 
 const RECEIPT_WIDTH = 620;
-const RECEIPT_PADDING = 40;
+const RECEIPT_PADDING = 28;
 const RECEIPT_MEASURE_SCALE = 1;
 const RECEIPT_OUTPUT_SCALE = 4;
-const RECEIPT_LAYOUT_SCALE = 0.9;
-const RECEIPT_TABLE_FONT_SCALE = 0.64;
-const MIN_RECEIPT_HEIGHT = 920;
+const RECEIPT_LAYOUT_SCALE = 1;
+const MIN_RECEIPT_HEIGHT = 1180;
 const WORKING_RECEIPT_HEIGHT = 4200;
-const RECEIPT_FONT = "'Tahoma', 'Arial', 'Segoe UI', sans-serif";
-const RECEIPT_NUMBER_FONT = "'Arial Narrow', 'Roboto Condensed', 'Arial', sans-serif";
-const RECEIPT_TEXT_COLOR = '#656d78';
-const RECEIPT_BORDER_COLOR = '#a3aab3';
-const RECEIPT_CODE_COLOR = '#4b5563';
+const RECEIPT_FONT = "'Helvetica Neue', 'Arial', 'Tahoma', sans-serif";
+const RECEIPT_NUMBER_FONT = "'Helvetica Neue', 'Arial', 'Tahoma', sans-serif";
+const RECEIPT_TEXT_COLOR = '#111111';
+const RECEIPT_BORDER_COLOR = '#222222';
+const RECEIPT_CODE_COLOR = '#111111';
 const DEFAULT_MACHINE_NAME = 'POS Mobile';
+const FOOTER_BLOCKS = [
+    [
+        'Bi\u00ean nh\u1eadn c\u00f3 gi\u00e1 tr\u1ecb l\u01b0u h\u00e0nh n\u1ed9i b\u1ed9.',
+        '\u0110\u1ec1 ngh\u1ecb qu\u00fd kh\u00e1ch l\u1ea5y h\u00f3a \u0111\u01a1n t\u00e0i ch\u00ednh trong ng\u00e0y.',
+    ],
+    [
+        'Xin qu\u00fd kh\u00e1ch ki\u1ec3m ti\u1ec1n v\u00e0 h\u00e0ng',
+        'tr\u01b0\u1edbc khi r\u1eddi kh\u1ecfi qu\u1ea7y. C\u1ea3m \u01a1n v\u00e0 H\u1eb9n g\u1eb7p l\u1ea1i.',
+    ],
+];
 const FOOTER_LINES = [
     'Xin quý khách kiểm tiền và vàng, trước khi',
     'rời khỏi quầy. Cảm ơn và hẹn gặp lại.',
@@ -34,9 +50,37 @@ const QR_FORMAT_L_MASK_0 = '111011111000100';
 
 const px = (value) => Math.round(value * RECEIPT_LAYOUT_SCALE);
 const moneyText = (value) => fmtCalc(Math.round(Math.abs(Number(value || 0))));
+const ticketMoneyText = (value) => fmtCalc(Math.round(Math.abs(Number(value || 0)) / 1000));
 const safeText = (value, fallback = '---') => {
     const text = String(value ?? '').trim();
     return text || fallback;
+};
+const fixedWeightText = (value, digits = 4, fallback = '') => {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return fallback;
+    if (!num && !fallback) return '0';
+    return num.toFixed(digits);
+};
+const weightedRateText = (amount, weight) => {
+    const safeWeight = Number(weight || 0);
+    if (!Number.isFinite(safeWeight) || safeWeight <= 0) return '';
+    return moneyText(Math.round(Number(amount || 0) / safeWeight));
+};
+const weightedTicketRateText = (amount, weight) => {
+    const safeWeight = Number(weight || 0);
+    if (!Number.isFinite(safeWeight) || safeWeight <= 0) return '';
+    return ticketMoneyText(Math.round(Number(amount || 0) / safeWeight));
+};
+const splitTrailingMarker = (text) => {
+    const source = safeText(text, '');
+    const matched = source.match(/^(.*?)(\s*\([^)]*\))$/);
+    if (!matched) {
+        return { mainText: source, markerText: '' };
+    }
+    return {
+        mainText: String(matched[1] || '').trimEnd(),
+        markerText: String(matched[2] || '').trim(),
+    };
 };
 
 const readReceiptSetting = (storageKey, globalKey, fallback) => {
@@ -409,11 +453,11 @@ const getLineMetrics = (line, rates) => {
             : (rates?.gold?.[line.customerProduct || '']?.[1] || 0)
     );
     const baseQty = parseFmt(line.qty);
-    const customerQty = parseWeight(line.customerQty || 0);
-    const sellLabor = Math.max(0, parseFmt(line.sellLabor || 0));
-    const sellAddedGold = Math.max(0, parseWeight(line.sellAddedGold || 0));
-    const sellCutGold = Math.max(0, parseWeight(line.sellCutGold || 0));
-    const tradeComp = Math.max(0, parseFmt(line.tradeComp || 0));
+    const customerQty = getTradeOldGoldQuantity(line);
+    const sellLabor = getLineSellLaborAmount(line);
+    const sellAddedGold = getLineSellAddedGoldWeight(line);
+    const sellCutGold = getLineSellCutGoldWeight(line);
+    const tradeComp = getTradeCompensationUnitAmount(line);
     const itemGoldWeight = Math.max(0, parseWeight(line.itemGoldWeight || 0));
     const usesInventory = effectiveCat === 'gold' && INVENTORY_TXS.has(line.tx);
     const isInventoryProductLocked = usesInventory && Boolean(line.itemId);
@@ -590,6 +634,569 @@ const buildDetailedReceiptFormulaLines = (formulaText = '') => (
         .map(line => String(line || '').trim())
         .filter(line => line && !/^TOTAL\s*:/i.test(line))
 );
+
+const resolvePosOldGoldLabel = (value) => {
+    const text = safeText(value, '');
+    if (!text) return 'D\u1ebb';
+    if (text === BUY_GOLD_OTHER_OPTION) return text;
+    return `D\u1ebb ${text}`;
+};
+
+const getPosLineMetrics = (line, rates) => {
+    const effectiveCat = line.tx === 'trade' ? 'gold' : line.cat;
+    const rate = rates?.[effectiveCat]?.[line.product] || [0, 0];
+    const sellRate = normalizeTradeRate(effectiveCat, line.customSell !== undefined ? line.customSell : rate[0]);
+    const buyRate = normalizeTradeRate(effectiveCat, line.customBuy !== undefined ? line.customBuy : rate[1]);
+    const tradeRate = normalizeTradeRate(effectiveCat, line.customTrade !== undefined ? line.customTrade : rate[0]);
+    const hasCustomerCustomBuy = line.customerCustomBuy !== undefined && String(line.customerCustomBuy).trim() !== '';
+    const customerRate = normalizeTradeRate(
+        'gold',
+        hasCustomerCustomBuy
+            ? line.customerCustomBuy
+            : (rates?.gold?.[line.customerProduct || '']?.[1] || 0)
+    );
+    const baseQty = Math.max(0, parseWeight(line.qty || 0));
+    const customerQty = getTradeOldGoldQuantity(line);
+    const sellLabor = getLineSellLaborAmount(line);
+    const sellAddedGold = getLineSellAddedGoldWeight(line);
+    const sellCutGold = getLineSellCutGoldWeight(line);
+    const itemGoldWeight = Math.max(0, parseWeight(line.itemGoldWeight || 0));
+    const stoneWeight = Math.max(0, parseWeight(line.itemStoneWeight || 0));
+    const usesInventory = effectiveCat === 'gold' && INVENTORY_TXS.has(line.tx);
+    const isInventoryProductLocked = usesInventory && Boolean(line.itemId);
+    const baseGoldWeight = isInventoryProductLocked ? (itemGoldWeight || 1) : baseQty;
+    const goldRate = line.tx === 'trade' ? tradeRate : sellRate;
+    const effectiveGoldQty = (line.tx === 'sell' || line.tx === 'trade') && effectiveCat === 'gold'
+        ? Math.max(0, baseGoldWeight + sellAddedGold - sellCutGold)
+        : baseQty;
+    const baseGoldAmount = Math.round(baseGoldWeight * Math.max(0, goldRate));
+    const addGoldAmount = Math.round(sellAddedGold * Math.max(0, goldRate));
+    const cutGoldAmount = Math.round(sellCutGold * Math.max(0, goldRate));
+    const buyAmount = Math.round(baseQty * Math.max(0, buyRate));
+    const tradeCustomerAmount = Math.round(customerQty * Math.max(0, customerRate));
+    const compensationQty = getTradeCompensationQuantity(line);
+    const compensationAmount = getTradeCompensationAmount(line);
+
+    return {
+        sellRate,
+        buyRate,
+        tradeRate,
+        customerRate,
+        sellLabor,
+        sellAddedGold,
+        sellCutGold,
+        baseQty,
+        customerQty,
+        stoneWeight,
+        baseGoldWeight,
+        effectiveGoldQty,
+        baseGoldAmount,
+        addGoldAmount,
+        cutGoldAmount,
+        buyAmount,
+        tradeCustomerAmount,
+        compensationQty,
+        compensationAmount,
+    };
+};
+
+const buildPosReceiptRows = (lines, rates) => {
+    const soldRows = [];
+    const oldRows = [];
+    const totals = {
+        soldCount: 0,
+        soldGoldWeight: 0,
+        soldStoneWeight: 0,
+        soldLabor: 0,
+        oldGrossWeight: 0,
+        oldGoldWeight: 0,
+        baseGoldWeight: 0,
+        baseGoldAmount: 0,
+        laborAmount: 0,
+        compensationAmount: 0,
+        addedGoldWeight: 0,
+        addedGoldAmount: 0,
+        deductionWeight: 0,
+        deductionAmount: 0,
+    };
+
+    (lines || []).forEach((line, index) => {
+        if (!line) return;
+        const metrics = getPosLineMetrics(line, rates);
+        const lineIndex = index + 1;
+
+        if (['sell', 'trade'].includes(line.tx) && (metrics.effectiveGoldQty > 0 || metrics.sellLabor > 0)) {
+            soldRows.push({
+                key: `${line.tx}-new-${line.id || lineIndex}`,
+                code: resolveLineCode(line.productCode || '', line.itemName || line.product, lineIndex),
+                goldWeight: metrics.effectiveGoldQty > 0 ? fixedWeightText(metrics.effectiveGoldQty, 4, '') : '',
+                stoneWeight: fixedWeightText(metrics.stoneWeight, 3, '0.000'),
+                labor: metrics.sellLabor > 0 ? ticketMoneyText(metrics.sellLabor) : '0',
+            });
+            totals.soldCount += 1;
+            totals.soldGoldWeight += metrics.effectiveGoldQty;
+            totals.soldStoneWeight += metrics.stoneWeight;
+            totals.soldLabor += metrics.sellLabor;
+            totals.baseGoldWeight += metrics.baseGoldWeight;
+            totals.baseGoldAmount += metrics.baseGoldAmount;
+            totals.laborAmount += metrics.sellLabor;
+            totals.addedGoldWeight += metrics.sellAddedGold;
+            totals.addedGoldAmount += metrics.addGoldAmount;
+            totals.deductionWeight += metrics.sellCutGold;
+            totals.deductionAmount += metrics.cutGoldAmount;
+        }
+
+        if (line.tx === 'buy' && metrics.buyAmount > 0) {
+            oldRows.push({
+                key: `buy-old-${line.id || lineIndex}`,
+                label: resolvePosOldGoldLabel(line.product || BUY_GOLD_OTHER_OPTION),
+                grossWeight: fixedWeightText(metrics.baseQty, 3, ''),
+                stoneWeight: '0.000',
+                goldWeight: fixedWeightText(metrics.baseQty, 4, ''),
+                rate: metrics.buyRate > 0 ? moneyText(metrics.buyRate) : '',
+            });
+            totals.oldGrossWeight += metrics.baseQty;
+            totals.oldGoldWeight += metrics.baseQty;
+            totals.deductionWeight += metrics.baseQty;
+            totals.deductionAmount += metrics.buyAmount;
+        }
+
+        if (line.tx === 'trade' && metrics.tradeCustomerAmount > 0) {
+            oldRows.push({
+                key: `trade-old-${line.id || lineIndex}`,
+                label: resolvePosOldGoldLabel(line.customerProduct || BUY_GOLD_OTHER_OPTION),
+                grossWeight: fixedWeightText(metrics.customerQty, 3, ''),
+                stoneWeight: '0.000',
+                goldWeight: fixedWeightText(metrics.customerQty, 4, ''),
+                rate: metrics.customerRate > 0 ? moneyText(metrics.customerRate) : '',
+            });
+            totals.oldGrossWeight += metrics.customerQty;
+            totals.oldGoldWeight += metrics.customerQty;
+            totals.deductionWeight += metrics.customerQty;
+            totals.deductionAmount += metrics.tradeCustomerAmount;
+        }
+
+        if (metrics.compensationAmount > 0) {
+            totals.compensationAmount += metrics.compensationAmount;
+        }
+    });
+
+    return { soldRows, oldRows, totals };
+};
+
+const buildPosReceiptModel = ({ orderId, customerInfo, lines, rates, total, formula = '', printSourceLabel = '' }) => {
+    const { soldRows, oldRows, totals } = buildPosReceiptRows(lines, rates);
+    if (!soldRows.length && !oldRows.length) {
+        throw new Error('Ch\u01b0a c\u00f3 n\u1ed9i dung giao d\u1ecbch \u0111\u1ec3 in.');
+    }
+
+    const paymentAmount = Math.abs(Math.round(Number(total || 0)));
+    const txSet = new Set((lines || []).map(line => txLabel(line?.tx)).filter(Boolean));
+    const machineName = safeText(
+        customerInfo?.machineName
+            || readReceiptSetting('sale_pos_machine_name', '__VK_POS_MACHINE_NAME__', '')
+            || resolveHostName(),
+        DEFAULT_MACHINE_NAME
+    );
+    void formula;
+
+    return {
+        orderId: safeText(orderId, 'POS-SALE'),
+        headerLines: [
+            'Nh\u00e2n vi\u00ean: ---',
+            `Giao d\u1ecbch: ${resolveTxDisplay(txSet)}`,
+        ],
+        soldTable: {
+            headers: ['M\u00e3 s\u1ed1', 'TL V\u00e0ng', 'TL H\u1ed9t', 'TC'],
+            rows: soldRows.length ? soldRows : [{
+                key: 'sold-empty',
+                code: '',
+                goldWeight: '',
+                stoneWeight: '',
+                labor: '',
+            }],
+            total: {
+                label: `S\u1ed1 m\u00f3n: ${soldRows.length}`,
+                goldWeight: soldRows.length ? fixedWeightText(totals.soldGoldWeight, 4, '0.0000') : '0.0000',
+                stoneWeight: soldRows.length ? fixedWeightText(totals.soldStoneWeight, 3, '0.000') : '0.000',
+                labor: soldRows.length ? ticketMoneyText(totals.soldLabor) : '0',
+            },
+        },
+        oldTable: oldRows.length ? {
+            headers: ['Lo\u1ea1i D\u1ebb', 'TL V+H', 'TL H\u1ed9t', 'TL V\u00e0ng', 'Gi\u00e1 B\u00f9'],
+            rows: oldRows,
+        } : null,
+        summaryTable: {
+            headers: ['V\u00e0ng Th\u00eam / D\u01b0', 'Gi\u00e1', 'Th\u00e0nh Ti\u1ec1n'],
+            rows: [
+                {
+                    label: 'T.V\u00e0ng(1)',
+                    qty: totals.baseGoldWeight > 0 ? fixedWeightText(totals.baseGoldWeight, 3, '') : '',
+                    rate: weightedTicketRateText(totals.baseGoldAmount, totals.baseGoldWeight),
+                    amount: totals.baseGoldAmount > 0 ? moneyText(totals.baseGoldAmount) : '',
+                    labelFitMinScale: 0.6,
+                },
+                {
+                    label: 'C\u00f4ng (2)',
+                    qty: '',
+                    rate: '',
+                    amount: totals.laborAmount > 0 ? moneyText(totals.laborAmount) : '',
+                    mergeToAmount: true,
+                },
+                {
+                    label: 'Ti\u1ec1n b\u00f9: (3)',
+                    qty: '',
+                    rate: '',
+                    amount: totals.compensationAmount > 0 ? moneyText(totals.compensationAmount) : '',
+                    mergeToAmount: true,
+                },
+                {
+                    label: 'Ti\u1ec1n v\u00e0ng th\u00eam: (4)',
+                    qty: totals.addedGoldWeight > 0 ? fixedWeightText(totals.addedGoldWeight, 3, '') : '',
+                    rate: weightedRateText(totals.addedGoldAmount, totals.addedGoldWeight),
+                    amount: totals.addedGoldAmount > 0 ? moneyText(totals.addedGoldAmount) : '',
+                    mergeToAmount: true,
+                },
+                {
+                    label: 'MS4: (5)',
+                    qty: '',
+                    rate: '',
+                    amount: '',
+                    mergeToAmount: true,
+                },
+                {
+                    label: 'Ti\u1ec1n b\u1edbt: (6)',
+                    qty: totals.deductionWeight > 0 ? fixedWeightText(totals.deductionWeight, 3, '') : '0',
+                    rate: weightedRateText(totals.deductionAmount, totals.deductionWeight),
+                    amount: totals.deductionAmount > 0 ? moneyText(totals.deductionAmount) : '0',
+                    mergeToAmount: true,
+                },
+            ],
+            totalLabel: Number(total || 0) < 0
+                ? 'Chi tr\u1ea3: (6-1-2-3-4-5)'
+                : 'Thanh to\u00e1n: (1+2+3+4+5-6)',
+            totalAmount: moneyText(paymentAmount),
+        },
+        footerBlocks: [
+            [
+                'Bi\u00ean nh\u1eadn c\u00f3 gi\u00e1 tr\u1ecb l\u01b0u h\u00e0nh n\u1ed9i b\u1ed9.',
+                '\u0110\u1ec1 ngh\u1ecb qu\u00fd kh\u00e1ch l\u1ea5y h\u00f3a \u0111\u01a1n t\u00e0i ch\u00ednh trong ng\u00e0y.',
+            ],
+            [
+                'Xin qu\u00fd kh\u00e1ch ki\u1ec3m ti\u1ec1n v\u00e0 h\u00e0ng',
+                'tr\u01b0\u1edbc khi r\u1eddi kh\u1ecfi qu\u1ea7y. C\u1ea3m \u01a1n v\u00e0 H\u1eb9n g\u1eb7p l\u1ea1i.',
+            ],
+        ],
+        sourceLine: safeText(printSourceLabel, '') || `In t\u1eeb m\u00e1y t\u00ednh: ${machineName}`,
+    };
+};
+
+const sumWidths = (widths) => widths.reduce((sum, value) => sum + value, 0);
+
+const drawTableRow = (ctx, { x, y, widths, height, cells, fill = '', defaultFont = `400 ${px(25)}px ${RECEIPT_FONT}` }) => {
+    const totalWidth = sumWidths(widths);
+    if (fill) {
+        ctx.save();
+        ctx.fillStyle = fill;
+        ctx.fillRect(x, y, totalWidth, height);
+        ctx.restore();
+    }
+    ctx.strokeRect(x, y, totalWidth, height);
+
+    let cursorX = x;
+    widths.forEach((width, index) => {
+        if (index > 0) {
+            ctx.beginPath();
+            ctx.moveTo(cursorX, y);
+            ctx.lineTo(cursorX, y + height);
+            ctx.stroke();
+        }
+        const cell = typeof cells[index] === 'object' && cells[index] !== null ? cells[index] : { text: cells[index] };
+        if (cell.leftText !== undefined || cell.rightText !== undefined) {
+            const leftPad = px(10);
+            const rightPad = px(10);
+            if (cell.leftText) {
+                drawCellText(
+                    ctx,
+                    cell.leftText,
+                    cursorX + leftPad,
+                    y + height / 2,
+                    Math.max(0, width - leftPad - rightPad - px(50)),
+                    'left',
+                    cell.font || defaultFont,
+                    cell.color || RECEIPT_TEXT_COLOR,
+                    { allowEllipsis: true, clip: true, fitMinScale: cell.fitMinScale || 0.72 }
+                );
+            }
+            if (cell.rightText) {
+                drawCellText(
+                    ctx,
+                    cell.rightText,
+                    cursorX + leftPad,
+                    y + height / 2,
+                    Math.max(0, width - leftPad - rightPad),
+                    'right',
+                    cell.rightFont || cell.font || defaultFont,
+                    cell.color || RECEIPT_TEXT_COLOR,
+                    { allowEllipsis: true, clip: true, fitMinScale: cell.fitMinScale || 0.72 }
+                );
+            }
+            cursorX += width;
+            return;
+        }
+        const align = cell.align || 'center';
+        const baseX = align === 'center' ? cursorX : cursorX + px(10);
+        const drawWidth = align === 'center' ? width : Math.max(0, width - px(18));
+        drawCellText(
+            ctx,
+            cell.text || '',
+            baseX,
+            y + height / 2,
+            drawWidth,
+            align,
+            cell.font || defaultFont,
+            cell.color || RECEIPT_TEXT_COLOR,
+            { allowEllipsis: true, clip: true, fitMinScale: cell.fitMinScale || 0.72 }
+        );
+        cursorX += width;
+    });
+
+    return y + height;
+};
+
+const drawPosReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => {
+    const width = ctx.canvas.width / renderScale;
+    const height = ctx.canvas.height / renderScale;
+    const left = RECEIPT_PADDING;
+    const tableWidth = width - RECEIPT_PADDING * 2;
+    const soldWidths = [
+        Math.round(tableWidth * 0.34),
+        Math.round(tableWidth * 0.22),
+        Math.round(tableWidth * 0.19),
+    ];
+    soldWidths.push(tableWidth - sumWidths(soldWidths));
+    const oldWidths = [
+        Math.round(tableWidth * 0.20),
+        Math.round(tableWidth * 0.19),
+        Math.round(tableWidth * 0.16),
+        Math.round(tableWidth * 0.23),
+    ];
+    oldWidths.push(tableWidth - sumWidths(oldWidths));
+    const summaryWidths = [
+        Math.round(tableWidth * 0.2),
+        Math.round(tableWidth * 0.2),
+        Math.round(tableWidth * 0.2),
+        tableWidth - Math.round(tableWidth * 0.2) * 3,
+    ];
+    const bodyFont = `400 ${px(25)}px ${RECEIPT_FONT}`;
+    const headerFont = `500 ${px(24)}px ${RECEIPT_FONT}`;
+    const labelFont = `400 ${px(24)}px ${RECEIPT_FONT}`;
+    const boldLabelFont = `600 ${px(24)}px ${RECEIPT_FONT}`;
+    const numberFont = `400 ${px(25)}px ${RECEIPT_NUMBER_FONT}`;
+    const boldNumberFont = `700 ${px(27)}px ${RECEIPT_NUMBER_FONT}`;
+    const tableHeaderHeight = px(48);
+    const tableRowHeight = px(52);
+    const tableTotalHeight = px(54);
+    const summaryHeaderHeight = px(54);
+    const summaryRowHeight = px(52);
+    const summaryTotalHeight = px(60);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.save();
+    ctx.strokeStyle = RECEIPT_BORDER_COLOR;
+    ctx.lineWidth = 1.2;
+
+    let y = px(28);
+    const qrSize = px(252);
+    const qrX = left;
+    const qrY = y;
+    drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
+
+    const headerX = qrX + qrSize + px(18);
+    const headerWidth = width - headerX - RECEIPT_PADDING;
+    const receiptHeaderFontSize = px(30);
+    const receiptHeaderLineGap = px(38);
+    const headerBlockHeight = Math.max(0, (model.headerLines.length - 1) * receiptHeaderLineGap);
+    let headerY = qrY + qrSize / 2 - headerBlockHeight / 2;
+    model.headerLines.forEach((line) => {
+        drawCellText(
+            ctx,
+            line,
+            headerX,
+            headerY,
+            headerWidth,
+            'left',
+            `400 ${receiptHeaderFontSize}px ${RECEIPT_FONT}`,
+            RECEIPT_TEXT_COLOR,
+            { allowEllipsis: false, clip: true, fitMinScale: 0.7 }
+        );
+        headerY += receiptHeaderLineGap;
+    });
+    y = Math.max(qrY + qrSize, headerY) + px(28);
+
+    y = drawTableRow(ctx, {
+        x: left,
+        y,
+        widths: soldWidths,
+        height: tableHeaderHeight,
+        cells: model.soldTable.headers.map(text => ({ text, font: headerFont })),
+        defaultFont: headerFont,
+    });
+    model.soldTable.rows.forEach((row) => {
+        y = drawTableRow(ctx, {
+            x: left,
+            y,
+            widths: soldWidths,
+            height: tableRowHeight,
+            cells: [
+                { text: row.code, font: bodyFont, fitMinScale: 0.62 },
+                { text: row.goldWeight, font: numberFont },
+                { text: row.stoneWeight, font: numberFont },
+                { text: row.labor, font: numberFont },
+            ],
+            defaultFont: bodyFont,
+        });
+    });
+    y = drawTableRow(ctx, {
+        x: left,
+        y,
+        widths: soldWidths,
+        height: tableTotalHeight,
+        cells: [
+            { text: model.soldTable.total.label, font: labelFont, align: 'center' },
+            { text: model.soldTable.total.goldWeight, font: boldNumberFont },
+            { text: model.soldTable.total.stoneWeight, font: numberFont },
+            { text: model.soldTable.total.labor, font: numberFont },
+        ],
+        defaultFont: bodyFont,
+    });
+
+    if (model.oldTable) {
+        y += px(26);
+        y = drawTableRow(ctx, {
+            x: left,
+            y,
+            widths: oldWidths,
+            height: tableHeaderHeight,
+            cells: model.oldTable.headers.map(text => ({ text, font: headerFont })),
+            defaultFont: headerFont,
+        });
+        model.oldTable.rows.forEach((row) => {
+            y = drawTableRow(ctx, {
+                x: left,
+                y,
+                widths: oldWidths,
+                height: tableRowHeight,
+                cells: [
+                    { text: row.label, font: bodyFont, fitMinScale: 0.62 },
+                    { text: row.grossWeight, font: numberFont },
+                    { text: row.stoneWeight, font: numberFont },
+                    { text: row.goldWeight, font: numberFont },
+                    { text: row.rate, font: numberFont },
+                ],
+                defaultFont: bodyFont,
+            });
+        });
+        y += px(76);
+    } else {
+        y += px(42);
+    }
+    y = drawTableRow(ctx, {
+        x: left,
+        y,
+        widths: [summaryWidths[0] + summaryWidths[1], summaryWidths[2], summaryWidths[3]],
+        height: summaryHeaderHeight,
+        cells: model.summaryTable.headers.map(text => ({ text, font: headerFont })),
+        defaultFont: headerFont,
+    });
+    model.summaryTable.rows.forEach((row, index) => {
+        const { mainText, markerText } = splitTrailingMarker(row.label);
+        if (row.mergeToAmount) {
+            y = drawTableRow(ctx, {
+                x: left,
+                y,
+                widths: [summaryWidths[0] + summaryWidths[1] + summaryWidths[2], summaryWidths[3]],
+                height: summaryRowHeight,
+                cells: [
+                    markerText
+                        ? {
+                            leftText: mainText,
+                            rightText: markerText,
+                            font: labelFont,
+                            rightFont: labelFont,
+                            fitMinScale: row.labelFitMinScale || 0.72,
+                        }
+                        : { text: row.label, font: labelFont, align: 'left', fitMinScale: row.labelFitMinScale || 0.72 },
+                    { text: row.amount, font: numberFont },
+                ],
+                defaultFont: bodyFont,
+            });
+            return;
+        }
+        y = drawTableRow(ctx, {
+            x: left,
+            y,
+            widths: summaryWidths,
+            height: summaryRowHeight,
+            cells: [
+                markerText
+                    ? {
+                        leftText: mainText,
+                        rightText: markerText,
+                        font: labelFont,
+                        rightFont: labelFont,
+                        fitMinScale: row.labelFitMinScale || (index === model.summaryTable.rows.length - 1 ? 0.8 : 0.72),
+                    }
+                    : { text: row.label, font: labelFont, align: 'left', fitMinScale: row.labelFitMinScale || (index === model.summaryTable.rows.length - 1 ? 0.8 : 0.72) },
+                { text: row.qty, font: numberFont },
+                { text: row.rate, font: numberFont },
+                { text: row.amount, font: numberFont },
+            ],
+            defaultFont: bodyFont,
+        });
+    });
+    y = drawTableRow(ctx, {
+        x: left,
+        y,
+        widths: [summaryWidths[0] + summaryWidths[1] + summaryWidths[2], summaryWidths[3]],
+        height: summaryTotalHeight,
+        cells: [
+            { text: model.summaryTable.totalLabel, font: boldLabelFont, align: 'left', fitMinScale: 0.72 },
+            { text: model.summaryTable.totalAmount, font: boldNumberFont },
+        ],
+        defaultFont: bodyFont,
+    });
+
+    y += px(34);
+    ctx.fillStyle = RECEIPT_TEXT_COLOR;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `italic 400 ${px(20)}px ${RECEIPT_FONT}`;
+    model.footerBlocks.forEach((block, blockIndex) => {
+        block.forEach((line, lineIndex) => {
+            ctx.fillText(line, width / 2, y + lineIndex * px(28));
+        });
+        y += block.length * px(28);
+        if (blockIndex === 0) {
+            y += px(10);
+            ctx.beginPath();
+            ctx.moveTo(left, y);
+            ctx.lineTo(width - RECEIPT_PADDING, y);
+            ctx.stroke();
+            y += px(30);
+        }
+    });
+
+    if (model.sourceLine) {
+        y += px(12);
+        ctx.font = `italic 400 ${px(15)}px ${RECEIPT_FONT}`;
+        ctx.fillText(model.sourceLine, width / 2, y);
+    }
+
+    ctx.restore();
+    return y + px(30);
+};
 
 const buildReceiptModel = ({ orderId, customerInfo, lines, rates, total, formula = '', printSourceLabel = '' }) => {
     const { rows, sections, summary, txDisplay, hasTrade } = buildReceiptRows(lines, rates);
@@ -893,7 +1500,7 @@ const createSaleReceiptPreview = async ({ orderId, customerInfo, lines, rates, t
     if (typeof document === 'undefined') {
         throw new Error('Chỉ hỗ trợ preview receipt trong trình duyệt.');
     }
-    const model = buildReceiptModel({ orderId, customerInfo, lines, rates, total, formula, printSourceLabel });
+    const model = buildPosReceiptModel({ orderId, customerInfo, lines, rates, total, formula, printSourceLabel });
     await ensureFontsReady();
 
     const createCanvas = (logicalHeight, renderScale) => {
@@ -909,12 +1516,12 @@ const createSaleReceiptPreview = async ({ orderId, customerInfo, lines, rates, t
     };
 
     const working = createCanvas(WORKING_RECEIPT_HEIGHT, RECEIPT_MEASURE_SCALE);
-    const usedHeight = Math.max(MIN_RECEIPT_HEIGHT, Math.ceil(drawReceiptToCanvas(working.ctx, model, RECEIPT_MEASURE_SCALE) + px(36)));
+    const usedHeight = Math.max(MIN_RECEIPT_HEIGHT, Math.ceil(drawPosReceiptToCanvas(working.ctx, model, RECEIPT_MEASURE_SCALE) + px(36)));
     let canvas = working.canvas;
 
     if (usedHeight !== WORKING_RECEIPT_HEIGHT || RECEIPT_MEASURE_SCALE !== RECEIPT_OUTPUT_SCALE) {
         const finalRender = createCanvas(usedHeight, RECEIPT_OUTPUT_SCALE);
-        drawReceiptToCanvas(finalRender.ctx, model, RECEIPT_OUTPUT_SCALE);
+        drawPosReceiptToCanvas(finalRender.ctx, model, RECEIPT_OUTPUT_SCALE);
         canvas = finalRender.canvas;
     }
 

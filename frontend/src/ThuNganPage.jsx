@@ -1,51 +1,199 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ThuNganCard from './thuNgan/ThuNganCard';
 import KhoTongCard from './thuNgan/KhoTongCard';
 import ThuNganHistory from './thuNgan/ThuNganHistory';
 import ThuNganManager from './thuNgan/ThuNganManager';
+import OrderListTable from './components/orders/OrderListTable';
 import { fetchCompanyBankAccounts, withFallbackCompanyBankAccounts } from './lib/companyBankAccounts';
+import { archiveOrder, getOrderArchiveKey, readArchivedOrderKeys } from './lib/orderArchive';
 import {
   API,
   TIEN_MAT_TUOI,
   buildFormMap,
   buildPayload,
   emptyDetailRow,
+  ensureTienMatRow,
   fmt,
-  formatMoneyInput,
   inputBase,
-  metricCardStyle,
   panelStyle,
   sameMoney,
-  serverEchoesDetailRows,
   statusMeta,
   toNumber,
   today,
-  totalsFromForm,
 } from './thuNgan/utils';
+
+const FALLBACK_BANK_LEDGER_NAME = 'Tài Khoản Ngân Hàng';
+
+const cloneFormMap = (map = {}) => Object.fromEntries(
+  Object.entries(map).map(([thuNganId, form]) => [
+    thuNganId,
+    {
+      ...form,
+      chi_tiet: ensureTienMatRow((form?.chi_tiet || []).map((row) => ({ ...row }))),
+    },
+  ]),
+);
+
+const cloneCashierForm = (form = {}) => ({
+  ghi_chu: form?.ghi_chu || '',
+  chi_tiet: ensureTienMatRow((form?.chi_tiet || []).map((row) => ({ ...row }))),
+});
+
+const buildZeroedCashierForm = (form = {}) => ({
+  ghi_chu: form?.ghi_chu || '',
+  chi_tiet: ensureTienMatRow((form?.chi_tiet || []).map((row) => ({
+    ...row,
+    ton_dau_ky: '0',
+    so_du_hien_tai: '0',
+    gia_tri_lech: '0',
+  }))),
+});
+
+const getOrderPaymentSign = (order) => {
+  const orderType = String(order?.loai_don || '').trim().toLowerCase();
+  if (orderType === 'mua' || orderType === 'buy') return -1;
+  if (orderType === 'bán' || orderType === 'ban' || orderType === 'sell' || orderType === 'pos') return 1;
+  return 0;
+};
+
+const resolveOrderLivePayments = (order, companyBankAccounts) => {
+  const tongTien = toNumber(order?.tong_tien);
+  if (tongTien <= 0) return null;
+
+  const sign = getOrderPaymentSign(order);
+  if (!sign) return null;
+
+  const settlement = order?.hoa_don_tai_chinh?.settlement && typeof order.hoa_don_tai_chinh.settlement === 'object'
+    ? order.hoa_don_tai_chinh.settlement
+    : {};
+
+  const explicitCash = settlement.cashRaw ?? settlement.cash ?? '';
+  const explicitBank = settlement.bankcashRaw ?? settlement.bankcash ?? settlement.bank ?? '';
+
+  let cashPayment = 0;
+  let bankPayment = 0;
+  if (explicitCash !== '' || explicitBank !== '') {
+    cashPayment = toNumber(explicitCash);
+    bankPayment = toNumber(explicitBank);
+  } else {
+    const cashAbs = Math.max(0, Math.min(toNumber(order?.dat_coc), tongTien));
+    const bankAbs = Math.max(0, tongTien - cashAbs);
+    cashPayment = cashAbs * sign;
+    bankPayment = bankAbs * sign;
+  }
+
+  if (!cashPayment && !bankPayment) return null;
+
+  const fallbackBankAccount = withFallbackCompanyBankAccounts(companyBankAccounts, true)[0];
+  return {
+    cashPayment,
+    bankPayment,
+    bankCategory: settlement.companyBankLedgerKey
+      || fallbackBankAccount?.ledger_key
+      || FALLBACK_BANK_LEDGER_NAME,
+  };
+};
+
+const upsertLiveAmount = (formMap, thuNganId, category, amount) => {
+  if (!thuNganId || !amount || !formMap[thuNganId]) return;
+
+  const targetForm = formMap[thuNganId];
+  const nextDetails = [...(targetForm.chi_tiet || [])];
+  let targetIndex = nextDetails.findIndex((row) => row.tuoi_vang === category);
+  if (targetIndex < 0) {
+    nextDetails.push({
+      row_id: `live_${thuNganId}_${category}`,
+      tuoi_vang: category,
+      ton_dau_ky: '0',
+      so_du_hien_tai: '0',
+      gia_tri_lech: '0',
+    });
+    targetIndex = nextDetails.length - 1;
+  }
+
+  const targetRow = { ...nextDetails[targetIndex] };
+  const nextCurrent = toNumber(targetRow.so_du_hien_tai) + amount;
+  const opening = toNumber(targetRow.ton_dau_ky);
+  targetRow.so_du_hien_tai = String(Math.round(nextCurrent));
+  targetRow.gia_tri_lech = String(Math.round(nextCurrent - opening));
+  nextDetails[targetIndex] = targetRow;
+  targetForm.chi_tiet = ensureTienMatRow(nextDetails);
+};
+
+const applyHistoryTransfersToKhoTong = (formMap, history = []) => {
+  for (const entry of history || []) {
+    for (const detail of entry?.chi_tiet || []) {
+      const category = String(detail?.tuoi_vang || '').trim();
+      if (!category) continue;
+      const amount = toNumber(detail?.so_du_hien_tai);
+      if (!amount) continue;
+      upsertLiveAmount(formMap, 'kho_tong', category, amount);
+    }
+  }
+};
+
+const buildPreviewFormMap = (rows, history, pendingOrders, companyBankAccounts) => {
+  const baseFormMap = cloneFormMap(buildFormMap(rows));
+  const seenOrderKeys = new Set();
+  const orderKeys = [];
+
+  const tn1Row = (rows || []).find((row) => row.thu_ngan_id !== 'kho_tong' && String(row?.ten_thu_ngan || '').toLowerCase().includes('tn1'))
+    || (rows || []).find((row) => row.thu_ngan_id !== 'kho_tong');
+
+  let totalAmount = 0;
+  let cashTotal = 0;
+  let bankTotal = 0;
+
+  applyHistoryTransfersToKhoTong(baseFormMap, history);
+
+  for (const order of pendingOrders || []) {
+    const orderKey = getOrderArchiveKey(order);
+    if (!orderKey || seenOrderKeys.has(orderKey)) continue;
+    seenOrderKeys.add(orderKey);
+
+    const payment = resolveOrderLivePayments(order, companyBankAccounts);
+    if (!payment) continue;
+
+    orderKeys.push(orderKey);
+    totalAmount += toNumber(order?.tong_tien);
+    cashTotal += payment.cashPayment;
+    bankTotal += payment.bankPayment;
+    if (tn1Row?.thu_ngan_id && payment.cashPayment) {
+      upsertLiveAmount(baseFormMap, tn1Row.thu_ngan_id, TIEN_MAT_TUOI, payment.cashPayment);
+    }
+    if (payment.bankPayment) {
+      upsertLiveAmount(baseFormMap, 'kho_tong', payment.bankCategory, payment.bankPayment);
+    }
+  }
+
+  return {
+    formMap: baseFormMap,
+    meta: {
+      orderKeys,
+      count: orderKeys.length,
+      totalAmount,
+      cashTotal,
+      bankTotal,
+    },
+  };
+};
 
 export default function ThuNganPage() {
   const [ngay, setNgay] = useState(today());
   const [data, setData] = useState({ ngay: today(), rows: [], history: [] });
   const [formMap, setFormMap] = useState({});
+  const [pendingOrders, setPendingOrders] = useState([]);
+  const [livePreviewMeta, setLivePreviewMeta] = useState({ orderKeys: [], count: 0, totalAmount: 0, cashTotal: 0, bankTotal: 0 });
   const [tuoiVangOptions, setTuoiVangOptions] = useState([]);
   const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingMap, setSavingMap] = useState({});
   const [draftStatusMap, setDraftStatusMap] = useState({});
   const [historyDeletingKey, setHistoryDeletingKey] = useState('');
+  const [settlementModal, setSettlementModal] = useState({ open: false, cashierName: '' });
   const [notice, setNotice] = useState('');
   const ngayRef = useRef(ngay);
   const pendingFormsRef = useRef({});
-  const statusTimersRef = useRef({});
-  const queuedDraftsRef = useRef({});
-  const savePromisesRef = useRef({});
-
-  const clearAllTimers = useCallback(() => {
-    Object.values(statusTimersRef.current).forEach(clearTimeout);
-    statusTimersRef.current = {};
-    queuedDraftsRef.current = {};
-    savePromisesRef.current = {};
-  }, []);
 
   useEffect(() => {
     ngayRef.current = ngay;
@@ -53,53 +201,59 @@ export default function ThuNganPage() {
 
   const applyPayload = useCallback((payload, fallbackNgay) => {
     let rawRows = Array.isArray(payload.rows) ? payload.rows : [];
-    if (!rawRows.some(r => r.thu_ngan_id === 'kho_tong')) {
+    if (!rawRows.some((row) => row.thu_ngan_id === 'kho_tong')) {
       rawRows = [{
-          thu_ngan_id: 'kho_tong',
-          ten_thu_ngan: 'Kho Tổng',
-          nguoi_quan_ly: 'Quản trị viên',
-          ten_kho: 'Tổ hợp',
-          quays: [],
+        thu_ngan_id: 'kho_tong',
+        ten_thu_ngan: 'Kho Tổng',
+        nguoi_quan_ly: 'Quản trị viên',
+        ten_kho: 'Tổ hợp',
+        quays: [],
       }, ...rawRows];
     } else {
-      // Ensure Kho Tong is always at the top
-      const kt = rawRows.find(r => r.thu_ngan_id === 'kho_tong');
-      rawRows = [kt, ...rawRows.filter(r => r.thu_ngan_id !== 'kho_tong')];
+      const khoTong = rawRows.find((row) => row.thu_ngan_id === 'kho_tong');
+      rawRows = [khoTong, ...rawRows.filter((row) => row.thu_ngan_id !== 'kho_tong')];
     }
 
-    const nextData = {
+    setData({
       ngay: payload.ngay || fallbackNgay,
       rows: rawRows,
       history: Array.isArray(payload.history) ? payload.history : [],
-    };
-    setData(nextData);
-    setFormMap({
-      ...buildFormMap(nextData.rows),
-      ...pendingFormsRef.current,
     });
+  }, []);
+
+  const loadOrders = useCallback(async () => {
+    const archivedOrderKeys = readArchivedOrderKeys();
+    const res = await fetch(`${API}/api/don_hang`);
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    const rows = Array.isArray(payload) ? payload : [];
+    return rows.filter((order) => !archivedOrderKeys.has(getOrderArchiveKey(order)));
   }, []);
 
   const load = useCallback(async (targetNgay) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/thu_ngan_so_quy?ngay=${encodeURIComponent(targetNgay)}`);
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+      const [cashierRes, orders] = await Promise.all([
+        fetch(`${API}/api/thu_ngan_so_quy?ngay=${encodeURIComponent(targetNgay)}`),
+        loadOrders(),
+      ]);
+      const payload = await cashierRes.json();
+      if (!cashierRes.ok) throw new Error(payload.error || `HTTP ${cashierRes.status}`);
       applyPayload(payload, targetNgay);
+      setPendingOrders(orders);
+      setDraftStatusMap({});
       setNotice('');
     } catch (err) {
       setNotice(`Không tải được bảng thu ngân: ${err.message}`);
     } finally {
       setLoading(false);
     }
-  }, [applyPayload]);
+  }, [applyPayload, loadOrders]);
 
   useEffect(() => {
-    clearAllTimers();
     pendingFormsRef.current = {};
-    setDraftStatusMap({});
     load(ngay);
-  }, [clearAllTimers, load, ngay]);
+  }, [load, ngay]);
 
   useEffect(() => {
     fetch(`${API}/api/tuoi_vang`)
@@ -114,93 +268,31 @@ export default function ThuNganPage() {
       .catch(() => setCompanyBankAccounts([]));
   }, []);
 
-  useEffect(() => () => clearAllTimers(), [clearAllTimers]);
+  useEffect(() => {
+    if (!data.rows.length) {
+      setFormMap({});
+      setLivePreviewMeta({ orderKeys: [], count: 0, totalAmount: 0, cashTotal: 0, bankTotal: 0 });
+      return;
+    }
+    const { formMap: nextFormMap, meta } = buildPreviewFormMap(data.rows, data.history, pendingOrders, companyBankAccounts);
+    setFormMap(nextFormMap);
+    pendingFormsRef.current = nextFormMap;
+    setLivePreviewMeta(meta);
+  }, [companyBankAccounts, data.history, data.rows, pendingOrders]);
 
   const reloadCashLedger = useCallback(async () => {
     await load(ngayRef.current);
   }, [load]);
 
-  const flushDraftSave = useCallback((thuNganId) => {
-    if (savePromisesRef.current[thuNganId]) return savePromisesRef.current[thuNganId];
-
-    const task = (async () => {
-      while (queuedDraftsRef.current[thuNganId]) {
-        const requestNgay = ngayRef.current;
-        const formToSave = queuedDraftsRef.current[thuNganId];
-        delete queuedDraftsRef.current[thuNganId];
-        clearTimeout(statusTimersRef.current[thuNganId]);
-        setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'saving' }));
-        try {
-          const res = await fetch(`${API}/api/thu_ngan_so_quy`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildPayload(thuNganId, requestNgay, formToSave)),
-          });
-          const payload = await res.json();
-          if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-          if (ngayRef.current !== requestNgay) continue;
-
-          const hasQueuedUpdate = Boolean(queuedDraftsRef.current[thuNganId]);
-          const hasDetailEcho = serverEchoesDetailRows(payload, thuNganId, formToSave);
-          if (!hasQueuedUpdate && hasDetailEcho) {
-            delete pendingFormsRef.current[thuNganId];
-          } else if (hasQueuedUpdate) {
-            pendingFormsRef.current[thuNganId] = queuedDraftsRef.current[thuNganId];
-          } else {
-            pendingFormsRef.current[thuNganId] = formToSave;
-          }
-          applyPayload(payload, requestNgay);
-
-          if (hasQueuedUpdate) {
-            setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'pending' }));
-            continue;
-          }
-          if (hasDetailEcho) {
-            setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'saved' }));
-            statusTimersRef.current[thuNganId] = setTimeout(() => {
-              setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'idle' }));
-            }, 1600);
-          } else {
-            setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'error' }));
-            setNotice('Backend đang phản hồi bản cũ cho Thu Ngân: dòng chi tiết chưa được lưu. Hãy restart backend để nạp API mới.');
-          }
-        } catch (err) {
-          if (ngayRef.current !== requestNgay) continue;
-          pendingFormsRef.current[thuNganId] = queuedDraftsRef.current[thuNganId] || formToSave;
-          setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'error' }));
-          setNotice(`Không lưu được nháp của thu ngân #${thuNganId}: ${err.message}`);
-          break;
-        }
-      }
-    })().finally(() => {
-      if (savePromisesRef.current[thuNganId] === task) {
-        delete savePromisesRef.current[thuNganId];
-      }
-      if (queuedDraftsRef.current[thuNganId]) {
-        flushDraftSave(thuNganId);
-      }
-    });
-
-    savePromisesRef.current[thuNganId] = task;
-    return task;
-  }, [applyPayload]);
-
-  const scheduleDraftSave = useCallback((thuNganId, nextForm) => {
-    clearTimeout(statusTimersRef.current[thuNganId]);
-    queuedDraftsRef.current[thuNganId] = nextForm;
-    setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: savePromisesRef.current[thuNganId] ? 'pending' : 'saving' }));
-    flushDraftSave(thuNganId);
-  }, [flushDraftSave]);
-
   const updateCashierForm = useCallback((thuNganId, updater) => {
     setFormMap((prev) => {
       const current = prev[thuNganId] || { ghi_chu: '', chi_tiet: [] };
       const nextForm = typeof updater === 'function' ? updater(current) : updater;
-      pendingFormsRef.current[thuNganId] = nextForm;
-      scheduleDraftSave(thuNganId, nextForm);
+      pendingFormsRef.current = { ...pendingFormsRef.current, [thuNganId]: nextForm };
+      setDraftStatusMap((draftPrev) => ({ ...draftPrev, [thuNganId]: 'pending' }));
       return { ...prev, [thuNganId]: nextForm };
     });
-  }, [scheduleDraftSave]);
+  }, []);
 
   const handleAddDetailRow = useCallback((thuNganId) => {
     updateCashierForm(thuNganId, (current) => ({
@@ -227,7 +319,7 @@ export default function ThuNganPage() {
           const nextDauKy = key === 'ton_dau_ky' ? value : row.ton_dau_ky;
           const nextHienTai = key === 'so_du_hien_tai' ? value : row.so_du_hien_tai;
           if (row.gia_tri_lech === '' || sameMoney(row.gia_tri_lech, prevAutoDiff)) {
-            nextRow.gia_tri_lech = formatMoneyInput(toNumber(nextHienTai) - toNumber(nextDauKy));
+            nextRow.gia_tri_lech = String(Math.round(toNumber(nextHienTai) - toNumber(nextDauKy)));
           }
         }
         return nextRow;
@@ -237,91 +329,163 @@ export default function ThuNganPage() {
 
   const handleUpsertCategoryField = useCallback((thuNganId, category, key, value) => {
     updateCashierForm(thuNganId, (current) => {
-        let exists = false;
-        let nextChiTiet = (current.chi_tiet || []).map((row) => {
-            if (row.tuoi_vang !== category) return row;
-            exists = true;
-            const nextRow = { ...row, [key]: value };
-            if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
-                const prevAutoDiff = toNumber(row.so_du_hien_tai) - toNumber(row.ton_dau_ky);
-                const nextDauKy = key === 'ton_dau_ky' ? value : row.ton_dau_ky;
-                const nextHienTai = key === 'so_du_hien_tai' ? value : row.so_du_hien_tai;
-                if (row.gia_tri_lech === '' || sameMoney(row.gia_tri_lech, prevAutoDiff)) {
-                    nextRow.gia_tri_lech = formatMoneyInput(toNumber(nextHienTai) - toNumber(nextDauKy));
-                }
-            }
-            return nextRow;
-        });
-        if (!exists) {
-            const newRow = emptyDetailRow();
-            newRow.tuoi_vang = category;
-            newRow[key] = value;
-            if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
-                newRow.gia_tri_lech = formatMoneyInput(toNumber(newRow.so_du_hien_tai) - toNumber(newRow.ton_dau_ky));
-            }
-            nextChiTiet.push(newRow);
+      let exists = false;
+      const nextChiTiet = (current.chi_tiet || []).map((row) => {
+        if (row.tuoi_vang !== category) return row;
+        exists = true;
+        const nextRow = { ...row, [key]: value };
+        if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
+          const prevAutoDiff = toNumber(row.so_du_hien_tai) - toNumber(row.ton_dau_ky);
+          const nextDauKy = key === 'ton_dau_ky' ? value : row.ton_dau_ky;
+          const nextHienTai = key === 'so_du_hien_tai' ? value : row.so_du_hien_tai;
+          if (row.gia_tri_lech === '' || sameMoney(row.gia_tri_lech, prevAutoDiff)) {
+            nextRow.gia_tri_lech = String(Math.round(toNumber(nextHienTai) - toNumber(nextDauKy)));
+          }
         }
-        return { ...current, chi_tiet: nextChiTiet };
+        return nextRow;
+      });
+
+      if (!exists) {
+        const newRow = emptyDetailRow();
+        newRow.tuoi_vang = category;
+        newRow[key] = value;
+        if (key === 'ton_dau_ky' || key === 'so_du_hien_tai') {
+          newRow.gia_tri_lech = String(Math.round(toNumber(newRow.so_du_hien_tai) - toNumber(newRow.ton_dau_ky)));
+        }
+        nextChiTiet.push(newRow);
+      }
+
+      return { ...current, chi_tiet: nextChiTiet };
     });
   }, [updateCashierForm]);
 
-const handleResetKhoTong = useCallback((thuNganId) => {
+  const handleResetKhoTong = useCallback((thuNganId) => {
     updateCashierForm(thuNganId, (current) => {
       const bankLedgerKeys = withFallbackCompanyBankAccounts(companyBankAccounts, true)
         .map((account) => account.ledger_key)
         .filter(Boolean);
-      const cats = [TIEN_MAT_TUOI, ...bankLedgerKeys, ...(tuoiVangOptions || []).map(o => o.ten_tuoi)];
-      const nextChiTiet = cats.map(cat => ({
-        row_id: `reset_${Date.now()}_${cat}`,
-        tuoi_vang: cat,
-        ton_dau_ky: 0,
-        so_du_hien_tai: 0,
-        gia_tri_lech: 0
-      }));
+      const categories = [TIEN_MAT_TUOI, ...bankLedgerKeys, ...(tuoiVangOptions || []).map((option) => option.ten_tuoi)];
       return {
         ...current,
-        chi_tiet: nextChiTiet
+        chi_tiet: categories.map((category) => ({
+          row_id: `reset_${Date.now()}_${category}`,
+          tuoi_vang: category,
+          ton_dau_ky: '0',
+          so_du_hien_tai: '0',
+          gia_tri_lech: '0',
+        })),
       };
     });
-  }, [companyBankAccounts, updateCashierForm, tuoiVangOptions]);
+  }, [companyBankAccounts, tuoiVangOptions, updateCashierForm]);
 
   const handleNoteChange = useCallback((thuNganId, value) => {
     updateCashierForm(thuNganId, (current) => ({ ...current, ghi_chu: value }));
   }, [updateCashierForm]);
 
+  const handleArchivePendingOrder = useCallback((order) => {
+    archiveOrder(order);
+    const orderKey = getOrderArchiveKey(order);
+    setPendingOrders((prev) => prev.filter((item) => getOrderArchiveKey(item) !== orderKey));
+    setNotice(`Đã đưa ${order.ma_don} vào Hộp Lưu Trữ Lâu Dài.`);
+  }, []);
+
+  const handleDeletePendingOrder = useCallback(async (order) => {
+    if (!window.confirm(`Xóa đơn ${order.ma_don}? Hành động này không thể hoàn tác.`)) return;
+    try {
+      const res = await fetch(`${API}/api/don_hang/${order.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || `HTTP ${res.status}`);
+      }
+      setPendingOrders((prev) => prev.filter((item) => item.id !== order.id));
+      setNotice(`Đã xóa đơn ${order.ma_don}.`);
+    } catch (err) {
+      setNotice(`Không xóa được ${order.ma_don}: ${err.message}`);
+    }
+  }, []);
+
+  /*
   const handleChot = async (row) => {
     const thuNganId = row.thu_ngan_id;
-    clearTimeout(statusTimersRef.current[thuNganId]);
-    if (savePromisesRef.current[thuNganId]) {
-      await savePromisesRef.current[thuNganId].catch(() => null);
-    }
-    const form = pendingFormsRef.current[thuNganId]
+    const currentForm = pendingFormsRef.current[thuNganId]
       || formMap[thuNganId]
       || buildFormMap([row])[thuNganId]
       || { ghi_chu: row.ghi_chu || '', chi_tiet: [] };
+    const form = cloneCashierForm(currentForm);
+    const zeroedForm = buildZeroedCashierForm(form);
+
     setSavingMap((prev) => ({ ...prev, [thuNganId]: true }));
     try {
-      const res = await fetch(`${API}/api/thu_ngan_so_quy/chot`, {
+      const chotRes = await fetch(`${API}/api/thu_ngan_so_quy/chot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildPayload(thuNganId, ngay, form)),
       });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
-      const hasDetailEcho = serverEchoesDetailRows(payload, thuNganId, form);
-      if (hasDetailEcho) {
-        delete pendingFormsRef.current[thuNganId];
-      } else {
-        pendingFormsRef.current[thuNganId] = form;
-      }
-      applyPayload(payload, ngay);
-      if (hasDetailEcho) {
+      const chotPayload = await chotRes.json();
+      if (!chotRes.ok) throw new Error(chotPayload.error || `HTTP ${chotRes.status}`);
+
+      const resetRes = await fetch(`${API}/api/thu_ngan_so_quy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(thuNganId, ngay, zeroedForm)),
+      });
+      const resetPayload = await resetRes.json();
+      if (!resetRes.ok) throw new Error(resetPayload.error || `HTTP ${resetRes.status}`);
+
+      delete pendingFormsRef.current[thuNganId];
+      setFormMap((prev) => ({ ...prev, [thuNganId]: zeroedForm }));
+      applyPayload(resetPayload, ngay);
+      setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'saved' }));
         setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'saved' }));
         setNotice(`Đã chốt số tiền cho ${row.ten_thu_ngan}.`);
-      } else {
+      setSettlementModal({ open: true, cashierName: row.ten_thu_ngan || '' });
         setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'error' }));
         setNotice(`Backend đang chạy bản cũ nên chưa nhận chi tiết của ${row.ten_thu_ngan}. Hãy restart backend rồi chốt lại.`);
       }
+    } catch (err) {
+      setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'error' }));
+      setNotice(`Không chốt được ${row.ten_thu_ngan}: ${err.message}`);
+    } finally {
+      setSavingMap((prev) => ({ ...prev, [thuNganId]: false }));
+    }
+  };
+  */
+
+  const handleChot = async (row) => handleCashierSettlement(row);
+
+  const handleCashierSettlement = async (row) => {
+    const thuNganId = row.thu_ngan_id;
+    const currentForm = pendingFormsRef.current[thuNganId]
+      || formMap[thuNganId]
+      || buildFormMap([row])[thuNganId]
+      || { ghi_chu: row.ghi_chu || '', chi_tiet: [] };
+    const form = cloneCashierForm(currentForm);
+    const zeroedForm = buildZeroedCashierForm(form);
+
+    setSavingMap((prev) => ({ ...prev, [thuNganId]: true }));
+    try {
+      const chotRes = await fetch(`${API}/api/thu_ngan_so_quy/chot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(thuNganId, ngay, form)),
+      });
+      const chotPayload = await chotRes.json();
+      if (!chotRes.ok) throw new Error(chotPayload.error || `HTTP ${chotRes.status}`);
+
+      const resetRes = await fetch(`${API}/api/thu_ngan_so_quy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(thuNganId, ngay, zeroedForm)),
+      });
+      const resetPayload = await resetRes.json();
+      if (!resetRes.ok) throw new Error(resetPayload.error || `HTTP ${resetRes.status}`);
+
+      delete pendingFormsRef.current[thuNganId];
+      setFormMap((prev) => ({ ...prev, [thuNganId]: zeroedForm }));
+      applyPayload(resetPayload, ngay);
+      setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'saved' }));
+      setNotice(`Đã chốt thu ngân ${row.ten_thu_ngan}, chuyển số dư về Kho Tổng và đưa thu ngân về 0.`);
+      setSettlementModal({ open: true, cashierName: row.ten_thu_ngan || '' });
     } catch (err) {
       setDraftStatusMap((prev) => ({ ...prev, [thuNganId]: 'error' }));
       setNotice(`Không chốt được ${row.ten_thu_ngan}: ${err.message}`);
@@ -360,18 +524,15 @@ const handleResetKhoTong = useCallback((thuNganId) => {
     }
   };
 
-  const summary = useMemo(() => (
-    (data.rows || []).reduce((acc, row) => {
-      const form = formMap[row.thu_ngan_id] || buildFormMap([row])[row.thu_ngan_id] || { ghi_chu: '', chi_tiet: [] };
-      const totals = totalsFromForm(form, row);
-      acc.soThuNgan += 1;
-      acc.soDong += form.chi_tiet.length;
-      acc.dauKy += totals.dauKy;
-      acc.hienTai += totals.hienTai;
-      acc.chenhLech += totals.chenhLech;
-      return acc;
-    }, { soThuNgan: 0, soDong: 0, dauKy: 0, hienTai: 0, chenhLech: 0 })
-  ), [data.rows, formMap]);
+  const settlementSummary = pendingOrders.reduce((acc, order) => {
+    const payment = resolveOrderLivePayments(order, companyBankAccounts);
+    acc.count += 1;
+    acc.totalAmount += toNumber(order?.tong_tien);
+    if (!payment) return acc;
+    acc.cashTotal += payment.cashPayment;
+    acc.bankTotal += payment.bankPayment;
+    return acc;
+  }, { count: 0, totalAmount: 0, cashTotal: 0, bankTotal: 0 });
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -394,7 +555,15 @@ const handleResetKhoTong = useCallback((thuNganId) => {
           </div>
         )}
 
-
+        {livePreviewMeta.count > 0 && (
+          <div style={{ marginBottom: 16, padding: '11px 14px', borderRadius: 12, border: '1px solid #fde68a', background: '#fffbeb', color: '#92400e', fontSize: 12, lineHeight: 1.6 }}>
+            Đang tạm cộng frontend từ <b>{livePreviewMeta.count}</b> đơn chưa chốt
+            {' · '}Tổng tiền <b>{fmt(livePreviewMeta.totalAmount)} ₫</b>
+            {' · '}Tiền mặt <b>{fmt(livePreviewMeta.cashTotal)} ₫</b>
+            {' · '}Ngân hàng <b>{fmt(livePreviewMeta.bankTotal)} ₫</b>
+            {' · '}Chỉ lưu backend khi bấm <b>Chốt Thu Ngân</b>.
+          </div>
+        )}
 
         {loading ? (
           <div style={{ ...panelStyle, padding: 32, textAlign: 'center', color: '#94a3b8' }}>Đang tải dữ liệu thu ngân...</div>
@@ -405,25 +574,20 @@ const handleResetKhoTong = useCallback((thuNganId) => {
             {data.rows.map((row) => {
               const fallbackForm = buildFormMap([row])[row.thu_ngan_id] || { ghi_chu: row.ghi_chu || '', chi_tiet: [] };
               const form = formMap[row.thu_ngan_id] || fallbackForm;
-              const totals = totalsFromForm(form, row);
 
               if (row.thu_ngan_id === 'kho_tong') {
-                  return (
-                      <KhoTongCard
-                          key="kho_tong"
-                          draftState={statusMeta[draftStatusMap[row.thu_ngan_id] || 'idle']}
-                          form={form}
-                          isSaving={!!savingMap[row.thu_ngan_id]}
-                          onChot={handleChot}
-                          onReset={handleResetKhoTong}
-                          onUpsertCategoryField={handleUpsertCategoryField}
-                          onNoteChange={handleNoteChange}
-                          row={row}
-                          totals={totals}
-                          companyBankAccounts={withFallbackCompanyBankAccounts(companyBankAccounts, true)}
-                          tuoiVangOptions={tuoiVangOptions}
-                      />
-                  );
+                return (
+                  <KhoTongCard
+                    key="kho_tong"
+                    draftState={statusMeta[draftStatusMap[row.thu_ngan_id] || 'idle']}
+                    form={form}
+                    onReset={handleResetKhoTong}
+                    onUpsertCategoryField={handleUpsertCategoryField}
+                    row={row}
+                    companyBankAccounts={withFallbackCompanyBankAccounts(companyBankAccounts, true)}
+                    tuoiVangOptions={tuoiVangOptions}
+                  />
+                );
               }
 
               return (
@@ -433,12 +597,11 @@ const handleResetKhoTong = useCallback((thuNganId) => {
                   form={form}
                   isSaving={!!savingMap[row.thu_ngan_id]}
                   onAddDetailRow={handleAddDetailRow}
-                  onChot={handleChot}
+                  onChot={handleCashierSettlement}
                   onDetailFieldChange={handleDetailFieldChange}
                   onNoteChange={handleNoteChange}
                   onRemoveDetailRow={handleRemoveDetailRow}
                   row={row}
-                  totals={totals}
                   tuoiVangOptions={tuoiVangOptions}
                 />
               );
@@ -448,6 +611,79 @@ const handleResetKhoTong = useCallback((thuNganId) => {
 
         <ThuNganHistory history={data.history} historyDeletingKey={historyDeletingKey} loading={loading} ngay={ngay} onDeleteHistory={handleDeleteHistory} />
       </div>
+
+      {settlementModal.open && (
+        <div
+          onClick={() => setSettlementModal({ open: false, cashierName: '' })}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            zIndex: 1200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 'min(1180px, 100%)',
+              maxHeight: '88vh',
+              overflow: 'auto',
+              background: 'white',
+              borderRadius: 18,
+              boxShadow: '0 30px 80px rgba(15, 23, 42, 0.28)',
+              border: '1px solid #e2e8f0',
+            }}
+          >
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Đơn hàng cần chốt</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
+                  Thu ngân <b style={{ color: '#0f766e' }}>{settlementModal.cashierName || 'TN1'}</b> đã chốt xong. Bạn có thể archive hoặc xóa các đơn còn đang nằm ngoài Hộp Lưu Trữ Lâu Dài ngay tại đây.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettlementModal({ open: false, cashierName: '' })}
+                style={{ border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 28, lineHeight: 1, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: 22 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 18 }}>
+                <div style={{ ...panelStyle, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Số đơn cần chốt</div>
+                  <div style={{ marginTop: 8, fontSize: 28, fontWeight: 800, color: '#1d4ed8' }}>{settlementSummary.count}</div>
+                </div>
+                <div style={{ ...panelStyle, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Tổng tiền</div>
+                  <div style={{ marginTop: 8, fontSize: 24, fontWeight: 800, color: '#16a34a' }}>{fmt(settlementSummary.totalAmount)} ₫</div>
+                </div>
+                <div style={{ ...panelStyle, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Tiền mặt</div>
+                  <div style={{ marginTop: 8, fontSize: 24, fontWeight: 800, color: '#c2410c' }}>{fmt(settlementSummary.cashTotal)} ₫</div>
+                </div>
+                <div style={{ ...panelStyle, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Chuyển khoản</div>
+                  <div style={{ marginTop: 8, fontSize: 24, fontWeight: 800, color: '#0369a1' }}>{fmt(settlementSummary.bankTotal)} ₫</div>
+                </div>
+              </div>
+
+              <OrderListTable
+                orders={pendingOrders}
+                emptyText="Không còn đơn hàng nào cần chốt."
+                onArchive={handleArchivePendingOrder}
+                onDelete={handleDeletePendingOrder}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

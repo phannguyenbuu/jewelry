@@ -1,4 +1,4 @@
-import { API, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldLineEffectiveQuantity, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, normalizeTradeRate, parseFmt, parseWeight } from './shared';
+import { API, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldLineEffectiveQuantity, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, normalizeTradeRate, parseFmt, parseWeight } from './shared';
 
 const SALE_PAGE = {
     width: 1240,
@@ -44,7 +44,6 @@ const safeText = (value, fallback = '') => {
 };
 const formatBuyProductName = (product) => safeText(formatBuyGoldProductLabel(product), 'Dẻ khác');
 const getTradeNewGoldQuantity = (line) => getGoldLineEffectiveQuantity({ ...line, tx: 'trade', cat: 'gold' });
-const getTradeOldGoldQuantity = (line) => Math.max(0, parseWeight(line?.customerQty || 0));
 const HEX10_MOD = 0x10000000000n;
 const hashTextToBigInt = (value) => {
     let hash = 0n;
@@ -282,9 +281,9 @@ const getSaleVoucherRows = (lines, rates) => {
         );
         const qty = parseFmt(line.qty);
         const itemGoldWeight = parseWeight(line.itemGoldWeight || 0);
-        const addGold = parseWeight(line.sellAddedGold || 0);
-        const cutGold = parseWeight(line.sellCutGold || 0);
-        const labor = Math.max(0, parseFmt(line.sellLabor || 0));
+        const addGold = getLineSellAddedGoldWeight(line);
+        const cutGold = getLineSellCutGoldWeight(line);
+        const labor = getLineSellLaborAmount(line);
         const baseGoldQty = line.itemId ? (itemGoldWeight || 1) : qty;
         const actualGoldQty = Math.max(0, baseGoldQty + addGold - cutGold);
         const codeText = safeText(line.productCode || `MH-${index + 1}`);
@@ -558,13 +557,13 @@ const createEasyInvoiceDraft = ({ orderId, customerInfo, lines, rates }) => {
         );
         const itemGoldWeight = parseWeight(line.itemGoldWeight || 0);
         const qty = parseWeight(line.qty || 0);
-        const addGold = parseWeight(line.sellAddedGold || 0);
-        const cutGold = parseWeight(line.sellCutGold || 0);
+        const addGold = getLineSellAddedGoldWeight(line);
+        const cutGold = getLineSellCutGoldWeight(line);
         const baseGoldQty = line.itemId ? (itemGoldWeight || 1) : qty;
         const quantity = normalizeEasyInvoiceQuantity(line.tx === 'trade' ? getTradeNewGoldQuantity(line) : Math.max(0, baseGoldQty + addGold - cutGold));
         if (!quantity) return;
 
-        const labor = Math.max(0, parseFmt(line.sellLabor || 0));
+        const labor = getLineSellLaborAmount(line);
         const resolvedCode = safeText(line.productCode, buildSyntheticEasyInvoiceCode({ orderId, line, index }));
         items.push({
             key: String(line.id || `${index + 1}`),
@@ -597,7 +596,7 @@ const createEasyInvoiceDraft = ({ orderId, customerInfo, lines, rates }) => {
             bankNo: safeText(customerInfo?.bankNo),
         },
         invoice: {
-            paymentMethod: '',
+            paymentMethod: 'Chuyển khoản',
             arisingDate: currentDateText(),
             currencyUnit: 'VND',
             exchangeRate: '1',
@@ -726,7 +725,7 @@ const buildEasyInvoicePayload = ({ orderId, customerInfo, lines, rates, settleme
         },
         invoice: {
             currencyUnit: safeText(invoiceMeta?.currencyUnit, 'VND'),
-            paymentMethod: safeText(invoiceMeta?.paymentMethod, resolvePaymentMethodText(settlement)),
+            paymentMethod: 'Chuyển khoản',
             arisingDate: safeText(invoiceMeta?.arisingDate, currentDateText()),
             exchangeRate: safeText(invoiceMeta?.exchangeRate, '1'),
             total: totalBeforeTax,

@@ -14,6 +14,9 @@ const fmtCalc = n => {
     return Math.round(Math.abs(v || 0)).toLocaleString('en-US');
 };
 const VN_MONEY_SUGGESTIONS = ['000', '0,000', '00,000', '000,000'];
+const TRADE_COMP_SUGGESTIONS = Array.from({ length: 19 }, (_, index) => (
+    ((index * 50000) + 100000).toLocaleString('en-US')
+));
 const getDayGreeting = (date = new Date()) => {
     const hour = date.getHours();
     if (hour >= 5 && hour < 12) return 'Chào buổi sáng.';
@@ -106,6 +109,7 @@ const sanitizeLineInventoryState = (line) => {
         itemId: null,
         itemName: '',
         itemGoldWeight: '',
+        itemStoneWeight: '',
         productCode: '',
     };
 };
@@ -117,7 +121,7 @@ const createDefaultLine = (rates, overrides = {}) => {
         id: Date.now(),
         cat: firstCat,
         product: firstProd,
-        tx: 'sell',
+        tx: 'trade',
         qty: '0',
         value: 0,
         customerQty: '',
@@ -127,8 +131,11 @@ const createDefaultLine = (rates, overrides = {}) => {
         sellAddedGold: '',
         sellCutGold: '',
         itemGoldWeight: '',
+        itemStoneWeight: '',
         tradeLabor: '',
         tradeComp: '',
+        tradeOldExpanded: true,
+        tradeNewExpanded: true,
         ...overrides,
     });
 };
@@ -386,6 +393,18 @@ const formatWeight = value => {
     if (!Number.isFinite(value)) return '';
     return value.toFixed(4).replace(/\.?0+$/, '') || '0';
 };
+const getLineSellLaborAmount = (line) => {
+    const amount = Math.max(0, parseFmt(line?.sellLabor || 0));
+    return amount;
+};
+const getLineSellAddedGoldWeight = (line) => {
+    const amount = Math.max(0, parseWeight(line?.sellAddedGold || 0));
+    return amount;
+};
+const getLineSellCutGoldWeight = (line) => {
+    const amount = Math.max(0, parseWeight(line?.sellCutGold || 0));
+    return amount;
+};
 const getGoldLineEffectiveQuantity = (line) => {
     const effectiveCat = line?.tx === 'trade' ? 'gold' : line?.cat;
     const baseQty = parseFmt(line?.qty || 0);
@@ -393,18 +412,27 @@ const getGoldLineEffectiveQuantity = (line) => {
         return Math.max(0, baseQty);
     }
     const itemGoldWeight = parseWeight(line?.itemGoldWeight || 0);
-    const addGold = parseWeight(line?.sellAddedGold || 0);
-    const cutGold = parseWeight(line?.sellCutGold || 0);
+    const addGold = getLineSellAddedGoldWeight(line);
+    const cutGold = getLineSellCutGoldWeight(line);
     const baseGoldQty = line?.itemId ? (itemGoldWeight || 1) : baseQty;
     return Math.max(0, baseGoldQty + addGold - cutGold);
 };
+const getTradeOldGoldQuantity = (line) => (
+    line?.tx === 'trade' && !Boolean(line?.tradeOldExpanded)
+        ? 0
+        : Math.max(0, parseWeight(line?.customerQty || 0))
+);
 const getTradeCompensationQuantity = (line) => {
     if (line?.tx !== 'trade') return 0;
-    const oldGoldQty = Math.max(0, parseWeight(line?.customerQty || 0));
+    const oldGoldQty = getTradeOldGoldQuantity(line);
     const newGoldQty = getGoldLineEffectiveQuantity(line);
     return Math.min(oldGoldQty, newGoldQty);
 };
-const getTradeCompensationUnitAmount = (line) => Math.max(0, Math.round(parseFmt(line?.tradeComp || 0)));
+const getTradeCompensationUnitAmount = (line) => (
+    line?.tx === 'trade' && !Boolean(line?.tradeOldExpanded)
+        ? 0
+        : Math.max(0, Math.round(parseFmt(line?.tradeComp || 0)))
+);
 const getTradeCompensationAmount = (line) => Math.round(getTradeCompensationQuantity(line) * getTradeCompensationUnitAmount(line));
 const computeRepairNextWeight = (line, repairMode) => {
     const current = parseWeight(line?.tl_vang_hien_tai);
@@ -466,6 +494,7 @@ export {
   parseFmt,
   fmtCalc,
   VN_MONEY_SUGGESTIONS,
+  TRADE_COMP_SUGGESTIONS,
   getDayGreeting,
   SOLD_STATUS,
   REPAIRING_STATUS,
@@ -508,7 +537,11 @@ export {
   inventoryStatusLabel,
   parseWeight,
   formatWeight,
+  getLineSellLaborAmount,
+  getLineSellAddedGoldWeight,
+  getLineSellCutGoldWeight,
   getGoldLineEffectiveQuantity,
+  getTradeOldGoldQuantity,
   getTradeCompensationQuantity,
   getTradeCompensationUnitAmount,
   getTradeCompensationAmount,

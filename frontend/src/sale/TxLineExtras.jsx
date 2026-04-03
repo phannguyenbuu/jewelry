@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IoChevronDownOutline, IoChevronUpOutline } from 'react-icons/io5';
 
 import FormattedNumberInput from './FormattedNumberInput';
-import { S, VN_MONEY_SUGGESTIONS, fmtCalc, normalizeTradeRate, parseWeight } from './shared';
+import { S, TRADE_COMP_SUGGESTIONS, VN_MONEY_SUGGESTIONS, fmtCalc, normalizeTradeRate, parseWeight } from './shared';
 
 function StepButtons({ txTheme, lineAccent, onIncrease, onDecrease, increaseLabel, decreaseLabel }) {
     return (
@@ -168,9 +168,30 @@ export function MoneyField({
     onDecrease,
     increaseLabel,
     decreaseLabel,
+    suggestions,
+    onSuggestionSelect,
 }) {
+    const [suggestOpen, setSuggestOpen] = useState(false);
+    const [panelTop, setPanelTop] = useState(0);
+    const containerRef = useRef(null);
+
+    useEffect(() => {
+        if (suggestOpen && containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            setPanelTop(Math.round(rect.bottom) + 4);
+        }
+    }, [suggestOpen]);
+
     return (
-        <div>
+        <div
+            ref={containerRef}
+            onFocus={() => suggestions && setSuggestOpen(true)}
+            onBlur={(e) => {
+                if (suggestions && !e.currentTarget.contains(e.relatedTarget)) {
+                    setSuggestOpen(false);
+                }
+            }}
+        >
             <span style={S.label}>{label}</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 6 }}>
                 <FormattedNumberInput
@@ -189,6 +210,42 @@ export function MoneyField({
                     decreaseLabel={decreaseLabel}
                 />
             </div>
+            {suggestions && suggestOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        left: 12,
+                        right: 12,
+                        top: panelTop,
+                        zIndex: 1200,
+                        background: '#fff',
+                        border: '1px solid #dbe4ee',
+                        borderRadius: 16,
+                        padding: '10px 8px',
+                        boxShadow: '0 12px 40px rgba(15,23,42,.18)',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, 1fr)',
+                        gap: 6,
+                    }}
+                >
+                    {suggestions.map(s => (
+                        <button
+                            key={s}
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => { onSuggestionSelect?.(s); setSuggestOpen(false); }}
+                            style={{
+                                padding: '8px 4px', fontSize: 11, fontWeight: 700,
+                                border: `1px solid ${txTheme.softBorder}`,
+                                borderRadius: 10, background: txTheme.softBg,
+                                cursor: 'pointer', textAlign: 'center', color: lineAccent,
+                            }}
+                        >
+                            {s}
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
@@ -265,7 +322,7 @@ export default function TxLineExtras({
             </datalist>
             {showTradeComp && tradeMoneySuggestionId && tradeMoneySuggestionId !== sellMoneySuggestionId && (
                 <datalist id={tradeMoneySuggestionId}>
-                    {VN_MONEY_SUGGESTIONS.map(option => (
+                    {TRADE_COMP_SUGGESTIONS.map(option => (
                         <option key={option} value={option} />
                     ))}
                 </datalist>

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import SalePosMobile from './SalePosMobile';
 import ImageOcrUpload from './components/ImageOcrUpload';
 import { API_BASE } from './lib/api';
+import { archiveOrder, getOrderArchiveKey, pruneArchivedOrderKeys, readArchivedOrderKeys, unarchiveOrder } from './lib/orderArchive';
 
 const API = API_BASE;
 
@@ -120,6 +121,7 @@ function LoaiBadge({ l }) {
 /* ─── Main Page ──────────────────────────────────────────────────────── */
 export default function DonHangPage() {
     const [list, setList] = useState([]);
+    const [archivedOrderKeys, setArchivedOrderKeys] = useState(() => readArchivedOrderKeys());
     const [modal, setModal] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
     const [search, setSearch] = useState('');
@@ -130,10 +132,13 @@ export default function DonHangPage() {
     const [confirmDelAll, setConfirmDelAll] = useState(false);
     const [isDeletingAll, setIsDeletingAll] = useState(false);
     const [posOpen, setPosOpen] = useState(false);
+    const [archiveModalOpen, setArchiveModalOpen] = useState(false);
 
     const load = async () => {
         const r = await fetch(`${API}/api/don_hang`);
-        setList(await r.json());
+        const rows = await r.json();
+        setList(rows);
+        setArchivedOrderKeys(pruneArchivedOrderKeys(rows));
     };
 
     useEffect(() => {
@@ -141,7 +146,10 @@ export default function DonHangPage() {
         const fetchList = async () => {
             const r = await fetch(`${API}/api/don_hang`);
             const data = await r.json();
-            if (!cancelled) setList(data);
+            if (!cancelled) {
+                setList(data);
+                setArchivedOrderKeys(pruneArchivedOrderKeys(data));
+            }
         };
         fetchList().catch(() => { });
         return () => {
@@ -196,7 +204,10 @@ export default function DonHangPage() {
         }
     };
 
-    const filtered = list.filter(d => {
+    const activeOrders = useMemo(() => list.filter(d => !archivedOrderKeys.has(getOrderArchiveKey(d))), [archivedOrderKeys, list]);
+    const archivedOrders = useMemo(() => list.filter(d => archivedOrderKeys.has(getOrderArchiveKey(d))), [archivedOrderKeys, list]);
+
+    const filtered = activeOrders.filter(d => {
         const q = search.toLowerCase();
         const matchSearch = !q || (d.ma_don || '').toLowerCase().includes(q) || (d.khach_hang || '').toLowerCase().includes(q) || (d.so_dien_thoai || '').includes(q) || (d.cccd || '').includes(q);
         const matchStatus = !filterStatus || d.trang_thai === filterStatus;
@@ -205,12 +216,22 @@ export default function DonHangPage() {
     });
 
     const stats = {
-        total: list.length,
-        mua: list.filter(d => d.loai_don === 'Mua').length,
-        ban: list.filter(d => d.loai_don === 'Bán').length,
-        traoDoi: list.filter(d => d.loai_don === 'Trao đổi').length,
-        hoanThanh: list.filter(d => d.trang_thai === 'Hoàn thành').length,
-        tongTien: list.filter(d => d.trang_thai !== 'Hủy').reduce((s, d) => s + (d.tong_tien || 0), 0),
+        total: activeOrders.length,
+        mua: activeOrders.filter(d => d.loai_don === 'Mua').length,
+        ban: activeOrders.filter(d => d.loai_don === 'Bán').length,
+        traoDoi: activeOrders.filter(d => d.loai_don === 'Trao đổi').length,
+        hoanThanh: activeOrders.filter(d => d.trang_thai === 'Hoàn thành').length,
+        tongTien: activeOrders.filter(d => d.trang_thai !== 'Hủy').reduce((s, d) => s + (d.tong_tien || 0), 0),
+    };
+
+    const handleArchiveOrder = (order) => {
+        archiveOrder(order);
+        setArchivedOrderKeys(readArchivedOrderKeys());
+    };
+
+    const handleUnarchiveOrder = (order) => {
+        unarchiveOrder(order);
+        setArchivedOrderKeys(readArchivedOrderKeys());
     };
 
     const isTD = form.loai_don === 'Trao đổi';
@@ -252,6 +273,9 @@ export default function DonHangPage() {
                         {Object.keys(STATUS_CFG).map(s => <option key={s}>{s}</option>)}
                     </select>
                     <div style={{ flex: 1 }} />
+                    <button onClick={() => setArchiveModalOpen(true)} style={{ ...btn('#f8fafc', '#475569'), display: 'flex', alignItems: 'center', gap: 6 }}>
+                        🗃 Hộp Lưu Trữ Lâu Dài {archivedOrders.length ? `(${archivedOrders.length})` : ''}
+                    </button>
                     <button onClick={() => setConfirmDelAll(true)} style={{ ...btn('#fee2e2', '#dc2626'), display: 'flex', alignItems: 'center', gap: 6 }}>🗑 Xóa toàn bộ</button>
                     <button onClick={() => setPosOpen(true)} style={{ ...btn('#1e293b'), display: 'flex', alignItems: 'center', gap: 6 }}>📱 POS</button>
                     <button onClick={openAdd} style={{ ...btn('#6366f1'), display: 'flex', alignItems: 'center', gap: 6 }}>+ Tạo đơn hàng</button>
@@ -290,6 +314,7 @@ export default function DonHangPage() {
                                     <td style={{ padding: '10px 14px' }}><StatusBadge s={d.trang_thai} /></td>
                                     <td style={{ padding: '10px 14px' }}>
                                         <div style={{ display: 'flex', gap: 6 }}>
+                                            <button onClick={() => handleArchiveOrder(d)} title="Đưa vào Hộp Lưu Trữ Lâu Dài" style={{ ...btn('#fff7ed', '#c2410c'), padding: '5px 10px', fontSize: 11 }}>🗃</button>
                                             <button onClick={() => openEdit(d)} style={{ ...btn('#f1f5f9', '#475569'), padding: '5px 10px', fontSize: 11 }}>✏️</button>
                                             <button onClick={() => setConfirmDel(d.id)} style={{ ...btn('#fee2e2', '#dc2626'), padding: '5px 10px', fontSize: 11 }}>🗑</button>
                                         </div>
@@ -512,6 +537,47 @@ export default function DonHangPage() {
                             )}
                         </div>
                     )}
+                </Modal>
+
+                {/* Confirm Delete All */}
+                <Modal open={archiveModalOpen} onClose={() => setArchiveModalOpen(false)} title="🗃 Hộp Lưu Trữ Lâu Dài" maxWidth={760}>
+                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+                        Đơn hàng trong hộp này sẽ không còn hiển thị ở danh sách chính và sẽ không được tính vào <b>/Thu Ngan</b>.
+                    </div>
+                    <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                    {['Mã đơn', 'Loại', 'Khách hàng', 'Ngày đặt', 'Tổng tiền', ''].map(h => (
+                                        <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: '#64748b', borderBottom: '1.5px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {archivedOrders.length === 0 && (
+                                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 34, color: '#94a3b8' }}>Chưa có đơn nào trong Hộp Lưu Trữ Lâu Dài</td></tr>
+                                )}
+                                {archivedOrders.map((d, i) => (
+                                    <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                                        <td style={{ padding: '10px 14px', fontWeight: 700, color: '#6366f1' }}>{d.ma_don}</td>
+                                        <td style={{ padding: '10px 14px' }}><LoaiBadge l={d.loai_don || 'Mua'} /></td>
+                                        <td style={{ padding: '10px 14px' }}>
+                                            <div style={{ fontWeight: 600 }}>{d.khach_hang}</div>
+                                            <div style={{ fontSize: 11, color: '#94a3b8' }}>{d.so_dien_thoai}{d.cccd && ` · CCCD: ${d.cccd}`}</div>
+                                        </td>
+                                        <td style={{ padding: '10px 14px', color: '#64748b' }}>
+                                            <div>{splitOrderDateDisplay(d.ngay_dat).dateText}</div>
+                                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{splitOrderDateDisplay(d.ngay_dat).timeText}</div>
+                                        </td>
+                                        <td style={{ padding: '10px 14px', fontWeight: 700, color: '#16a34a' }}>{fmt(d.tong_tien)} ₫</td>
+                                        <td style={{ padding: '10px 14px' }}>
+                                            <button onClick={() => handleUnarchiveOrder(d)} style={{ ...btn('#ecfeff', '#0f766e'), padding: '5px 10px', fontSize: 11 }}>↩ Khôi phục</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </Modal>
 
                 {/* Confirm Delete All */}

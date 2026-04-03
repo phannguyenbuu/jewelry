@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtCalc } from '../sale/shared';
+import { API_BASE } from '../lib/api';
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200];
 const POLL_INTERVAL_MS = 60 * 1000;
@@ -32,6 +33,66 @@ function getInvoiceNo(item) {
 
 function getInvoiceDate(item) {
     return item.ArisingDate || item.PublishDate || item.InvDate || item.date || '-';
+}
+
+function getInvoiceDateTimeSource(item) {
+    return item.ModifiedDate
+        || item.IssueDate
+        || item.ArisingDate
+        || item.PublishDate
+        || item.InvDate
+        || item.date
+        || '-';
+}
+
+function parseInvoiceDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw || raw === '-') return null;
+
+    const normalized = raw.replace('T', ' ').replace(/\.\d+$/, '');
+    let match = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (match) {
+        const [, day, month, year, hour = '00', minute = '00', second = '00'] = match;
+        return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hour),
+            Number(minute),
+            Number(second),
+        );
+    }
+
+    match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (match) {
+        const [, year, month, day, hour = '00', minute = '00', second = '00'] = match;
+        return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hour),
+            Number(minute),
+            Number(second),
+        );
+    }
+
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatInvoiceDateTime(value) {
+    const date = parseInvoiceDate(value);
+    if (!date) return { dateText: String(value || '-').trim() || '-', timeText: '' };
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mi = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return {
+        dateText: `${dd}/${mm}/${yyyy}`,
+        timeText: `${hh}:${mi}:${ss}`,
+    };
 }
 
 function getLookupCode(item) {
@@ -168,7 +229,7 @@ export default function HoaDonTab() {
 
     const fetchStatus = async () => {
         try {
-            const { ok, payload, message } = await fetchJsonWithRetry('/api/easyinvoice/cache-status');
+            const { ok, payload, message } = await fetchJsonWithRetry(`${API_BASE}/api/easyinvoice/cache-status`);
             if (!ok) throw new Error(message);
             if (payload?.sync) setSyncInfo(payload.sync);
             if (Array.isArray(payload?.logs)) setSyncLogs(payload.logs);
@@ -196,7 +257,7 @@ export default function HoaDonTab() {
             query.set('start', activeParams.pageSize === 0 ? '0' : String((activeParams.page - 1) * activeParams.pageSize));
             query.set('length', String(activeParams.pageSize));
 
-            const { ok, payload, message } = await fetchJsonWithRetry(`/api/easyinvoice/list?${query.toString()}`);
+            const { ok, payload, message } = await fetchJsonWithRetry(`${API_BASE}/api/easyinvoice/list?${query.toString()}`);
             if (!ok) throw new Error(message);
 
             if (currentRequestId !== requestIdRef.current) return;
@@ -262,7 +323,7 @@ export default function HoaDonTab() {
         const nextEnabled = !isPollingEnabled;
         setPollingActionLoading(true);
         try {
-            const { ok, payload, message } = await fetchJsonWithRetry('/api/easyinvoice/cache-polling', {
+            const { ok, payload, message } = await fetchJsonWithRetry(`${API_BASE}/api/easyinvoice/cache-polling`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: nextEnabled }),
@@ -575,6 +636,7 @@ export default function HoaDonTab() {
                                         const baseBg = index % 2 === 0 ? 'white' : '#f8fafc';
                                         const invoiceNo = getInvoiceNo(item);
                                         const isUnsignedInvoice = String(invoiceNo).trim() === '0';
+                                        const invoiceDate = formatInvoiceDateTime(getInvoiceDateTimeSource(item));
                                         return (
                                             <tr
                                                 key={`${getLookupCode(item)}-${rowIndex}`}
@@ -588,9 +650,12 @@ export default function HoaDonTab() {
                                             >
                                                 <td style={{ padding: '9px 12px', color: '#94a3b8', fontWeight: 600 }}>{rowIndex}</td>
                                                 <td style={{ padding: '9px 12px', fontWeight: isUnsignedInvoice ? 500 : 800, color: isUnsignedInvoice ? '#dc2626' : '#1e293b', whiteSpace: 'nowrap' }}>
-                                                    {isUnsignedInvoice ? 'Unsined' : invoiceNo}
+                                                    {isUnsignedInvoice ? 'Unsigned' : invoiceNo}
                                                 </td>
-                                                <td style={{ padding: '9px 12px', color: '#475569', whiteSpace: 'nowrap' }}>{getInvoiceDate(item)}</td>
+                                                <td style={{ padding: '9px 12px', color: '#475569', whiteSpace: 'nowrap' }}>
+                                                    <div>{invoiceDate.dateText}</div>
+                                                    <div style={{ marginTop: 2, fontSize: 11, color: '#94a3b8' }}>{invoiceDate.timeText || '--:--:--'}</div>
+                                                </td>
                                                 <td style={{ padding: '9px 12px', fontFamily: 'monospace', color: '#2563eb', whiteSpace: 'nowrap' }}>{getLookupCode(item)}</td>
                                                 <td style={{ padding: '9px 12px', color: '#334155', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getBuyer(item)}>
                                                     {getBuyer(item)}

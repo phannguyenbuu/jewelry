@@ -5,7 +5,7 @@ import OrderScreen from './sale/OrderScreen';
 import PaymentScreen from './sale/PaymentScreen';
 import RepairJobScreen from './sale/RepairJobScreen';
 import { OrderListScreen, SavedTransactionsModal } from './sale/SavedScreens';
-import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldLineEffectiveQuantity, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
+import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldLineEffectiveQuantity, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
 
 const serializeOrderLines = (saleLines = []) => saleLines.map((line, index) => ({
     stt: index + 1,
@@ -120,9 +120,9 @@ export default function SalePosMobile() {
         if (l.tx === 'trade') {
             const hasCustomerCustomBuy = l.customerCustomBuy !== undefined && String(l.customerCustomBuy).trim() !== '';
             const customerRate = normalizeTradeRate('gold', hasCustomerCustomBuy ? l.customerCustomBuy : (rates.gold?.[l.customerProduct]?.[1] || 0));
-            const customerQty = parseWeight(l.customerQty || 0);
+            const customerQty = getTradeOldGoldQuantity(l);
             const customerAmount = Math.round(customerQty * customerRate);
-            const labor = parseFmt(l.sellLabor || 0);
+            const labor = getLineSellLaborAmount(l);
             const actualQty = getGoldLineEffectiveQuantity(l);
             const newGoldAmount = Math.round(actualQty * rate + labor);
             const manualAdjustment = Math.round(parseFmt(l.tradeLabor || 0));
@@ -135,8 +135,6 @@ export default function SalePosMobile() {
                 tradeCompAmount > 0 ? ` | Bu: ${fmtVN(tradeCompUnitAmount)} x ${formatWeight(tradeCompQty)}` : '',
             ].join('');
             return `${sign}Vang moi ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)} - De ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}${tradeNote} = ${fmtVN(newGoldAmount - customerAmount + tradeAdjustedAmount)}`;
-            const adjustNote = adjustAmount ? ` | Chỉnh tay: ${fmtVN(adjustAmount)}` : '';
-            return `${sign}Vàng mới ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)} - Dẻ ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}${adjustNote} = ${fmtVN(newGoldAmount - customerAmount + adjustAmount)}`;
         }
         if (l.tx === 'sell' && effectiveCat === 'gold') {
             const labor = parseFmt(l.sellLabor || 0);

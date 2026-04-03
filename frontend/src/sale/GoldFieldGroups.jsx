@@ -150,32 +150,105 @@ export function GoldSaleFieldGroup({
     adjustSellLabor,
     adjustTradeComp,
     set,
+    showSupplementalFields = true,
+    supplementalToggle = null,
+    showGroupFields = true,
+    headerToggle = null,
 }) {
     return (
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1', marginTop: 2, paddingTop: 10, borderTop: `1px solid ${txTheme.softBorder}` }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em', marginBottom: 6 }}>{title}</span>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <div style={{ width: '100%' }}>
-                            <ProductSelect
-                                value={product}
-                                onChange={onProductChange}
-                                options={productOptions}
-                                disabled={productLocked}
-                                width={tradeComboWidth}
-                            />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+                        <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>{title}</span>
+                        {headerToggle}
+                    </div>
+                    <div
+                        style={{
+                            display: 'grid',
+                            gridTemplateRows: showGroupFields ? '1fr' : '0fr',
+                            transition: 'grid-template-rows .24s ease, opacity .24s ease',
+                            opacity: showGroupFields ? 1 : 0.72,
+                        }}
+                    >
+                        <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showGroupFields ? 2 : 0 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                                <div style={{ width: '100%' }}>
+                                    <ProductSelect
+                                        value={product}
+                                        onChange={onProductChange}
+                                        options={productOptions}
+                                        disabled={productLocked}
+                                        width={tradeComboWidth}
+                                    />
+                                </div>
+                                <QuantityField
+                                    label="Số lượng"
+                                    value={qty}
+                                    onChange={onQtyChange}
+                                    adjust={adjustQty}
+                                    step={quantityStep}
+                                    lineAccent={lineAccent}
+                                    txTheme={txTheme}
+                                    disabled={qtyLocked}
+                                />
+                            </div>
+
+                            <TxLineInventoryLookup {...inventoryLookupProps} />
+
+                            <div>
+                                <span style={S.label}>{rateLabel}</span>
+                                <FormattedNumberInput
+                                    style={{ ...S.inp, color: lineAccent }}
+                                    value={rateValue}
+                                    onValueChange={onRateChange}
+                                />
+                            </div>
+
+                            {supplementalToggle}
+
+                            <div
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateRows: showSupplementalFields ? '1fr' : '0fr',
+                                    transition: 'grid-template-rows .24s ease, opacity .24s ease',
+                                    opacity: showSupplementalFields ? 1 : 0.72,
+                                }}
+                            >
+                                <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
+                                    <MoneyField
+                                        label="Tiền công"
+                                        placeholder="Nhập tiền công"
+                                        list={sellMoneySuggestionId}
+                                        txTheme={txTheme}
+                                        lineAccent={lineAccent}
+                                        value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+                                        onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+                                        onIncrease={() => adjustSellLabor(sellMoneyStep)}
+                                        onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+                                        increaseLabel="Tăng tiền công"
+                                        decreaseLabel="Giảm tiền công"
+                                    />
+                                    <TxLineExtras
+                                        visible={showSupplementalFields}
+                                        line={line}
+                                        txTheme={txTheme}
+                                        lineAccent={lineAccent}
+                                        goldAdjustStep={goldAdjustStep}
+                                        sellMoneyStep={sellMoneyStep}
+                                        sellMoneySuggestionId={sellMoneySuggestionId}
+                                        tradeMoneySuggestionId={tradeMoneySuggestionId}
+                                        showTradeComp={showTradeComp}
+                                        normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
+                                        adjustGoldField={adjustGoldField}
+                                        adjustSellLabor={adjustSellLabor}
+                                        adjustTradeComp={adjustTradeComp}
+                                        set={set}
+                                        hideLaborField
+                                    />
+                                </div>
+                            </div>
                         </div>
-                        <QuantityField
-                            label="Số lượng"
-                            value={qty}
-                            onChange={onQtyChange}
-                            adjust={adjustQty}
-                            step={quantityStep}
-                            lineAccent={lineAccent}
-                            txTheme={txTheme}
-                            disabled={qtyLocked}
-                        />
                     </div>
                 </div>
             ) : (
@@ -190,7 +263,6 @@ export function GoldSaleFieldGroup({
                 </div>
             )}
 
-            {/* Trade: So luong cung hang voi Tuoi vang trong header */}
             {!title && (
                 <QuantityField
                     label="Số lượng"
@@ -204,54 +276,70 @@ export function GoldSaleFieldGroup({
                 />
             )}
 
-            <TxLineInventoryLookup {...inventoryLookupProps} />
+            {!title && <TxLineInventoryLookup {...inventoryLookupProps} />}
 
-            <div>
-                <span style={S.label}>{rateLabel}</span>
-                <FormattedNumberInput
-                    style={{ ...S.inp, color: lineAccent }}
-                    value={rateValue}
-                    onValueChange={onRateChange}
-                />
-            </div>
+            {!title && (
+                <div>
+                    <span style={S.label}>{rateLabel}</span>
+                    <FormattedNumberInput
+                        style={{ ...S.inp, color: lineAccent }}
+                        value={rateValue}
+                        onValueChange={onRateChange}
+                    />
+                </div>
+            )}
 
-            {/* Tiền công cùng hàng với Giá bán (cả Sell lẫn Trade) */}
-            <MoneyField
-                label="Tiền công"
-                placeholder="Nhập tiền công"
-                list={sellMoneySuggestionId}
-                txTheme={txTheme}
-                lineAccent={lineAccent}
-                value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
-                onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
-                onIncrease={() => adjustSellLabor(sellMoneyStep)}
-                onDecrease={() => adjustSellLabor(-sellMoneyStep)}
-                increaseLabel="Tăng tiền công"
-                decreaseLabel="Giảm tiền công"
-            />
+            {!title && supplementalToggle}
 
-            <TxLineExtras
-                visible
-                line={line}
-                txTheme={txTheme}
-                lineAccent={lineAccent}
-                goldAdjustStep={goldAdjustStep}
-                sellMoneyStep={sellMoneyStep}
-                sellMoneySuggestionId={sellMoneySuggestionId}
-                tradeMoneySuggestionId={tradeMoneySuggestionId}
-                showTradeComp={showTradeComp}
-                normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
-                adjustGoldField={adjustGoldField}
-                adjustSellLabor={adjustSellLabor}
-                adjustTradeComp={adjustTradeComp}
-                set={set}
-                hideLaborField
-            />
+            {!title && (
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateRows: showSupplementalFields ? '1fr' : '0fr',
+                        transition: 'grid-template-rows .24s ease, opacity .24s ease',
+                        opacity: showSupplementalFields ? 1 : 0.72,
+                    }}
+                >
+                    <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
+                        <MoneyField
+                            label="Tiền công"
+                            placeholder="Nhập tiền công"
+                            list={sellMoneySuggestionId}
+                            txTheme={txTheme}
+                            lineAccent={lineAccent}
+                            value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+                            onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+                            onIncrease={() => adjustSellLabor(sellMoneyStep)}
+                            onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+                            increaseLabel="Tăng tiền công"
+                            decreaseLabel="Giảm tiền công"
+                        />
+                        <TxLineExtras
+                            visible={showSupplementalFields}
+                            line={line}
+                            txTheme={txTheme}
+                            lineAccent={lineAccent}
+                            goldAdjustStep={goldAdjustStep}
+                            sellMoneyStep={sellMoneyStep}
+                            sellMoneySuggestionId={sellMoneySuggestionId}
+                            tradeMoneySuggestionId={tradeMoneySuggestionId}
+                            showTradeComp={showTradeComp}
+                            normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
+                            adjustGoldField={adjustGoldField}
+                            adjustSellLabor={adjustSellLabor}
+                            adjustTradeComp={adjustTradeComp}
+                            set={set}
+                            hideLaborField
+                        />
+                    </div>
+                </div>
+            )}
         </>
     );
 }
 
 export function GoldBuyFieldGroup({
+
     title,
     productOptions,
     product,
@@ -266,30 +354,58 @@ export function GoldBuyFieldGroup({
     rateValue,
     onRateChange,
     buField,
+    showGroupFields = true,
+    headerToggle = null,
 }) {
     return (
         <>
             {title ? (
                 <div style={{ gridColumn: '1 / -1' }}>
-                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em', marginBottom: 6 }}>{title}</span>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                        <div style={{ width: '100%' }}>
-                            <ProductSelect
-                                value={product}
-                                onChange={onProductChange}
-                                options={productOptions}
-                                width={tradeComboWidth}
-                            />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+                        <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>{title}</span>
+                        {headerToggle}
+                    </div>
+                    <div
+                        style={{
+                            display: 'grid',
+                            gridTemplateRows: showGroupFields ? '1fr' : '0fr',
+                            transition: 'grid-template-rows .24s ease, opacity .24s ease',
+                            opacity: showGroupFields ? 1 : 0.72,
+                        }}
+                    >
+                        <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showGroupFields ? 2 : 0 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                                <div style={{ width: '100%' }}>
+                                    <ProductSelect
+                                        value={product}
+                                        onChange={onProductChange}
+                                        options={productOptions}
+                                        width={tradeComboWidth}
+                                    />
+                                </div>
+                                <QuantityField
+                                    label="Số lượng"
+                                    value={qty}
+                                    onChange={onQtyChange}
+                                    adjust={adjustQty}
+                                    step={quantityStep}
+                                    lineAccent={lineAccent}
+                                    txTheme={txTheme}
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                                <div>
+                                    <span style={S.label}>Giá mua</span>
+                                    <FormattedNumberInput
+                                        style={{ ...S.inp, color: lineAccent }}
+                                        value={rateValue}
+                                        onValueChange={onRateChange}
+                                    />
+                                </div>
+                                {buField || null}
+                            </div>
                         </div>
-                        <QuantityField
-                            label="Số lượng"
-                            value={qty}
-                            onChange={onQtyChange}
-                            adjust={adjustQty}
-                            step={quantityStep}
-                            lineAccent={lineAccent}
-                            txTheme={txTheme}
-                        />
                     </div>
                 </div>
             ) : (
@@ -315,16 +431,20 @@ export function GoldBuyFieldGroup({
                 />
             )}
 
-            <div>
-                <span style={S.label}>Giá mua</span>
-                <FormattedNumberInput
-                    style={{ ...S.inp, color: lineAccent }}
-                    value={rateValue}
-                    onValueChange={onRateChange}
-                />
-            </div>
+            {!title && (
+                <>
+                    <div>
+                        <span style={S.label}>Giá mua</span>
+                        <FormattedNumberInput
+                            style={{ ...S.inp, color: lineAccent }}
+                            value={rateValue}
+                            onValueChange={onRateChange}
+                        />
+                    </div>
 
-            {buField || null}
+                    {buField || null}
+                </>
+            )}
         </>
     );
 }

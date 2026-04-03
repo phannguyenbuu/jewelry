@@ -14,7 +14,7 @@ import EasyInvoicePaper from './EasyInvoicePaper';
 import { ConfirmDialog } from './Dialogs';
 
 import { buildCompanyBankLabel, fetchCompanyBankAccounts, withFallbackCompanyBankAccounts } from '../lib/companyBankAccounts';
-import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, getTradeCompensationAmount, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
+import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeCompensationAmount, getTradeOldGoldQuantity, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
 
 import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogoUrl } from './vietQrBanks';
 
@@ -129,13 +129,13 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
     const baseQty = parseFmt(nextLine.qty || 0);
 
-    const customerQty = parseWeight(nextLine.customerQty || 0);
+    const customerQty = getTradeOldGoldQuantity(nextLine);
 
-    const sellLabor = parseFmt(nextLine.sellLabor || 0);
+    const sellLabor = getLineSellLaborAmount(nextLine);
 
-    const sellAddedGold = parseWeight(nextLine.sellAddedGold || 0);
+    const sellAddedGold = getLineSellAddedGoldWeight(nextLine);
 
-    const sellCutGold = parseWeight(nextLine.sellCutGold || 0);
+    const sellCutGold = getLineSellCutGoldWeight(nextLine);
 
     const itemGoldWeight = parseWeight(nextLine.itemGoldWeight || 0);
 

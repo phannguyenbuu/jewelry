@@ -47,6 +47,17 @@ def build_url(base_url, resource):
     return f'{str(base_url or "").rstrip("/")}/{str(resource or "").lstrip("/")}'
 
 
+def _easyinvoice_api_username(config):
+    if not isinstance(config, dict):
+        return EASYINVOICE_LIST_USERNAME
+    return (
+        clean_text(config.get('api_username'))
+        or clean_text(config.get('list_username'))
+        or clean_text(config.get('username'))
+        or EASYINVOICE_LIST_USERNAME
+    )
+
+
 def post_json(base_url, resource, payload, username, password, tax_code, timeout=60):
     endpoint = build_url(base_url, resource)
     auth_header = build_authentication_header('POST', username, password, tax_code)
@@ -151,7 +162,7 @@ def issue_invoice(config, xml_data, timeout=60):
         config.get('api_url', ''),
         'api/publish/importAndIssueInvoice',
         payload,
-        config.get('username', ''),
+        _easyinvoice_api_username(config),
         config.get('password', ''),
         config.get('tax_code', ''),
         timeout=timeout,
@@ -171,7 +182,7 @@ def import_invoice(config, xml_data, timeout=60):
         config.get('api_url', ''),
         'api/publish/importInvoice',
         payload,
-        config.get('username', ''),
+        _easyinvoice_api_username(config),
         config.get('password', ''),
         config.get('tax_code', ''),
         timeout=timeout,
@@ -184,7 +195,7 @@ def get_invoices_by_ikeys(config, ikeys, timeout=60):
         config.get('api_url', ''),
         'api/publish/getInvoicesByIkeys',
         {'Ikeys': list(ikeys or [])},
-        config.get('username', ''),
+        _easyinvoice_api_username(config),
         config.get('password', ''),
         config.get('tax_code', ''),
         timeout=timeout,
@@ -197,7 +208,7 @@ def check_invoice_state(config, ikeys, timeout=60):
         config.get('api_url', ''),
         'api/publish/checkInvoiceState',
         {'Ikeys': list(ikeys or [])},
-        config.get('username', ''),
+        _easyinvoice_api_username(config),
         config.get('password', ''),
         config.get('tax_code', ''),
         timeout=timeout,
@@ -245,13 +256,7 @@ def get_json(base_url, resource, params, username, password, tax_code, timeout=6
 
 
 def _easyinvoice_list_username(config):
-    if not isinstance(config, dict):
-        return EASYINVOICE_LIST_USERNAME
-    return (
-        clean_text(config.get('api_username'))
-        or clean_text(config.get('list_username'))
-        or EASYINVOICE_LIST_USERNAME
-    )
+    return _easyinvoice_api_username(config)
 
 
 def _easyinvoice_filter_invoices(invoices, keyword='', invoice_type=-1, status=-1):

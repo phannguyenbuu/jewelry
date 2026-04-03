@@ -330,15 +330,18 @@ def _build_thu_ngan_so_quy_payload(ngay):
     for cashier in cashiers:
         record = record_map.get(cashier['id'])
         if record:
-            if record.lich_su_chot:
-                payload_changed = _sync_thu_ngan_so_quy_from_history(record) or payload_changed
-            else:
-                payload_changed = _sync_thu_ngan_so_quy_detail_totals(record) or payload_changed
+            payload_changed = _sync_thu_ngan_so_quy_detail_totals(record) or payload_changed
         rows.append(thu_ngan_so_quy_row_json(cashier, record, ngay=ngay))
 
     history = []
     for row in rows:
         for entry in row.get('lich_su_chot', []):
+            entry_chi_tiet, _ = _normalize_thu_ngan_so_quy_detail_rows(
+                entry.get('chi_tiet') or [],
+                fallback_so_tien_dau_ngay=entry.get('so_tien_dau_ngay', 0),
+                fallback_so_tien_hien_tai=entry.get('so_tien', 0),
+                fallback_chenh_lech=entry.get('so_tien_chenh_lech', 0),
+            )
             history.append({
                 'entry_id': entry.get('entry_id') or '',
                 'thu_ngan_id': row['thu_ngan_id'],
@@ -348,7 +351,8 @@ def _build_thu_ngan_so_quy_payload(ngay):
                 'so_tien_dau_ngay': _format_thu_ngan_amount_output(entry.get('so_tien_dau_ngay', 0)),
                 'so_tien': _format_thu_ngan_amount_output(entry.get('so_tien', 0)),
                 'so_tien_chenh_lech': _format_thu_ngan_amount_output(entry.get('so_tien_chenh_lech', 0)),
-                'so_dong_chi_tiet': len(entry.get('chi_tiet') or []),
+                'chi_tiet': [_thu_ngan_so_quy_detail_row_json(item) for item in entry_chi_tiet],
+                'so_dong_chi_tiet': len(entry_chi_tiet),
                 'ghi_chu': entry.get('ghi_chu', ''),
             })
     history.sort(key=lambda item: _parse_vi_datetime(item.get('thoi_gian')), reverse=True)
@@ -460,7 +464,7 @@ def delete_thu_ngan_so_quy_history():
     entries.pop(target_index)
     obj.lich_su_chot = entries
     flag_modified(obj, 'lich_su_chot')
-    _sync_thu_ngan_so_quy_from_history(obj)
+    obj.cap_nhat_luc = now_str()
     db.session.commit()
     return jsonify(_build_thu_ngan_so_quy_payload(ngay))
 

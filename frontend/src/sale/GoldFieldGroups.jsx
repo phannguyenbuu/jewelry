@@ -2,7 +2,7 @@ import { IoChevronDownOutline, IoChevronUpOutline } from 'react-icons/io5';
 
 import FormattedNumberInput from './FormattedNumberInput';
 import TxLineExtras, { MoneyField } from './TxLineExtras.jsx';
-import TxLineInventoryLookup from './TxLineInventoryLookup';
+import TxLineInventoryLookup, { InventoryProductLookupField } from './TxLineInventoryLookup';
 import { S, fmtCalc, normalizeTradeRate } from './shared';
 
 function ProductSelect({ value, onChange, options, disabled = false, width = '100%' }) {
@@ -154,7 +154,97 @@ export function GoldSaleFieldGroup({
     supplementalToggle = null,
     showGroupFields = true,
     headerToggle = null,
+    inlineRateAndLabor = false,
 }) {
+    const rateField = (
+        <div>
+            <span style={S.label}>{rateLabel}</span>
+            <FormattedNumberInput
+                style={{ ...S.inp, color: lineAccent }}
+                value={rateValue}
+                onValueChange={onRateChange}
+            />
+        </div>
+    );
+
+    const laborField = (
+        <MoneyField
+            label="Tiền công"
+            placeholder="Nhập tiền công"
+            list={sellMoneySuggestionId}
+            txTheme={txTheme}
+            lineAccent={lineAccent}
+            value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
+            onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
+            onIncrease={() => adjustSellLabor(sellMoneyStep)}
+            onDecrease={() => adjustSellLabor(-sellMoneyStep)}
+            increaseLabel="Tăng tiền công"
+            decreaseLabel="Giảm tiền công"
+        />
+    );
+
+    const supplementalExtras = (
+        <TxLineExtras
+            visible={showSupplementalFields}
+            line={line}
+            txTheme={txTheme}
+            lineAccent={lineAccent}
+            goldAdjustStep={goldAdjustStep}
+            sellMoneyStep={sellMoneyStep}
+            sellMoneySuggestionId={sellMoneySuggestionId}
+            tradeMoneySuggestionId={tradeMoneySuggestionId}
+            showTradeComp={showTradeComp}
+            normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
+            adjustGoldField={adjustGoldField}
+            adjustSellLabor={adjustSellLabor}
+            adjustTradeComp={adjustTradeComp}
+            set={set}
+            hideLaborField
+        />
+    );
+
+    const primaryQtyField = (
+        <QuantityField
+            label="Số lượng"
+            value={qty}
+            onChange={onQtyChange}
+            adjust={adjustQty}
+            step={quantityStep}
+            lineAccent={lineAccent}
+            txTheme={txTheme}
+            disabled={qtyLocked}
+        />
+    );
+
+    const showIntegratedInventoryPicker = Boolean(inventoryLookupProps?.integratedPicker);
+    const titleProductBlock = showIntegratedInventoryPicker ? (
+        <InventoryProductLookupField
+            {...inventoryLookupProps}
+            productOptions={productOptions}
+            product={product}
+            onProductChange={inventoryLookupProps?.onPickerProductChange || onProductChange}
+            qtyField={primaryQtyField}
+            width={tradeComboWidth}
+        />
+    ) : (
+        <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                <div style={{ width: '100%' }}>
+                    <ProductSelect
+                        value={product}
+                        onChange={onProductChange}
+                        options={productOptions}
+                        disabled={productLocked}
+                        width={tradeComboWidth}
+                    />
+                </div>
+                {primaryQtyField}
+            </div>
+
+            <TxLineInventoryLookup {...inventoryLookupProps} />
+        </>
+    );
+
     return (
         <>
             {title ? (
@@ -172,38 +262,14 @@ export function GoldSaleFieldGroup({
                         }}
                     >
                         <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showGroupFields ? 2 : 0 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                                <div style={{ width: '100%' }}>
-                                    <ProductSelect
-                                        value={product}
-                                        onChange={onProductChange}
-                                        options={productOptions}
-                                        disabled={productLocked}
-                                        width={tradeComboWidth}
-                                    />
+                            {titleProductBlock}
+
+                            {inlineRateAndLabor ? (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                                    {rateField}
+                                    {laborField}
                                 </div>
-                                <QuantityField
-                                    label="Số lượng"
-                                    value={qty}
-                                    onChange={onQtyChange}
-                                    adjust={adjustQty}
-                                    step={quantityStep}
-                                    lineAccent={lineAccent}
-                                    txTheme={txTheme}
-                                    disabled={qtyLocked}
-                                />
-                            </div>
-
-                            <TxLineInventoryLookup {...inventoryLookupProps} />
-
-                            <div>
-                                <span style={S.label}>{rateLabel}</span>
-                                <FormattedNumberInput
-                                    style={{ ...S.inp, color: lineAccent }}
-                                    value={rateValue}
-                                    onValueChange={onRateChange}
-                                />
-                            </div>
+                            ) : rateField}
 
                             {supplementalToggle}
 
@@ -216,36 +282,8 @@ export function GoldSaleFieldGroup({
                                 }}
                             >
                                 <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
-                                    <MoneyField
-                                        label="Tiền công"
-                                        placeholder="Nhập tiền công"
-                                        list={sellMoneySuggestionId}
-                                        txTheme={txTheme}
-                                        lineAccent={lineAccent}
-                                        value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
-                                        onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
-                                        onIncrease={() => adjustSellLabor(sellMoneyStep)}
-                                        onDecrease={() => adjustSellLabor(-sellMoneyStep)}
-                                        increaseLabel="Tăng tiền công"
-                                        decreaseLabel="Giảm tiền công"
-                                    />
-                                    <TxLineExtras
-                                        visible={showSupplementalFields}
-                                        line={line}
-                                        txTheme={txTheme}
-                                        lineAccent={lineAccent}
-                                        goldAdjustStep={goldAdjustStep}
-                                        sellMoneyStep={sellMoneyStep}
-                                        sellMoneySuggestionId={sellMoneySuggestionId}
-                                        tradeMoneySuggestionId={tradeMoneySuggestionId}
-                                        showTradeComp={showTradeComp}
-                                        normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
-                                        adjustGoldField={adjustGoldField}
-                                        adjustSellLabor={adjustSellLabor}
-                                        adjustTradeComp={adjustTradeComp}
-                                        set={set}
-                                        hideLaborField
-                                    />
+                                    {!inlineRateAndLabor && laborField}
+                                    {supplementalExtras}
                                 </div>
                             </div>
                         </div>
@@ -263,31 +301,16 @@ export function GoldSaleFieldGroup({
                 </div>
             )}
 
-            {!title && (
-                <QuantityField
-                    label="Số lượng"
-                    value={qty}
-                    onChange={onQtyChange}
-                    adjust={adjustQty}
-                    step={quantityStep}
-                    lineAccent={lineAccent}
-                    txTheme={txTheme}
-                    disabled={qtyLocked}
-                />
-            )}
+            {!title && primaryQtyField}
 
             {!title && <TxLineInventoryLookup {...inventoryLookupProps} />}
 
-            {!title && (
-                <div>
-                    <span style={S.label}>{rateLabel}</span>
-                    <FormattedNumberInput
-                        style={{ ...S.inp, color: lineAccent }}
-                        value={rateValue}
-                        onValueChange={onRateChange}
-                    />
+            {!title && (inlineRateAndLabor ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                    {rateField}
+                    {laborField}
                 </div>
-            )}
+            ) : rateField)}
 
             {!title && supplementalToggle}
 
@@ -301,36 +324,8 @@ export function GoldSaleFieldGroup({
                     }}
                 >
                     <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
-                        <MoneyField
-                            label="Tiền công"
-                            placeholder="Nhập tiền công"
-                            list={sellMoneySuggestionId}
-                            txTheme={txTheme}
-                            lineAccent={lineAccent}
-                            value={line.sellLabor ? fmtCalc(line.sellLabor) : ''}
-                            onValueChange={raw => set('sellLabor', normalizeTradeRate('money', raw))}
-                            onIncrease={() => adjustSellLabor(sellMoneyStep)}
-                            onDecrease={() => adjustSellLabor(-sellMoneyStep)}
-                            increaseLabel="Tăng tiền công"
-                            decreaseLabel="Giảm tiền công"
-                        />
-                        <TxLineExtras
-                            visible={showSupplementalFields}
-                            line={line}
-                            txTheme={txTheme}
-                            lineAccent={lineAccent}
-                            goldAdjustStep={goldAdjustStep}
-                            sellMoneyStep={sellMoneyStep}
-                            sellMoneySuggestionId={sellMoneySuggestionId}
-                            tradeMoneySuggestionId={tradeMoneySuggestionId}
-                            showTradeComp={showTradeComp}
-                            normalizeNonNegativeNumberInput={normalizeNonNegativeNumberInput}
-                            adjustGoldField={adjustGoldField}
-                            adjustSellLabor={adjustSellLabor}
-                            adjustTradeComp={adjustTradeComp}
-                            set={set}
-                            hideLaborField
-                        />
+                        {!inlineRateAndLabor && laborField}
+                        {supplementalExtras}
                     </div>
                 </div>
             )}
@@ -339,7 +334,6 @@ export function GoldSaleFieldGroup({
 }
 
 export function GoldBuyFieldGroup({
-
     title,
     productOptions,
     product,
@@ -356,11 +350,24 @@ export function GoldBuyFieldGroup({
     buField,
     showGroupFields = true,
     headerToggle = null,
+    panelStyle = null,
 }) {
+    const titledPanelStyle = panelStyle
+        ? {
+            gridColumn: '1 / -1',
+            padding: '10px 12px 12px',
+            borderRadius: 18,
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,.65)',
+            ...panelStyle,
+        }
+        : { gridColumn: '1 / -1' };
+
     return (
         <>
             {title ? (
-                <div style={{ gridColumn: '1 / -1' }}>
+                <div style={titledPanelStyle}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
                         <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>{title}</span>
                         {headerToggle}

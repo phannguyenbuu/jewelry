@@ -22,6 +22,13 @@ import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogo
 const FIXED_QR_NOTE = 'Mua hang tai cong ty van kim';
 const DIRECT_ISSUE_DISABLED_REASON = 'Tạm khóa phát hành trực tiếp, vui lòng xuất HĐ nháp.';
 const BUY_VOUCHER_MANUAL_SERIAL = '........';
+const BUY_VOUCHER_PRINT_TARGET = {
+    machineName: 'DESKTOP-563MTH4',
+    hostName: '192.168.1.57',
+    deviceName: 'DESKTOP-563MTH4',
+    printerName: 'EPSON TM-T81III Receipt',
+    uncPath: '\\\\DESKTOP-563MTH4\\EPSON TM-T81III Receipt',
+};
 
 const REQUIRED_EASY_INVOICE_FIELDS = [
 
@@ -866,12 +873,13 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
     const queueVoucherToAgent = async (imageUrl = voucherPreviewUrl) => {
 
         const { contentType, imageBase64 } = extractBase64FromDataUrl(imageUrl);
+        const target = BUY_VOUCHER_PRINT_TARGET;
 
         setVoucherSending(true);
 
         setVoucherPreviewActionError(false);
 
-        setVoucherPreviewActionMessage('');
+        setVoucherPreviewActionMessage(`Đang gửi PNG tới ${target.machineName}...`);
 
         try {
 
@@ -893,6 +901,18 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                     requested_by: 'POS Mobile',
 
+                    machine_name: target.machineName,
+
+                    host_name: target.hostName,
+
+                    device_name: target.deviceName,
+
+                    printer_name: target.printerName,
+
+                    unc_path: target.uncPath,
+
+                    options: {},
+
                 }),
 
             });
@@ -901,9 +921,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
 
-            const agentName = payload?.agent?.device_name || payload?.agent?.agent_key || 'agent';
+            const agentName = payload?.agent?.machine_name || payload?.agent?.device_name || payload?.agent?.agent_key || target.machineName;
 
-            const printerName = payload?.printer?.printer_name || payload?.command?.printer_name || '';
+            const printerName = payload?.printer?.printer_name || payload?.command?.printer_name || target.printerName;
 
             setVoucherPreviewActionMessage(printerName ? `Đã gửi PNG tới ${agentName} / ${printerName}.` : `Đã gửi PNG tới ${agentName}.`);
 
@@ -1648,12 +1668,16 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
         setVoucherPreviewActionError(false);
 
         setVoucherPreviewError('');
-
-        setVoucherPreviewLoading(true);
+        const hasExistingPreview = Boolean(voucherPreviewUrl);
+        if (!hasExistingPreview) {
+            setVoucherPreviewLoading(true);
+        }
 
         try {
 
-            const preview = await createBuyVoucherPreviewData({ modeOverride: 'buy' });
+            const preview = hasExistingPreview
+                ? { imageUrl: voucherPreviewUrl }
+                : await createBuyVoucherPreviewData({ modeOverride: 'buy' });
 
             await queueVoucherToAgent(preview?.imageUrl || voucherPreviewUrl);
 
@@ -1673,7 +1697,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         } finally {
 
-            setVoucherPreviewLoading(false);
+            if (!hasExistingPreview) {
+                setVoucherPreviewLoading(false);
+            }
 
         }
 

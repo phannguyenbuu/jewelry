@@ -264,6 +264,26 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
             customTrade: undefined,
         });
     };
+    const handleInventoryProductChange = (nextProduct) => {
+        setCatalogQuery('');
+        setLookupMessage('');
+        const patch = {
+            product: nextProduct,
+            customSell: undefined,
+            customBuy: undefined,
+            customTrade: undefined,
+        };
+        if (line.itemId || line.productCode || line.itemName || line.itemGoldWeight || line.itemStoneWeight) {
+            patch.entryMode = 'catalog';
+            patch.itemId = null;
+            patch.itemName = '';
+            patch.itemGoldWeight = '';
+            patch.itemStoneWeight = '';
+            patch.productCode = '';
+            patch.sellLabor = '';
+        }
+        onChange(patch);
+    };
     const handleCustomerProductChange = (nextProduct) => {
         onChange({
             customerProduct: nextProduct,
@@ -305,14 +325,16 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         setCatalogQuery(nextQuery);
         setLookupMessage('');
         if (!String(nextQuery || '').trim()) {
-            onChange({
+            const patch = {
                 entryMode: 'catalog',
                 itemId: null,
                 itemName: '',
                 itemGoldWeight: '',
                 itemStoneWeight: '',
                 productCode: '',
-            });
+            };
+            if (line.itemId) patch.sellLabor = '';
+            onChange(patch);
             return;
         }
         onChange({ entryMode: 'catalog' });
@@ -415,6 +437,10 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                             txTheme={txTheme}
                             rateValue={fmtCalc(customerRate)}
                             onRateChange={raw => onChange({ customerCustomBuy: normalizeTradeRate('gold', raw) })}
+                            panelStyle={{
+                                background: 'linear-gradient(180deg, rgba(240,253,244,.98) 0%, rgba(220,252,231,.94) 100%)',
+                                border: '1px solid rgba(134,239,172,.92)',
+                            }}
                             showGroupFields={tradeOldExpanded}
                             headerToggle={
                                 <button
@@ -464,6 +490,8 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                                 scanMessage: lookupMessage,
                                 suggestionItems: inventorySuggestions,
                                 onSelectSuggestion: item => applyInventoryItem(item, 'catalog'),
+                                integratedPicker: true,
+                                onPickerProductChange: handleInventoryProductChange,
                                 line,
                                 lineAccent,
                             }}
@@ -477,6 +505,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                             rateLabel="Giá bán"
                             rateValue={fmtCalc(tradeRate)}
                             onRateChange={raw => onChange({ customTrade: normalizeTradeRate('gold', raw) })}
+                            inlineRateAndLabor
                             showGroupFields={tradeNewExpanded}
                             headerToggle={
                                 <button

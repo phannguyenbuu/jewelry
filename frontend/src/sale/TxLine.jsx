@@ -3,21 +3,23 @@ import { IoChevronDownOutline, IoChevronUpOutline, IoCloseOutline } from 'react-
 import FormattedNumberInput from './FormattedNumberInput';
 import { GoldBuyFieldGroup, GoldSaleFieldGroup } from './GoldFieldGroups';
 import { MoneyField } from './TxLineExtras.jsx';
-import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, TRADE_COMP_SUGGESTIONS, calcValueStyle, filterInventoryItems, findInventoryByCode, fmtCalc, formatBuyGoldProductLabel, formatWeight, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, getTxTheme, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
+import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, TRADE_COMP_SUGGESTIONS, calcValueStyle, filterInventoryItems, findInventoryByCode, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldAgeProductValues, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeBaseAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, getTxTheme, inventoryStatusLabel, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
 
 export default function TxLine({ line, rates, inventoryItems, onChange, onRemove, showRemove }) {
     const effectiveCat = line.tx === 'trade' ? 'gold' : line.cat;
-    const products = Object.keys(rates[effectiveCat] || {});
-    const goldProducts = Object.keys(rates.gold || {});
-    const goldBuyProductOptions = [
+    const goldProducts = getGoldAgeProductValues(rates);
+    const products = effectiveCat === 'gold' ? goldProducts : Object.keys(rates[effectiveCat] || {});
+    const tradeOldProductOptions = goldProducts.length ? [
         ...goldProducts.map(product => ({ value: product, label: formatBuyGoldProductLabel(product) })),
         { value: BUY_GOLD_OTHER_OPTION, label: BUY_GOLD_OTHER_OPTION },
-    ];
+    ] : [];
+    const tradeOldProductValues = tradeOldProductOptions.map(option => option.value);
+    const goldBuyProductOptions = goldProducts.length ? [
+        ...goldProducts.map(product => ({ value: product, label: formatBuyGoldProductLabel(product) })),
+        { value: BUY_GOLD_OTHER_OPTION, label: BUY_GOLD_OTHER_OPTION },
+    ] : [];
     const productOptions = line.tx === 'buy' && effectiveCat === 'gold'
-        ? [
-            ...products.map(product => ({ value: product, label: formatBuyGoldProductLabel(product) })),
-            { value: BUY_GOLD_OTHER_OPTION, label: BUY_GOLD_OTHER_OPTION },
-        ]
+        ? goldBuyProductOptions
         : products.map(product => ({ value: product, label: product }));
     const selectableProducts = productOptions.map(option => option.value);
     const [catalogQuery, setCatalogQuery] = useState(line.productCode || '');
@@ -30,19 +32,17 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
     const tradeRate = normalizeTradeRate(effectiveCat, line.customTrade !== undefined ? line.customTrade : rate[0]);
     const curRate = line.tx === 'buy' ? buyRate : line.tx === 'trade' ? tradeRate : sellRate;
     const hasCustomerCustomBuy = line.customerCustomBuy !== undefined && String(line.customerCustomBuy).trim() !== '';
-    const effectiveCustomerProduct = line.customerProduct || goldProducts[0] || '';
+    const effectiveCustomerProduct = line.customerProduct || tradeOldProductValues[0] || goldProducts[0] || '';
     const _custBuyRaw = rates.gold?.[effectiveCustomerProduct]?.[1] || 0;
-    const _custSellRaw = rates.gold?.[effectiveCustomerProduct]?.[0] || 0;
     const customerRate = normalizeTradeRate(
         'gold',
         hasCustomerCustomBuy
             ? line.customerCustomBuy
-            : (_custBuyRaw || _custSellRaw || 0)  // fallback sang sell rate khi buy rate chua cau hinh
+            : _custBuyRaw
     );
     const baseQty = parseFmt(line.qty);
     const tradeOldExpanded = Boolean(line.tradeOldExpanded);
     const tradeNewExpanded = line.tradeNewExpanded !== false; // default true
-    const customerQty = getTradeOldGoldQuantity(line);
     const sellLabor = getLineSellLaborAmount(line);
     const sellAddedGold = getLineSellAddedGoldWeight(line);
     const sellCutGold = getLineSellCutGoldWeight(line);
@@ -60,11 +60,13 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
     const goldEditorAmount = (line.tx === 'sell' || line.tx === 'trade') && effectiveCat === 'gold'
         ? Math.round(inventoryValue + sellLabor)
         : inventoryValue;
+    const tradeQuantityDirection = isTrade ? getTradeQuantityDirection(line) : 'equal';
+    const tradeOldGoldQty = isTrade ? getTradeOldGoldQuantity(line) : 0;
+    const tradeBaseAmount = isTrade ? getTradeBaseAmount(line, tradeRate, customerRate) : 0;
     const tradeCompensationQty = isTrade ? getTradeCompensationQuantity(line) : 0;
     const tradeCompensationUnitAmount = isTrade ? getTradeCompensationUnitAmount(line) : 0;
     const tradeAdjustmentAmount = isTrade ? getTradeCompensationAmount(line) : 0;
-    const tradeCustomerAmount = isTrade ? Math.round(customerQty * parseFmt(customerRate)) : 0;
-    const tradeAmount = Math.round(goldEditorAmount - tradeCustomerAmount + tradeAdjustmentAmount);
+    const tradeAmount = Math.round(tradeBaseAmount + sellLabor + tradeAdjustmentAmount);
     const value = line.tx === 'trade' ? tradeAmount : goldEditorAmount;
     const entryMode = usesInventory ? normalizeGoldEntryMode(line.entryMode) : '';
     const txTheme = getTxTheme(line.tx);
@@ -92,18 +94,30 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         appendFormulaOperator(sign);
         formulaParts.push(fmtCalc(amount));
     };
+    const appendFormulaGroupedRateTerm = (sign, leftQty, rightQty, price, { allowZero = false } = {}) => {
+        const normalizedPrice = Math.max(0, parseFmt(price));
+        if (!allowZero && (Math.max(0, leftQty - rightQty) <= 0 || normalizedPrice <= 0)) return;
+        appendFormulaOperator(sign);
+        if (rightQty <= 0) {
+            formulaParts.push(formatWeight(leftQty), '*', fmtCalc(normalizedPrice));
+            return;
+        }
+        formulaParts.push(`(${formatWeight(leftQty)}-${formatWeight(rightQty)})`, '*', fmtCalc(normalizedPrice));
+    };
     if (isSellGold) {
         appendFormulaRateTerm('+', sellBaseGoldWeight, sellRate);
         appendFormulaMoneyTerm('+', sellLabor);
         appendFormulaRateTerm('+', sellAddedGold, sellRate);
         appendFormulaRateTerm('-', sellCutGold, sellRate);
     } else if (isTradeGold) {
-        appendFormulaRateTerm('+', sellBaseGoldWeight, tradeRate);
+        const tradeBaseSign = tradeQuantityDirection === 'old' ? '-' : '+';
+        const tradeBaseLeftQty = tradeQuantityDirection === 'old' ? tradeOldGoldQty : effectiveGoldQty;
+        const tradeBaseRightQty = tradeQuantityDirection === 'old' ? effectiveGoldQty : tradeOldGoldQty;
+        const tradeBaseRate = tradeQuantityDirection === 'old' ? customerRate : tradeRate;
+        const tradeCompSign = tradeQuantityDirection === 'old' ? '-' : '+';
+        appendFormulaGroupedRateTerm(tradeBaseSign, tradeBaseLeftQty, tradeBaseRightQty, tradeBaseRate, { allowZero: true });
         appendFormulaMoneyTerm('+', sellLabor);
-        appendFormulaRateTerm('+', sellAddedGold, tradeRate);
-        appendFormulaRateTerm('-', sellCutGold, tradeRate);
-        appendFormulaRateTerm('-', customerQty, customerRate);
-        appendFormulaRateTerm('+', tradeCompensationQty, tradeCompensationUnitAmount);
+        appendFormulaRateTerm(tradeCompSign, tradeCompensationQty, tradeCompensationUnitAmount);
     } else if (line.tx === 'buy' && isGold) {
         appendFormulaRateTerm('+', baseQty, buyRate);
     }
@@ -215,12 +229,12 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
 
     useEffect(() => {
         if (!isTrade) return;
-        const productValid = line.customerProduct && goldProducts.includes(line.customerProduct);
-        if (!productValid && goldProducts.length) {
-            onChange({ customerProduct: goldProducts[0] });
+        const productValid = line.customerProduct && tradeOldProductValues.includes(line.customerProduct);
+        if (!productValid && tradeOldProductValues.length) {
+            onChange({ customerProduct: tradeOldProductValues[0] });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isTrade, goldProducts.join('|')]);
+    }, [isTrade, tradeOldProductValues.join('|')]);
 
     useEffect(() => {
         const added = parseWeight(line.sellAddedGold || 0);
@@ -291,18 +305,28 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         });
     };
 
+    const buildLookupResetPatch = (nextCode = '', source = 'catalog') => ({
+        entryMode: source,
+        itemId: null,
+        itemName: '',
+        itemGoldWeight: '',
+        itemStoneWeight: '',
+        productCode: nextCode,
+        sellLabor: '',
+    });
+
     const applyInventoryItem = (item, source = entryMode) => {
         if (!item) {
-            setLookupMessage('');
-            return;
+            setLookupMessage('San pham khong tim thay.');
+            return false;
         }
         if (isUnavailableInventoryItem(item)) {
-            setLookupMessage('');
-            return;
+            setLookupMessage(`San pham ${item.ma_hang || item.ncc || ''} dang o trang thai ${inventoryStatusLabel(item)}, khong the chon.`);
+            return false;
         }
-        const nextProduct = item.tuoi_vang && (rates.gold?.[item.tuoi_vang] || products.includes(item.tuoi_vang))
+        const nextProduct = item.tuoi_vang && goldProducts.includes(item.tuoi_vang)
             ? item.tuoi_vang
-            : (line.product || products[0] || '');
+            : (line.product || goldProducts[0] || '');
         onChange({
             entryMode: source,
             itemId: item.id,
@@ -318,26 +342,18 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
             qty: usesInventory ? '1' : (line.qty || '0'),
         });
         setCatalogQuery(item.ma_hang || item.ncc || '');
-        setLookupMessage('');
+        setLookupMessage(`Da chon san pham ${item.ma_hang || 'khong ro ma'}${item.ncc ? ` · ${item.ncc}` : ''}.`);
+        return true;
     };
 
     const handleCatalogInputChange = (nextQuery) => {
         setCatalogQuery(nextQuery);
         setLookupMessage('');
         if (!String(nextQuery || '').trim()) {
-            const patch = {
-                entryMode: 'catalog',
-                itemId: null,
-                itemName: '',
-                itemGoldWeight: '',
-                itemStoneWeight: '',
-                productCode: '',
-            };
-            if (line.itemId) patch.sellLabor = '';
-            onChange(patch);
+            onChange(buildLookupResetPatch('', 'catalog'));
             return;
         }
-        onChange({ entryMode: 'catalog' });
+        onChange(buildLookupResetPatch(nextQuery, 'catalog'));
         const matched = findInventoryByCode(inventoryItems, nextQuery);
         if (matched) applyInventoryItem(matched, 'catalog');
     };
@@ -348,9 +364,10 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
             setLookupMessage('Không đọc được mã sản phẩm.');
             return false;
         }
-        onChange({ productCode: nextCode, entryMode: source });
+        onChange(buildLookupResetPatch(nextCode, source));
         setCatalogQuery(nextCode);
         const matched = findInventoryByCode(inventoryItems, nextCode);
+        if (matched) return applyInventoryItem(matched, source);
         if (matched) {
             applyInventoryItem(matched, source);
             setLookupMessage(`Đã đọc mã ${nextCode}.`);
@@ -422,7 +439,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
                     <>
                         <GoldBuyFieldGroup
                             title="Dẻ"
-                            productOptions={goldBuyProductOptions}
+                            productOptions={tradeOldProductOptions}
                             product={line.customerProduct || ''}
                             onProductChange={handleCustomerProductChange}
                             tradeComboWidth={tradeComboWidth}

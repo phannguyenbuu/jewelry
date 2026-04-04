@@ -13,29 +13,29 @@ const todayText = () => {
 };
 
 const words1k = (num) => {
-    const d = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
-    const h = Math.floor(num / 100);
-    const t = Math.floor((num % 100) / 10);
-    const u = num % 10;
+    const digits = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
+    const hundred = Math.floor(num / 100);
+    const ten = Math.floor((num % 100) / 10);
+    const unit = num % 10;
     const parts = [];
 
-    if (h > 0) parts.push(d[h], 'trăm');
-    if (t > 1) {
-        parts.push(d[t], 'mươi');
-        if (u === 1) parts.push('mốt');
-        else if (u === 5) parts.push('lăm');
-        else if (u > 0) parts.push(d[u]);
+    if (hundred > 0) parts.push(digits[hundred], 'trăm');
+    if (ten > 1) {
+        parts.push(digits[ten], 'mươi');
+        if (unit === 1) parts.push('mốt');
+        else if (unit === 5) parts.push('lăm');
+        else if (unit > 0) parts.push(digits[unit]);
         return parts.join(' ');
     }
-    if (t === 1) {
+    if (ten === 1) {
         parts.push('mười');
-        if (u === 5) parts.push('lăm');
-        else if (u > 0) parts.push(d[u]);
+        if (unit === 5) parts.push('lăm');
+        else if (unit > 0) parts.push(digits[unit]);
         return parts.join(' ');
     }
-    if (u > 0) {
-        if (h > 0) parts.push('linh');
-        parts.push(u === 5 && h > 0 ? 'năm' : d[u]);
+    if (unit > 0) {
+        if (hundred > 0) parts.push('linh');
+        parts.push(unit === 5 && hundred > 0 ? 'năm' : digits[unit]);
     }
     return parts.join(' ');
 };
@@ -52,10 +52,10 @@ const moneyToWords = (value) => {
     }
 
     const parts = [];
-    for (let i = groups.length - 1; i >= 0; i -= 1) {
-        if (!groups[i]) continue;
-        parts.push(words1k(groups[i]));
-        if (units[i]) parts.push(units[i]);
+    for (let index = groups.length - 1; index >= 0; index -= 1) {
+        if (!groups[index]) continue;
+        parts.push(words1k(groups[index]));
+        if (units[index]) parts.push(units[index]);
     }
 
     const text = parts.join(' ').replace(/\s+/g, ' ').trim();
@@ -64,23 +64,22 @@ const moneyToWords = (value) => {
 
 const UI = {
     divider: { height: 1, background: 'rgba(120,53,15,.2)' },
-    subEn: { fontSize: 8, color: '#64748b', fontStyle: 'italic', marginLeft: 4 },
     field: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
     fieldLabel: { display: 'inline-flex', alignItems: 'baseline', flexShrink: 0, whiteSpace: 'nowrap', fontSize: 15 },
     fieldBox: { display: 'flex', alignItems: 'center', minHeight: 32, flex: 1, minWidth: 0, borderBottom: '1px dashed rgba(120,53,15,.42)' },
     fieldInput: { width: '100%', border: 'none', background: 'transparent', outline: 'none', padding: '4px 2px', fontSize: 15, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif" },
-    cellInput: { width: '100%', minHeight: 28, borderRadius: 10, border: '1px solid rgba(120,53,15,.18)', background: 'rgba(255,255,255,.82)', outline: 'none', padding: '4px 6px', fontSize: 10, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box' },
+    cellInput: { width: '100%', minHeight: 30, borderRadius: 10, border: '1px solid rgba(120,53,15,.18)', background: 'rgba(255,255,255,.82)', outline: 'none', padding: '5px 7px', fontSize: 11, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box' },
+    cellDisplay: { width: '100%', minHeight: 30, borderRadius: 10, border: '1px solid rgba(120,53,15,.14)', background: '#f8fafc', padding: '5px 7px', fontSize: 11, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box', display: 'flex', alignItems: 'center' },
     cellLabel: { display: 'block', fontSize: 8, color: '#7c2d12', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3, fontWeight: 700, whiteSpace: 'nowrap' },
-    th: { border: '1px solid rgba(120,53,15,.22)', padding: '6px 3px', fontSize: 6, whiteSpace: 'nowrap', lineHeight: 1.15 },
-    td: { border: '1px solid rgba(120,53,15,.18)', padding: 5, verticalAlign: 'top' },
+    th: { border: '1px solid rgba(120,53,15,.22)', padding: '7px 4px', fontSize: 7, whiteSpace: 'nowrap', lineHeight: 1.15 },
+    td: { border: '1px solid rgba(120,53,15,.18)', padding: 4, verticalAlign: 'top' },
 };
 
-function PaperField({ label, en, value, onChange, type = 'text', align = 'left', readOnly = false }) {
+function PaperField({ label, value, onChange, type = 'text', align = 'left', readOnly = false }) {
     return (
         <label style={UI.field}>
             <div style={UI.fieldLabel}>
                 <span>{label}</span>
-                {en ? <span style={UI.subEn}>({en})</span> : null}
             </div>
             <div style={UI.fieldBox}>
                 <input
@@ -122,6 +121,25 @@ function CellField({ label, value, onChange, align = 'left', inputMode = undefin
     );
 }
 
+function CellDisplay({ label, value, align = 'left', accent = false }) {
+    return (
+        <div>
+            <span style={UI.cellLabel}>{label}</span>
+            <div
+                style={{
+                    ...UI.cellDisplay,
+                    justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+                    background: accent ? 'rgba(240,253,244,.92)' : UI.cellDisplay.background,
+                    color: accent ? '#166534' : UI.cellDisplay.color,
+                    fontWeight: accent ? 800 : UI.cellDisplay.fontWeight,
+                }}
+            >
+                <span style={{ width: '100%', textAlign: align, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || ''}</span>
+            </div>
+        </div>
+    );
+}
+
 export default function EasyInvoicePaper({
     draft,
     onCustomerFieldChange,
@@ -130,6 +148,8 @@ export default function EasyInvoicePaper({
     onAddManualItem,
     onRemoveItem,
 }) {
+    void onAddManualItem;
+
     const compact = typeof window !== 'undefined' ? window.innerWidth < 980 : false;
     const customer = draft?.customer || {};
     const invoice = draft?.invoice || {};
@@ -148,6 +168,7 @@ export default function EasyInvoicePaper({
                 <img src={CORNER_SVG_URL} alt="" aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, width: cornerSize, height: 'auto', opacity: 0.58, pointerEvents: 'none', userSelect: 'none', transform: 'scaleY(-1)' }} />
                 <img src={CORNER_SVG_URL} alt="" aria-hidden="true" style={{ position: 'absolute', right: 0, bottom: 0, width: cornerSize, height: 'auto', opacity: 0.58, pointerEvents: 'none', userSelect: 'none', transform: 'scaleX(-1)' }} />
                 <img src={CORNER_SVG_URL} alt="" aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, width: cornerSize, height: 'auto', opacity: 0.58, pointerEvents: 'none', userSelect: 'none', transform: 'scale(-1,-1)' }} />
+
                 <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14, alignItems: 'start' }}>
                         <div style={{ textAlign: 'center' }}>
@@ -171,20 +192,20 @@ export default function EasyInvoicePaper({
                     <div style={UI.divider} />
 
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1.1fr .9fr', gap: 12 }}>
-                        <PaperField label="Họ tên người mua hàng" en="Buyer" value={customer.name || ''} onChange={(event) => onCustomerFieldChange('name', event.target.value)} />
-                        <PaperField label="Tên đơn vị" en="Company" value={customer.company || ''} onChange={(event) => onCustomerFieldChange('company', event.target.value)} />
+                        <PaperField label="Họ & tên" value={customer.name || ''} onChange={(event) => onCustomerFieldChange('name', event.target.value)} />
+                        <PaperField label="Tên đơn vị" value={customer.company || ''} onChange={(event) => onCustomerFieldChange('company', event.target.value)} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                        <PaperField label="Mã số thuế" en="Tax code" value={customer.taxCode || ''} onChange={(event) => onCustomerFieldChange('taxCode', event.target.value)} />
-                        <PaperField label="Điện thoại" en="Tel" value={customer.phone || ''} onChange={(event) => onCustomerFieldChange('phone', event.target.value)} />
+                        <PaperField label="Mã số thuế" value={customer.taxCode || ''} onChange={(event) => onCustomerFieldChange('taxCode', event.target.value)} />
+                        <PaperField label="Điện thoại" value={customer.phone || ''} onChange={(event) => onCustomerFieldChange('phone', event.target.value)} />
                         <div style={compact ? undefined : { gridColumn: '1 / -1' }}>
-                            <PaperField label="Địa chỉ" en="Address" value={customer.address || ''} onChange={(event) => onCustomerFieldChange('address', event.target.value)} />
+                            <PaperField label="Địa chỉ" value={customer.address || ''} onChange={(event) => onCustomerFieldChange('address', event.target.value)} />
                         </div>
-                        <PaperField label="Căn cước công dân" en="Citizen ID" value={customer.cccd || ''} onChange={(event) => onCustomerFieldChange('cccd', event.target.value)} />
-                        <PaperField label="Mã khách" en="Code" value={customer.code || ''} onChange={(event) => onCustomerFieldChange('code', event.target.value)} />
-                        <PaperField label="Hình thức thanh toán" en="Payment method" value={paymentMethodValue} readOnly />
-                        <PaperField label="Đơn vị tiền tệ" en="Currency" value={invoice.currencyUnit || 'VND'} onChange={(event) => onInvoiceFieldChange('currencyUnit', event.target.value)} />
+                        <PaperField label="CCCD" value={customer.cccd || ''} onChange={(event) => onCustomerFieldChange('cccd', event.target.value)} />
+                        <PaperField label="Mã khách" value={customer.code || ''} onChange={(event) => onCustomerFieldChange('code', event.target.value)} />
+                        <PaperField label="Hình thức TT" value={paymentMethodValue} readOnly />
+                        <PaperField label="Đơn vị tiền tệ" value={invoice.currencyUnit || 'VND'} onChange={(event) => onInvoiceFieldChange('currencyUnit', event.target.value)} />
                     </div>
 
                     <div style={{ position: 'relative', borderRadius: 0, overflow: 'hidden', border: '1px solid rgba(120,53,15,.22)', background: '#ffffff' }}>
@@ -204,17 +225,19 @@ export default function EasyInvoicePaper({
                                 zIndex: 0,
                             }}
                         />
+
                         <table style={{ position: 'relative', zIndex: 1, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                             <thead>
                                 <tr style={{ background: 'rgba(120,53,15,.08)' }}>
-                                    <th style={{ ...UI.th, width: '7%' }}>STT</th>
-                                    <th style={{ ...UI.th, width: '18%' }}>Tên hàng hóa, dịch vụ</th>
-                                    <th style={{ ...UI.th, width: '12%' }}>Đơn vị tính</th>
-                                    <th style={{ ...UI.th, width: '12%' }}>Số lượng</th>
-                                    <th style={{ ...UI.th, width: '25%' }}>Đơn giá / Công</th>
-                                    <th style={{ ...UI.th, width: '26%' }}>Thành tiền</th>
+                                    <th style={{ ...UI.th, width: '6%' }}>STT</th>
+                                    <th style={{ ...UI.th, width: '24%' }}>Tên hàng hóa, dịch vụ</th>
+                                    <th style={{ ...UI.th, width: '9%' }}>ĐVT</th>
+                                    <th style={{ ...UI.th, width: '10%' }}>SLG</th>
+                                    <th style={{ ...UI.th, width: '23%' }}>Giá TP / Công</th>
+                                    <th style={{ ...UI.th, width: '28%' }}>Thành tiền</th>
                                 </tr>
                             </thead>
+
                             <tbody>
                                 {rows.map((item, index) => (
                                     <tr key={item?.key || `row-${index}`}>
@@ -228,29 +251,31 @@ export default function EasyInvoicePaper({
                                                 ) : null}
                                             </div>
                                         </td>
+
                                         <td style={UI.td}>
                                             <div style={{ display: 'grid', gap: 8 }}>
-                                                <CellField label="Mã hàng" value={item?.code || ''} onChange={(event) => onItemFieldChange(item.key, 'code', event.target.value)} />
-                                                <CellField label="Tên hàng" value={item?.name || ''} onChange={(event) => onItemFieldChange(item.key, 'name', event.target.value)} />
+                                                <CellDisplay label="Mã hàng" value={item?.code || ''} />
+                                                <CellDisplay label="Tên hàng" value={item?.name || ''} />
                                             </div>
                                         </td>
+
                                         <td style={UI.td}>
-                                            <CellField label="Đơn vị" value={item?.unit || 'chi'} onChange={(event) => onItemFieldChange(item.key, 'unit', event.target.value)} align="center" />
+                                            <CellDisplay label="ĐVT" value={item?.unit || 'chi'} align="center" />
                                         </td>
+
                                         <td style={UI.td}>
-                                            <CellField label="Số lượng" value={item?.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" />
+                                            <CellField label="SLG" value={item?.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" />
                                         </td>
+
                                         <td style={UI.td}>
                                             <div style={{ display: 'grid', gap: 8 }}>
-                                                <CellField label="Giá thành phần" value={item?.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" />
+                                                <CellField label="Giá TP" value={item?.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" />
                                                 <CellField label="Tiền công" value={item?.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" />
                                             </div>
                                         </td>
+
                                         <td style={UI.td}>
-                                            <div>
-                                                <span style={UI.cellLabel}>Thành tiền</span>
-                                                <input style={{ ...UI.cellInput, textAlign: 'right', background: '#f8fafc', color: '#166534', fontWeight: 800 }} type="text" value={fmtMoney(item?.total || 0)} readOnly />
-                                            </div>
+                                            <CellDisplay label="Thành tiền" value={fmtMoney(item?.total || 0)} align="right" accent />
                                         </td>
                                     </tr>
                                 ))}
@@ -258,13 +283,13 @@ export default function EasyInvoicePaper({
                         </table>
                     </div>
 
-                    <PaperField label="Ghi chú" en="Note" value={invoice.note || ''} onChange={(event) => onInvoiceFieldChange('note', event.target.value)} />
+                    <PaperField label="Ghi chú" value={invoice.note || ''} onChange={(event) => onInvoiceFieldChange('note', event.target.value)} />
 
                     <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 220px', gap: 12, alignItems: 'center' }}>
                         <div style={{ fontSize: 15, lineHeight: 1.6 }}>
-                            <span style={{ fontWeight: 700 }}>Số tiền viết bằng chữ</span>
-                            <span style={UI.subEn}>(Amount in words)</span>: <b>{moneyToWords(total)}</b>
+                            <span style={{ fontWeight: 700 }}>Số tiền viết bằng chữ</span>: <b>{moneyToWords(total)}</b>
                         </div>
+
                         <div style={{ borderRadius: 16, border: '1px solid rgba(22,163,74,.22)', background: 'rgba(240,253,244,.85)', padding: '12px 14px', textAlign: 'right' }}>
                             <div style={{ fontSize: 11, color: '#166534', textTransform: 'uppercase', fontWeight: 800 }}>Tổng thanh toán</div>
                             <div data-sale-amount="true" style={{ marginTop: 4, fontSize: 28, lineHeight: 1, fontWeight: 900, color: '#166534' }}>{fmtMoney(total)}</div>

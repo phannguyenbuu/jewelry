@@ -14,7 +14,7 @@ import EasyInvoicePaper from './EasyInvoicePaper';
 import { ConfirmDialog } from './Dialogs';
 
 import { buildCompanyBankLabel, fetchCompanyBankAccounts, withFallbackCompanyBankAccounts } from '../lib/companyBankAccounts';
-import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeCompensationAmount, getTradeOldGoldQuantity, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
+import { API, NEUTRAL_BORDER, NUMBER_FONT, POS_RED, fmtCalc, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeNetAmount, getTradeOldGoldQuantity, normalizeTradeRate, nowStr, parseFmt, parseWeight, S } from './shared';
 
 import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogoUrl } from './vietQrBanks';
 
@@ -22,13 +22,65 @@ import { VIET_QR_BANKS, findVietQrBank, formatVietQrBankLabel, getVietQrBankLogo
 const FIXED_QR_NOTE = 'Mua hang tai cong ty van kim';
 const DIRECT_ISSUE_DISABLED_REASON = 'Tạm khóa phát hành trực tiếp, vui lòng xuất HĐ nháp.';
 const BUY_VOUCHER_MANUAL_SERIAL = '........';
-const BUY_VOUCHER_PRINT_TARGET = {
-    machineName: 'DESKTOP-563MTH4',
-    hostName: '192.168.1.57',
-    deviceName: 'DESKTOP-563MTH4',
-    printerName: 'EPSON TM-T81III Receipt',
-    uncPath: '\\\\DESKTOP-563MTH4\\EPSON TM-T81III Receipt',
+const RECEIPT_PREVIEW_PRINT_TARGETS = {
+    1: {
+        machineName: 'LAPTOP_PHAT',
+        hostName: 'LAPTOP_PHAT',
+        deviceName: 'LAPTOP_PHAT',
+        printerName: 'Canon LBP2900',
+        uncPath: '\\\\LAPTOP_PHAT\\Canon LBP2900',
+    },
+    2: {
+        machineName: 'LAPTOP_KHACHIEU',
+        hostName: 'LAPTOP_KHACHIEU',
+        deviceName: 'LAPTOP_KHACHIEU',
+        printerName: 'Canon LBP2900',
+        uncPath: '\\\\LAPTOP_KHACHIEU\\Canon LBP2900',
+    },
+    3: {
+        machineName: 'MAY01',
+        hostName: 'MAY01',
+        deviceName: 'MAY01',
+        printerName: 'Canon LBP2900',
+        uncPath: '\\\\MAY01\\Canon LBP2900',
+    },
+    4: {
+        machineName: 'DESKTOP-563MTH4',
+        hostName: 'DESKTOP-563MTH4',
+        deviceName: 'DESKTOP-563MTH4',
+        printerName: 'Canon LBP2900',
+        uncPath: '\\\\DESKTOP-563MTH4\\Canon LBP2900',
+    },
+    5: {
+        machineName: 'May05',
+        hostName: 'May05',
+        deviceName: 'May05',
+        printerName: 'Canon LBP2900 (Copy 2)',
+        uncPath: '\\\\May05\\Canon LBP2900 (Copy 2)',
+    },
 };
+const RECEIPT_PREVIEW_PRINTER_OPTIONS = [
+    { key: 1, label: '1', title: '\\\\LAPTOP_PHAT\\Canon LBP2900' },
+    { key: 2, label: '2', title: '\\\\LAPTOP_KHACHIEU\\Canon LBP2900' },
+    { key: 3, label: '3', title: '\\\\MAY01\\Canon LBP2900' },
+    { key: 4, label: '4', title: '\\\\DESKTOP-563MTH4\\Canon LBP2900' },
+    { key: 5, label: '5', title: '\\\\May05\\Canon LBP2900 (Copy 2)' },
+];
+const BUY_VOUCHER_PREVIEW_PRINT_TARGETS = RECEIPT_PREVIEW_PRINT_TARGETS;
+const BUY_VOUCHER_PREVIEW_PRINTER_OPTIONS = RECEIPT_PREVIEW_PRINTER_OPTIONS;
+
+const createDocumentPreviewState = (kind = 'buy') => ({
+    loading: false,
+    url: '',
+    title: kind === 'receipt' ? 'Biên nhận' : 'Phiếu kê mua hàng',
+    subtitle: kind === 'receipt' ? 'File PNG preview cho biên nhận.' : 'File PNG preview cho phiếu kê mua hàng.',
+    fileName: kind === 'receipt' ? 'bien-nhan.png' : 'phieu-ke-mua-hang.png',
+    documentName: kind === 'receipt' ? 'Biên nhận' : 'Phiếu kê mua hàng',
+    error: '',
+    actionMessage: '',
+    actionError: false,
+    sending: false,
+});
 
 const REQUIRED_EASY_INVOICE_FIELDS = [
 
@@ -136,8 +188,6 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
     const baseQty = parseFmt(nextLine.qty || 0);
 
-    const customerQty = getTradeOldGoldQuantity(nextLine);
-
     const sellLabor = getLineSellLaborAmount(nextLine);
 
     const sellAddedGold = getLineSellAddedGoldWeight(nextLine);
@@ -166,9 +216,7 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
         : inventoryValue;
 
-    const tradeAdjustmentAmount = nextLine.tx === 'trade' ? getTradeCompensationAmount(nextLine) : 0;
-
-    const tradeCustomerAmount = nextLine.tx === 'trade' ? Math.round(customerQty * parseFmt(customerRate)) : 0;
+    const tradeAmount = nextLine.tx === 'trade' ? getTradeNetAmount(nextLine, currentRate, customerRate) : 0;
 
     return {
 
@@ -176,7 +224,7 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
         value: nextLine.tx === 'trade'
 
-            ? Math.round(goldEditorAmount - tradeCustomerAmount + tradeAdjustmentAmount)
+            ? tradeAmount
 
             : goldEditorAmount,
 
@@ -184,15 +232,57 @@ const recomputeLinkedSaleLine = (line, rates, overrides = {}) => {
 
 };
 
+const parseInvoiceQuantityValue = (value) => {
+
+    const quantityValue = Number(String(value ?? 0).replace(/,/g, '.'));
+
+    return Number.isFinite(quantityValue) && quantityValue > 0 ? Number(quantityValue.toFixed(4)) : 0;
+
+};
+
+const parseInvoiceMoneyValue = (value) => Math.max(0, Math.round(parseFmt(value || 0)));
+
+const computeInvoiceComponentAmount = (quantity, componentPrice) => Math.max(0, Math.round(Number(quantity || 0) * Math.max(0, Math.round(componentPrice || 0))));
+
+const resolveInvoiceNetAmount = (total, labor) => Math.max(0, Math.round(Number(total || 0)) - parseInvoiceMoneyValue(labor));
+
+const resolveInvoiceComponentPriceFromLockedTotal = ({ quantity, total, labor }) => {
+
+    const safeQuantity = Number(quantity || 0);
+
+    if (!(safeQuantity > 0)) return 0;
+
+    const netAmount = resolveInvoiceNetAmount(total, labor);
+
+    return parseInvoiceMoneyValue(netAmount / safeQuantity);
+
+};
+
+const resolveInvoiceQuantityFromLockedTotal = ({ componentPrice, total, labor }) => {
+
+    const safeComponentPrice = parseInvoiceMoneyValue(componentPrice);
+
+    if (!(safeComponentPrice > 0)) return 0;
+
+    const netAmount = resolveInvoiceNetAmount(total, labor);
+
+    return parseInvoiceQuantityValue(netAmount / safeComponentPrice);
+
+};
+
 const normalizeInvoiceItem = (item) => {
 
-    const quantityValue = Number(String(item?.quantity ?? 0).replace(/,/g, '.'));
+    const quantity = parseInvoiceQuantityValue(item?.quantity ?? 0);
 
-    const quantity = Number.isFinite(quantityValue) && quantityValue > 0 ? Number(quantityValue.toFixed(4)) : 0;
+    const componentPrice = parseInvoiceMoneyValue(item?.componentPrice || 0);
 
-    const componentPrice = Math.max(0, Math.round(parseFmt(item?.componentPrice || 0)));
+    const rawLabor = parseInvoiceMoneyValue(item?.labor || 0);
 
-    const labor = Math.max(0, Math.round(parseFmt(item?.labor || 0)));
+    const computedTotal = Math.round(computeInvoiceComponentAmount(quantity, componentPrice) + rawLabor);
+
+    const fixedTotal = Math.max(0, Math.round(parseFmt(item?.fixedTotal ?? item?.total ?? computedTotal)));
+
+    const labor = Math.max(0, Math.min(fixedTotal, rawLabor));
 
     return {
 
@@ -208,9 +298,57 @@ const normalizeInvoiceItem = (item) => {
 
         labor,
 
-        total: Math.round(quantity * componentPrice + labor),
+        fixedTotal,
+
+        total: fixedTotal,
 
     };
+
+};
+
+const rebalanceInvoiceItemForLockedTotal = (item, field, value) => {
+
+    const normalizedItem = normalizeInvoiceItem(item);
+
+    const fixedTotal = Math.max(0, Math.round(Number(normalizedItem?.fixedTotal ?? normalizedItem?.total ?? 0)));
+
+    let quantity = normalizedItem.quantity;
+
+    let componentPrice = normalizedItem.componentPrice;
+
+    let labor = normalizedItem.labor;
+
+    if (field === 'quantity') {
+
+        quantity = parseInvoiceQuantityValue(value);
+
+        componentPrice = resolveInvoiceComponentPriceFromLockedTotal({ quantity, total: fixedTotal, labor });
+
+        return normalizeInvoiceItem({ ...normalizedItem, quantity, componentPrice, labor, fixedTotal });
+
+    }
+
+    if (field === 'componentPrice') {
+
+        componentPrice = parseInvoiceMoneyValue(value);
+
+        quantity = resolveInvoiceQuantityFromLockedTotal({ componentPrice, total: fixedTotal, labor });
+
+        return normalizeInvoiceItem({ ...normalizedItem, quantity, componentPrice, labor, fixedTotal });
+
+    }
+
+    if (field === 'labor') {
+
+        labor = Math.min(parseInvoiceMoneyValue(value), fixedTotal);
+
+        componentPrice = resolveInvoiceComponentPriceFromLockedTotal({ quantity, total: fixedTotal, labor });
+
+        return normalizeInvoiceItem({ ...normalizedItem, quantity, componentPrice, labor, fixedTotal });
+
+    }
+
+    return normalizeInvoiceItem({ ...normalizedItem, [field]: value, fixedTotal });
 
 };
 
@@ -374,6 +512,36 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
     const totalLabel = total > 0 ? 'KHÁCH TRẢ' : total < 0 ? 'KHÁCH NHẬN' : 'TỔNG TẠM TÍNH';
 
     const hasBuyVoucherData = hasBuyVoucherRows(lines);
+    const hasCountedNewGoldLine = (lines || []).some((line) => {
+        if (!line || !['sell', 'trade'].includes(line.tx)) return false;
+        const effectiveCat = line.tx === 'trade' ? 'gold' : line.cat;
+        if (effectiveCat !== 'gold') return false;
+        if (line.tx === 'trade' && line.tradeNewExpanded === false) return false;
+        const baseQty = parseWeight(line.qty || 0);
+        const addGold = getLineSellAddedGoldWeight(line);
+        const cutGold = getLineSellCutGoldWeight(line);
+        const itemGoldWeight = parseWeight(line.itemGoldWeight || 0);
+        const baseGoldWeight = line.itemId ? (itemGoldWeight || 1) : baseQty;
+        return Math.max(0, baseGoldWeight + addGold - cutGold) > 0;
+    });
+    const hasReceiptLineData = (lines || []).some((line) => {
+        if (!line) return false;
+        if (line.tx === 'buy' && line.cat === 'gold') {
+            return parseWeight(line.qty || 0) > 0;
+        }
+        if (!['sell', 'trade'].includes(line.tx)) return false;
+        const effectiveCat = line.tx === 'trade' ? 'gold' : line.cat;
+        if (effectiveCat !== 'gold') return false;
+        const baseQty = parseWeight(line.qty || 0);
+        const addGold = getLineSellAddedGoldWeight(line);
+        const cutGold = getLineSellCutGoldWeight(line);
+        const itemGoldWeight = parseWeight(line.itemGoldWeight || 0);
+        const baseGoldWeight = line.itemId ? (itemGoldWeight || 1) : baseQty;
+        const hasNewGold = Math.max(0, baseGoldWeight + addGold - cutGold) > 0;
+        const hasOldGold = line.tx === 'trade' && getTradeOldGoldQuantity(line) > 0;
+        return hasNewGold || hasOldGold;
+    });
+    const hasNewGoldForReceipt = hasReceiptLineData;
 
     const sharedCustomerInfo = normalizeSharedCustomerInfo(customerInfo);
 
@@ -401,25 +569,28 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const [voucherPreviewOpen, setVoucherPreviewOpen] = useState(false);
 
-    const [voucherPreviewLoading, setVoucherPreviewLoading] = useState(false);
+    const [buyVoucherPreviewState, setBuyVoucherPreviewState] = useState(() => createDocumentPreviewState('buy'));
 
-    const [voucherPreviewUrl, setVoucherPreviewUrl] = useState('');
+    const [receiptPreviewState, setReceiptPreviewState] = useState(() => createDocumentPreviewState('receipt'));
 
-    const [voucherPreviewTitle, setVoucherPreviewTitle] = useState('Phiếu kê mua hàng');
+    const [voucherPreviewKind, setVoucherPreviewKind] = useState('buy');
 
-    const [voucherPreviewSubtitle, setVoucherPreviewSubtitle] = useState('File PNG preview cho phiếu kê mua hàng.');
+    const voucherPreviewSendLabel = voucherPreviewKind === 'receipt' ? 'In Biên Nhận' : 'In Phiếu Kê';
 
-    const [voucherPreviewFileName, setVoucherPreviewFileName] = useState('phieu-ke-mua-hang.png');
-
-    const [voucherPreviewDocumentName, setVoucherPreviewDocumentName] = useState('Phiếu kê mua hàng');
-
-    const [voucherPreviewError, setVoucherPreviewError] = useState('');
-
-    const [voucherPreviewActionMessage, setVoucherPreviewActionMessage] = useState('');
-
-    const [voucherPreviewActionError, setVoucherPreviewActionError] = useState(false);
-
-    const [voucherSending, setVoucherSending] = useState(false);
+    const activeDocumentPreviewState = voucherPreviewKind === 'receipt' ? receiptPreviewState : buyVoucherPreviewState;
+    const updateDocumentPreviewState = (kind, patch) => {
+        const setState = kind === 'receipt' ? setReceiptPreviewState : setBuyVoucherPreviewState;
+        setState((prev) => ({ ...prev, ...patch }));
+    };
+    const getDocumentPreviewState = (kind) => (kind === 'receipt' ? receiptPreviewState : buyVoucherPreviewState);
+    const modalPreviewState = activeDocumentPreviewState || createDocumentPreviewState(voucherPreviewKind);
+    const modalPreviewFileName = modalPreviewState.fileName;
+    const buyVoucherPreviewLoading = buyVoucherPreviewState.loading;
+    const buyVoucherPreviewUrl = buyVoucherPreviewState.url;
+    const buyVoucherPreviewError = buyVoucherPreviewState.error;
+    const buyVoucherPreviewActionMessage = buyVoucherPreviewState.actionMessage;
+    const buyVoucherPreviewActionError = buyVoucherPreviewState.actionError;
+    const buyVoucherSending = buyVoucherPreviewState.sending;
 
     const [payoutBankMenuOpen, setPayoutBankMenuOpen] = useState(false);
     const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
@@ -478,7 +649,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         ...(easyInvoiceDraft?.customer || {}),
 
-        code: pickText(easyInvoiceDraft?.customer?.code || sharedCustomerInfo?.cccd || sharedCustomerInfo?.phone || orderId, orderId),
+        code: pickText(easyInvoiceDraft?.customer?.code),
 
     };
 
@@ -504,7 +675,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const createOrderReason = isIn ? requiredCustomerReason : '';
 
-    const showInvoiceTab = hasEasyInvoiceItems;
+    const showInvoiceTab = hasEasyInvoiceItems && hasCountedNewGoldLine;
 
     const effectiveExportInvoiceReason = requiredCustomerReason || exportInvoiceReason;
 
@@ -559,6 +730,12 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
     const selectedCompanyBankBank = findVietQrBank(selectedCompanyBankAccount?.bank_code || selectedCompanyBankAccount?.bank_name);
 
     const selectedCompanyBankLabel = selectedCompanyBankAccount ? buildCompanyBankLabel(selectedCompanyBankAccount) : '';
+    const selectedCompanyBankTitle = selectedCompanyBankAccount
+        ? [
+            pickText(selectedCompanyBankAccount?.bank_name || selectedCompanyBankAccount?.bank_code),
+            pickText(selectedCompanyBankAccount?.display_name || selectedCompanyBankAccount?.account_name),
+        ].filter(Boolean).join(' · ') || selectedCompanyBankLabel
+        : '';
 
     const companyBankLimit = Math.max(0, Math.round(Number(selectedCompanyBankAccount?.max_incoming_amount || 0)));
 
@@ -754,9 +931,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
-    const syncEasyInvoiceItemToHomeLine = (key, field, value) => {
+    const syncEasyInvoiceItemToHomeLine = (key, nextItem) => {
 
-        if (!setLines || !['componentPrice', 'labor'].includes(field)) return;
+        if (!setLines || !nextItem) return;
 
         setLines(prevLines => prevLines.map(line => {
 
@@ -764,13 +941,17 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             if (!matchedItem || String(line?.id) !== String(matchedItem?.lineId)) return line;
 
-            const nextAmount = Math.max(0, Math.round(parseFmt(value || 0)));
+            const nextComponentPrice = Math.max(0, Math.round(parseFmt(nextItem?.componentPrice || 0)));
 
-            const patch = field === 'componentPrice'
+            const nextLabor = Math.max(0, Math.round(parseFmt(nextItem?.labor || 0)));
 
-                ? { [line.tx === 'trade' ? 'customTrade' : 'customSell']: nextAmount }
+            const patch = {
 
-                : { sellLabor: nextAmount };
+                [line.tx === 'trade' ? 'customTrade' : 'customSell']: nextComponentPrice,
+
+                sellLabor: nextLabor,
+
+            };
 
             return recomputeLinkedSaleLine(line, rates, patch);
 
@@ -782,13 +963,22 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         setEasyInvoiceEditorError('');
 
+        const currentItem = (easyInvoiceDraft?.items || []).find(item => String(item?.key) === String(key));
+
+        const nextItem = currentItem ? rebalanceInvoiceItemForLockedTotal(currentItem, field, value) : null;
+
         setEasyInvoiceDraft(prev => ({
 
             ...prev,
 
-            items: (prev?.items || []).map(item => String(item?.key) === String(key) ? normalizeInvoiceItem({ ...item, [field]: field === 'componentPrice' || field === 'labor' ? parseFmt(value || 0) : value }) : item),
+            items: (prev?.items || []).map(item => {
+                if (String(item?.key) !== String(key)) return item;
+                return nextItem || rebalanceInvoiceItemForLockedTotal(item, field, value);
+            }),
 
         }));
+
+        return nextItem;
 
     };
 
@@ -854,6 +1044,14 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
+    const getReceiptFileName = () => {
+
+        const normalizedOrderId = String(orderId || 'sale').trim().replace(/[^a-zA-Z0-9_-]+/g, '-');
+
+        return `bien-nhan-${normalizedOrderId}.png`;
+
+    };
+
     const extractBase64FromDataUrl = (imageUrl) => {
 
         const matched = String(imageUrl || '').match(/^data:(.+?);base64,(.+)$/i);
@@ -870,16 +1068,21 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     };
 
-    const queueVoucherToAgent = async (imageUrl = voucherPreviewUrl) => {
+    const queueVoucherToAgent = async ({ kind = 'buy', imageUrl, targetOverride }) => {
 
-        const { contentType, imageBase64 } = extractBase64FromDataUrl(imageUrl);
-        const target = BUY_VOUCHER_PRINT_TARGET;
+        const previewState = getDocumentPreviewState(kind);
+        const resolvedImageUrl = imageUrl || previewState.url;
+        const { contentType, imageBase64 } = extractBase64FromDataUrl(resolvedImageUrl);
+        if (!targetOverride) {
+            throw new Error(kind === 'receipt' ? 'Không tìm thấy máy in biên nhận.' : 'Không tìm thấy máy in phiếu kê.');
+        }
+        const target = targetOverride;
 
-        setVoucherSending(true);
-
-        setVoucherPreviewActionError(false);
-
-        setVoucherPreviewActionMessage(`Đang gửi PNG tới ${target.machineName}...`);
+        updateDocumentPreviewState(kind, {
+            sending: true,
+            actionError: false,
+            actionMessage: `Đang gửi PNG tới ${target.machineName}...`,
+        });
 
         try {
 
@@ -895,9 +1098,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                     content_type: contentType,
 
-                    document_name: voucherPreviewDocumentName || 'Phiếu kê mua hàng',
+                    document_name: previewState.documentName || (kind === 'receipt' ? 'Biên nhận' : 'Phiếu kê mua hàng'),
 
-                    file_name: voucherPreviewFileName || 'phieu-ke-mua-hang.png',
+                    file_name: previewState.fileName || (kind === 'receipt' ? 'bien-nhan.png' : 'phieu-ke-mua-hang.png'),
 
                     requested_by: 'POS Mobile',
 
@@ -925,21 +1128,24 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             const printerName = payload?.printer?.printer_name || payload?.command?.printer_name || target.printerName;
 
-            setVoucherPreviewActionMessage(printerName ? `Đã gửi PNG tới ${agentName} / ${printerName}.` : `Đã gửi PNG tới ${agentName}.`);
+            updateDocumentPreviewState(kind, {
+                actionMessage: printerName ? `Đã gửi PNG tới ${agentName} / ${printerName}.` : `Đã gửi PNG tới ${agentName}.`,
+            });
 
             return payload;
 
         } catch (error) {
 
-            setVoucherPreviewActionError(true);
-
-            setVoucherPreviewActionMessage(error.message || 'Không gửi được PNG tới agent.');
+            updateDocumentPreviewState(kind, {
+                actionError: true,
+                actionMessage: error.message || 'Không gửi được PNG tới agent.',
+            });
 
             throw error;
 
         } finally {
 
-            setVoucherSending(false);
+            updateDocumentPreviewState(kind, { sending: false });
 
         }
 
@@ -947,53 +1153,61 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
     const handleVoucherDownload = () => {
 
-        if (!voucherPreviewUrl) return;
+        if (!modalPreviewState.url) return;
 
-        downloadSaleReceiptImage(voucherPreviewUrl, voucherPreviewFileName);
+        downloadSaleReceiptImage(modalPreviewState.url, modalPreviewFileName);
 
-        setVoucherPreviewActionError(false);
-
-        setVoucherPreviewActionMessage(`Đã tải ${voucherPreviewFileName}.`);
+        updateDocumentPreviewState(voucherPreviewKind, {
+            actionError: false,
+            actionMessage: `Đã tải ${modalPreviewFileName}.`,
+        });
 
     };
 
     const handleVoucherCopy = async () => {
 
-        if (!voucherPreviewUrl) return;
+        if (!modalPreviewState.url) return;
 
-        setVoucherPreviewActionError(false);
-
-        setVoucherPreviewActionMessage('');
+        updateDocumentPreviewState(voucherPreviewKind, {
+            actionError: false,
+            actionMessage: '',
+        });
 
         try {
 
-            await copySaleReceiptImageToClipboard(voucherPreviewUrl);
+            await copySaleReceiptImageToClipboard(modalPreviewState.url);
 
-            setVoucherPreviewActionMessage('Đã copy PNG vào clipboard.');
+            updateDocumentPreviewState(voucherPreviewKind, {
+                actionMessage: 'Đã copy PNG vào clipboard.',
+            });
 
         } catch (error) {
 
-            setVoucherPreviewActionError(true);
-
-            setVoucherPreviewActionMessage(error.message || 'Không copy được PNG.');
+            updateDocumentPreviewState(voucherPreviewKind, {
+                actionError: true,
+                actionMessage: error.message || 'Không copy được PNG.',
+            });
 
         }
 
     };
 
-    const applyBuyVoucherPreviewState = ({ imageUrl, model }, options = {}) => {
+    const applyDocumentPreviewState = ({ imageUrl, model }, kind = 'buy') => {
 
-        const documentTitle = model?.title || 'Phiếu kê mua hàng';
+        const isReceiptPreview = kind === 'receipt';
+        const documentTitle = model?.title || (isReceiptPreview ? 'Biên nhận' : 'Phiếu kê mua hàng');
+        const previewSubtitle = isReceiptPreview
+            ? `PNG preview. Đơn hàng: ${model?.orderId || orderId || 'PHIEU-TAM'}`
+            : `PNG preview. Số phiếu: ${BUY_VOUCHER_MANUAL_SERIAL}`;
 
-        setVoucherPreviewTitle(documentTitle);
-
-        setVoucherPreviewSubtitle(`PNG preview. Số phiếu: ${BUY_VOUCHER_MANUAL_SERIAL}`);
-
-        setVoucherPreviewFileName(getVoucherFileName());
-
-        setVoucherPreviewDocumentName(documentTitle);
-
-        setVoucherPreviewUrl(imageUrl);
+        updateDocumentPreviewState(kind, {
+            title: documentTitle,
+            subtitle: previewSubtitle,
+            fileName: isReceiptPreview ? getReceiptFileName() : getVoucherFileName(),
+            documentName: documentTitle,
+            url: imageUrl,
+            error: '',
+        });
     };
 
     const createBuyVoucherPreviewData = async (options = {}) => {
@@ -1020,61 +1234,118 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         });
 
-        applyBuyVoucherPreviewState(preview, options);
+        applyDocumentPreviewState(preview, 'buy');
 
         return preview;
 
     };
 
-    const openBuyVoucherPreview = async (options = {}) => {
+    const createReceiptPreviewData = async () => {
 
-        if (!options.skipOrderPersist) {
+        const settlement = buildSettlementPayload();
+
+        const preview = await createPaymentVoucherPreview({
+
+            orderId,
+
+            total,
+
+            customerInfo: isIn ? buildEasyInvoiceCustomerInfo() : sharedCustomerInfo,
+
+            lines,
+
+            rates,
+
+            settlement,
+
+            modeOverride: 'receipt',
+
+        });
+
+        applyDocumentPreviewState(preview, 'receipt');
+
+        return preview;
+
+    };
+
+    const openDocumentPreview = async ({
+        kind = 'buy',
+        skipOrderPersist = false,
+        persistOptions,
+        createPreview,
+        errorMessage,
+    }) => {
+
+        if (!skipOrderPersist) {
             try {
-                await persistCurrentOrder({
-                    customerInfoOverride: buildBuyVoucherCustomerInfo(),
-                });
+                await persistCurrentOrder(persistOptions || {});
             } catch (error) {
                 const message = error.message || 'Không ghi được đơn hàng vào backend.';
-                setVoucherPreviewError(message);
-                setVoucherPreviewActionError(true);
-                setVoucherPreviewActionMessage(message);
+                updateDocumentPreviewState(kind, {
+                    error: message,
+                    actionError: true,
+                    actionMessage: message,
+                });
                 return null;
             }
         }
 
+        setVoucherPreviewKind(kind);
         setVoucherPreviewOpen(true);
 
-        setVoucherPreviewLoading(true);
-
-        setVoucherPreviewError('');
-
-        setVoucherPreviewUrl('');
-
-        setVoucherPreviewActionMessage('');
-
-        setVoucherPreviewActionError(false);
+        updateDocumentPreviewState(kind, {
+            loading: true,
+            error: '',
+            url: '',
+            actionMessage: '',
+            actionError: false,
+        });
 
         try {
 
-            return await createBuyVoucherPreviewData(options);
+            return await createPreview();
 
         } catch (error) {
 
-            setVoucherPreviewError(error.message || 'Không tạo được file PNG cho phiếu kê mua hàng.');
-
-            setVoucherPreviewActionError(true);
-
-            setVoucherPreviewActionMessage(error.message || 'Không tạo được file PNG cho phiếu kê mua hàng.');
+            updateDocumentPreviewState(kind, {
+                error: error.message || errorMessage,
+                actionError: true,
+                actionMessage: error.message || errorMessage,
+            });
 
             return null;
 
         } finally {
 
-            setVoucherPreviewLoading(false);
+            updateDocumentPreviewState(kind, { loading: false });
 
         }
 
     };
+
+    const openBuyVoucherPreview = async (options = {}) => {
+
+        return openDocumentPreview({
+            kind: 'buy',
+            skipOrderPersist: options.skipOrderPersist,
+            persistOptions: {
+                customerInfoOverride: buildBuyVoucherCustomerInfo(),
+            },
+            createPreview: () => createBuyVoucherPreviewData(options),
+            errorMessage: 'Không tạo được file PNG cho phiếu kê mua hàng.',
+        });
+
+    };
+
+    const openReceiptPreview = async (options = {}) => openDocumentPreview({
+        kind: 'receipt',
+        skipOrderPersist: options.skipOrderPersist,
+        persistOptions: {
+            customerInfoOverride: isIn ? buildEasyInvoiceCustomerInfo() : sharedCustomerInfo,
+        },
+        createPreview: createReceiptPreviewData,
+        errorMessage: 'Không tạo được file PNG cho biên nhận.',
+    });
 
     useEffect(() => {
 
@@ -1082,11 +1353,13 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         if (!hasBuyVoucherData) {
 
-            setVoucherPreviewLoading(false);
-
-            setVoucherPreviewError('');
-
-            setVoucherPreviewUrl('');
+            updateDocumentPreviewState('buy', {
+                loading: false,
+                error: '',
+                url: '',
+                actionMessage: '',
+                actionError: false,
+            });
 
             return undefined;
 
@@ -1094,9 +1367,10 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         let cancelled = false;
 
-        setVoucherPreviewLoading(true);
-
-        setVoucherPreviewError('');
+        updateDocumentPreviewState('buy', {
+            loading: true,
+            error: '',
+        });
 
         const run = async () => {
 
@@ -1122,7 +1396,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 });
 
-                applyBuyVoucherPreviewState(preview, { modeOverride: 'buy' });
+                applyDocumentPreviewState(preview, 'buy');
 
                 if (cancelled || !preview) return;
 
@@ -1130,13 +1404,15 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 if (cancelled) return;
 
-                setVoucherPreviewError(error.message || 'Không tạo được file PNG cho phiếu kê mua hàng.');
+                updateDocumentPreviewState('buy', {
+                    error: error.message || 'Không tạo được file PNG cho phiếu kê mua hàng.',
+                });
 
             } finally {
 
                 if (!cancelled) {
 
-                    setVoucherPreviewLoading(false);
+                    updateDocumentPreviewState('buy', { loading: false });
 
                 }
 
@@ -1206,7 +1482,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         ...(easyInvoiceDraft?.customer || {}),
 
-        code: pickText(easyInvoiceDraft?.customer?.code || sharedCustomerInfo?.cccd || sharedCustomerInfo?.phone || orderId, orderId),
+        code: pickText(easyInvoiceDraft?.customer?.code),
 
     });
 
@@ -1282,15 +1558,13 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         }
 
-        await onSend(buildSettlementPayload(), {
+        if (!hasReceiptLineData) {
+            return;
+        }
 
-            customerInfoOverride: isIn ? buildEasyInvoiceCustomerInfo() : null,
+        setActionMessage('');
 
-            finalize: true,
-
-            markSold: true,
-
-        });
+        await openReceiptPreview();
 
     };
 
@@ -1390,21 +1664,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 const preview = await openBuyVoucherPreview({ modeOverride: 'buy', skipOrderPersist: true });
 
-                if (preview?.imageUrl) {
+                void preview;
 
-                    try {
-
-                        await queueVoucherToAgent(preview.imageUrl);
-
-                    } catch {
-
-                        // Preview modal already shows agent errors.
-
-                    }
-
-                }
-
-                setActionMessage('Đã xuất HĐ nháp. Phiếu kê mua hàng đang ở dạng PNG.');
+                setActionMessage('Đã xuất HĐ nháp. Chọn máy 1-5 để in phiếu kê mua hàng.');
 
             } else {
 
@@ -1555,21 +1817,9 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 const preview = await openBuyVoucherPreview({ modeOverride: 'buy', skipOrderPersist: true });
 
-                if (preview?.imageUrl) {
+                void preview;
 
-                    try {
-
-                        await queueVoucherToAgent(preview.imageUrl);
-
-                    } catch {
-
-                        // Preview modal already shows agent errors.
-
-                    }
-
-                }
-
-                setActionMessage(result.msg || 'Đã phát hành EasyInvoice. Phiếu kê mua hàng đang ở dạng PNG.');
+                setActionMessage(result.msg || 'Đã phát hành EasyInvoice. Chọn máy 1-5 để in phiếu kê mua hàng.');
 
             } else {
 
@@ -1635,8 +1885,8 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         }
 
-        if (voucherPreviewUrl) {
-
+        if (buyVoucherPreviewUrl) {
+            setVoucherPreviewKind('buy');
             setVoucherPreviewOpen(true);
 
             return;
@@ -1663,44 +1913,113 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         }
 
-        setVoucherPreviewActionMessage('');
-
-        setVoucherPreviewActionError(false);
-
-        setVoucherPreviewError('');
-        const hasExistingPreview = Boolean(voucherPreviewUrl);
+        updateDocumentPreviewState('buy', {
+            actionMessage: '',
+            actionError: false,
+            error: '',
+        });
+        const hasExistingPreview = Boolean(buyVoucherPreviewUrl);
         if (!hasExistingPreview) {
-            setVoucherPreviewLoading(true);
+            updateDocumentPreviewState('buy', { loading: true });
         }
 
         try {
 
             const preview = hasExistingPreview
-                ? { imageUrl: voucherPreviewUrl }
+                ? { imageUrl: buyVoucherPreviewUrl }
                 : await createBuyVoucherPreviewData({ modeOverride: 'buy' });
 
-            await queueVoucherToAgent(preview?.imageUrl || voucherPreviewUrl);
+            const buyVoucherTarget = BUY_VOUCHER_PREVIEW_PRINT_TARGETS[1];
+            await queueVoucherToAgent({
+                kind: 'buy',
+                imageUrl: preview?.imageUrl || buyVoucherPreviewUrl,
+                targetOverride: buyVoucherTarget,
+            });
 
         } catch (error) {
 
             const message = error.message || 'Không gửi được phiếu kê tới máy in.';
 
-            setVoucherPreviewActionError(true);
-
-            setVoucherPreviewActionMessage(message);
-
-            if (!voucherPreviewUrl) {
-
-                setVoucherPreviewError(message);
-
-            }
+            updateDocumentPreviewState('buy', {
+                actionError: true,
+                actionMessage: message,
+                ...(buyVoucherPreviewUrl ? {} : { error: message }),
+            });
 
         } finally {
 
             if (!hasExistingPreview) {
-                setVoucherPreviewLoading(false);
+                updateDocumentPreviewState('buy', { loading: false });
             }
 
+        }
+
+    };
+
+    const handlePreviewSend = async (printerKey = null, previewKindOverride = voucherPreviewKind) => {
+        const previewKind = previewKindOverride || voucherPreviewKind;
+
+        if (previewKind !== 'receipt') {
+            const buyVoucherTarget = BUY_VOUCHER_PREVIEW_PRINT_TARGETS[printerKey];
+            if (!buyVoucherTarget) {
+                updateDocumentPreviewState('buy', {
+                    actionError: true,
+                    actionMessage: 'Không tìm thấy máy in phiếu kê.',
+                });
+                return;
+            }
+            try {
+                await queueVoucherToAgent({
+                    kind: 'buy',
+                    targetOverride: buyVoucherTarget,
+                });
+            } catch {
+                return;
+            }
+            return;
+        }
+
+        const receiptTarget = RECEIPT_PREVIEW_PRINT_TARGETS[printerKey];
+        if (!receiptTarget) {
+            updateDocumentPreviewState('receipt', {
+                actionError: true,
+                actionMessage: 'Không tìm thấy máy in biên nhận.',
+            });
+            return;
+        }
+
+        try {
+            await queueVoucherToAgent({
+                kind: 'receipt',
+                targetOverride: receiptTarget,
+            });
+        } catch {
+            return;
+        }
+
+        updateDocumentPreviewState('receipt', {
+            actionError: false,
+            actionMessage: `Đã gửi biên nhận tới máy ${printerKey}. Đang chốt đơn...`,
+        });
+
+        try {
+            await onSend(buildSettlementPayload(), {
+                customerInfoOverride: isIn ? buildEasyInvoiceCustomerInfo() : null,
+                finalize: true,
+                markSold: true,
+                preserveScreenOnFinalize: true,
+                preserveStateOnFinalize: true,
+            });
+            const successMessage = `Đã gửi biên nhận tới máy ${printerKey} và ghi nhận đơn hàng.`;
+            setActionMessage(successMessage);
+            setVoucherPreviewOpen(false);
+        } catch (error) {
+            const message = `Đã gửi biên nhận tới máy ${printerKey} nhưng chưa chốt đơn: ${error.message || 'Lỗi không xác định.'}`;
+            updateDocumentPreviewState('receipt', {
+                actionError: true,
+                actionMessage: message,
+            });
+            setActionMessage(message);
         }
 
     };
@@ -1823,11 +2142,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
                                         )}
                                         <div style={{ minWidth: 0, flex: 1 }}>
                                             <div style={{ fontSize: 12, fontWeight: 800, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {selectedCompanyBankLabel}
-                                            </div>
-                                            <div style={{ fontSize: 11, color: '#64748b' }}>
-                                                {selectedCompanyBankAccount.account_no || 'Chưa có số tài khoản'}
-                                                {companyBankLimit > 0 ? ` · Nhận tối đa ${fmtMoneyDisplay(companyBankLimit)}` : ' · Không giới hạn'}
+                                                {selectedCompanyBankTitle || selectedCompanyBankLabel}
                                             </div>
                                         </div>
                                     </div>
@@ -2069,13 +2384,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                             {qrAccountName ? <div style={{ fontSize: 12, color: '#334155' }}>{qrAccountName}</div> : null}
 
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Noi dung: {qrNote}</div>
-
-                            {isIn && selectedCompanyBankAccount ? (
-                                <div style={{ fontSize: 11, color: companyBankOverLimit ? '#b91c1c' : '#64748b', marginTop: 4 }}>
-                                    Gioi han nhan 1 lan: {companyBankLimit > 0 ? fmtMoneyDisplay(companyBankLimit) : 'Khong gioi han'}
-                                </div>
-                            ) : null}
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{qrNote}</div>
 
                         </div>
 
@@ -2177,11 +2486,11 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 onItemFieldChange={(key, field, value) => {
 
-                    updateEasyInvoiceItem(key, field, value);
+                    const nextItem = updateEasyInvoiceItem(key, field, value);
 
                     if (field === 'componentPrice' || field === 'labor') {
 
-                        syncEasyInvoiceItemToHomeLine(key, field, value);
+                        syncEasyInvoiceItemToHomeLine(key, nextItem);
 
                     }
 
@@ -2201,111 +2510,78 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
         <>
             <div style={S.card}>
+                <button
+                    type="button"
+                    onClick={() => {
+                        if (buyVoucherPreviewUrl) {
+                            setVoucherPreviewKind('buy');
+                            setVoucherPreviewOpen(true);
+                        }
+                    }}
+                    disabled={buyVoucherPreviewLoading || !buyVoucherPreviewUrl}
+                    style={{
+                        minHeight: 220,
+                        borderRadius: 22,
+                        border: '1px solid #dbe4ee',
+                        background: '#f8fafc',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                        padding: 12,
+                        width: '100%',
+                        cursor: buyVoucherPreviewLoading || !buyVoucherPreviewUrl ? 'default' : 'pointer',
+                        appearance: 'none',
+                    }}
+                >
+                    {buyVoucherPreviewLoading ? (
+                        <div style={{ fontSize: 12, color: '#475569', fontWeight: 700 }}>Đang tạo preview PNG...</div>
+                    ) : buyVoucherPreviewError ? (
+                        <div style={{ fontSize: 11, color: '#dc2626', lineHeight: 1.55, textAlign: 'center' }}>{buyVoucherPreviewError}</div>
+                    ) : buyVoucherPreviewUrl ? (
+                        <img src={buyVoucherPreviewUrl} alt="preview-phieu-ke-mua-hang" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 16, background: '#ffffff', boxShadow: '0 10px 24px rgba(15,23,42,.10)' }} />
+                    ) : null}
+                </button>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-
-                    <div>
-
-                        <div style={S.sectionTitle}>Phiếu kê mua hàng</div>
-
-                        <div style={{ fontSize: 10, lineHeight: 1.55, color: '#64748b', marginTop: 4 }}>
-
-                            Phiếu kê mua hàng chỉ lấy phần dẻ mua vào. Với giao dịch đổi, phần dẻ cũ của khách sẽ đi vào đây.
-
-                        </div>
-
-                    </div>
-
-                    <div style={{ fontSize: 10, fontWeight: 700, color: hasBuyVoucherData ? '#166534' : '#64748b' }}>
-
-                        {hasBuyVoucherData ? 'Có dữ liệu mua dẻ/đổi dẻ' : 'Chưa có dữ liệu mua dẻ/đổi dẻ'}
-
-                    </div>
-
-                </div>
-
-                {!buyVoucherRows.length ? (
-
-                    <div style={{ marginTop: 12, borderRadius: 14, border: '1px dashed rgba(148,163,184,.7)', background: '#f8fafc', padding: 12, fontSize: 12, lineHeight: 1.6, color: '#64748b' }}>
-
-                        Phiếu kê mua hàng chỉ được in khi đơn có mua dẻ hoặc có phần dẻ cũ của giao dịch đổi.
-
-                    </div>
-
-                ) : (
-
-                    <div style={{ display: 'grid', gap: 12 }}>
-
-                        <div style={{ fontSize: 10, lineHeight: 1.55, color: '#64748b' }}>
-
-                            Đây là đúng bản preview PNG/in của phiếu kê mua hàng. Nội dung trong tab này sẽ khớp với file xuất PNG.
-
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => { void handleVoucherPreviewAction(); }}
-                            disabled={voucherPreviewLoading || (!voucherPreviewUrl && !hasBuyVoucherData)}
-                            style={{
-                                minHeight: 220,
-                                borderRadius: 22,
-                                border: '1px solid #dbe4ee',
-                                background: '#f8fafc',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                overflow: 'hidden',
-                                padding: 12,
-                                width: '100%',
-                                cursor: voucherPreviewLoading || (!voucherPreviewUrl && !hasBuyVoucherData) ? 'default' : 'pointer',
-                                appearance: 'none',
-                            }}
-                        >
-                            {voucherPreviewLoading ? (
-                                <div style={{ fontSize: 12, color: '#475569', fontWeight: 700 }}>Đang tạo preview PNG...</div>
-                            ) : voucherPreviewError ? (
-                                <div style={{ fontSize: 11, color: '#dc2626', lineHeight: 1.55, textAlign: 'center' }}>{voucherPreviewError}</div>
-                            ) : voucherPreviewUrl ? (
-                                <img src={voucherPreviewUrl} alt="preview-phieu-ke-mua-hang" style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 16, background: '#ffffff', boxShadow: '0 10px 24px rgba(15,23,42,.10)' }} />
-                            ) : (
-                                <div style={{ fontSize: 11, color: '#64748b' }}>Chưa có preview PNG.</div>
-                            )}
-                        </button>
-
-                        {voucherPreviewActionMessage ? (
-                            <div style={{ fontSize: 10, lineHeight: 1.45, color: voucherPreviewActionError ? '#dc2626' : '#0f766e', textAlign: 'center' }}>
-                                {voucherPreviewActionMessage}
+                {hasBuyVoucherData ? (
+                    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+                        {buyVoucherPreviewActionMessage ? (
+                            <div style={{ fontSize: 10, lineHeight: 1.45, color: buyVoucherPreviewActionError ? '#dc2626' : '#0f766e', textAlign: 'center' }}>
+                                {buyVoucherPreviewActionMessage}
                             </div>
                         ) : null}
-
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-
-                            <button
-                                type="button"
-
-                                onClick={() => { void handleVoucherPrintAction(); }}
-
-                                disabled={loading || voucherPreviewLoading || voucherSending || !hasBuyVoucherData}
-
-                                style={{ ...compactActionPillStyle('linear-gradient(135deg,#0f766e,#14b8a6)', loading || voucherPreviewLoading || voucherSending || !hasBuyVoucherData), minWidth: 214, height: 40, minHeight: 40, borderRadius: 20, padding: '0 18px' }}
-
-                                title={hasBuyVoucherData ? 'Gửi phiếu kê mua hàng tới máy in' : 'Chưa có dữ liệu phiếu kê mua hàng'}
-
-                                aria-label={hasBuyVoucherData ? 'Gửi phiếu kê mua hàng tới máy in' : 'Chưa có dữ liệu phiếu kê mua hàng'}
-
-                            >
-
-                                <IoPrintOutline style={{ fontSize: 18 }} />
-
-                                <span>{voucherPreviewLoading || voucherSending ? 'Đang in phiếu...' : 'In Phiếu'}</span>
-
-                            </button>
-
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                            {BUY_VOUCHER_PREVIEW_PRINTER_OPTIONS.map((printer) => (
+                                <button
+                                    key={printer.key}
+                                    type="button"
+                                    onClick={() => { void handlePreviewSend(printer.key, 'buy'); }}
+                                    disabled={buyVoucherPreviewLoading || !buyVoucherPreviewUrl || buyVoucherSending}
+                                    title={printer.title || `Máy in ${printer.label}`}
+                                    aria-label={printer.title || `Máy in ${printer.label}`}
+                                    style={{
+                                        width: 38,
+                                        height: 38,
+                                        borderRadius: '50%',
+                                        border: 'none',
+                                        background: 'linear-gradient(135deg,#15803d,#22c55e)',
+                                        color: '#ffffff',
+                                        fontWeight: 900,
+                                        fontSize: 13,
+                                        cursor: buyVoucherPreviewLoading || !buyVoucherPreviewUrl || buyVoucherSending ? 'not-allowed' : 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 10px 18px rgba(34,197,94,.24)',
+                                        opacity: buyVoucherPreviewLoading || !buyVoucherPreviewUrl || buyVoucherSending ? 0.55 : 1,
+                                    }}
+                                >
+                                    {printer.label}
+                                </button>
+                            ))}
                         </div>
-
                     </div>
-
-                )}
+                ) : null}
 
             </div>
 
@@ -2363,37 +2639,15 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
             <div style={{ ...S.totalBar, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
 
-                {isIn ? (
+                <div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 700, marginBottom: 4 }}>{totalLabel}</div><div data-sale-amount="true" style={S.totalAmt(total < 0)}>{totalPrefix}{fmtCalc(total)}</div></div>
 
-                    <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
 
-                        <div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 700, marginBottom: 4 }}>{totalLabel}</div><div data-sale-amount="true" style={S.totalAmt(total < 0)}>{totalPrefix}{fmtCalc(total)}</div></div>
+                    <button onClick={onBack} title="Quay lại" aria-label="Quay lại" style={{ ...S.iconBtn('transparent'), width: 40, height: 40, background: 'transparent', border: 'none', boxShadow: 'none', color: '#94a3b8', fontSize: 22, padding: 0 }}><IoChevronForward style={{ transform: 'scaleX(-1)' }} /></button>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                    {hasReceiptLineData ? <button onClick={handleSend} disabled={loading} title="In Biên Nhận" aria-label="In Biên Nhận" style={footerPillStyle('linear-gradient(135deg,#15803d,#22c55e)', loading)}><IoPrintOutline style={{ fontSize: 18 }} /><span>In Biên Nhận</span></button> : null}
 
-                            <button onClick={onBack} title="Quay lại" aria-label="Quay lại" style={{ ...S.iconBtn('transparent'), width: 40, height: 40, background: 'transparent', border: 'none', boxShadow: 'none', color: '#94a3b8', fontSize: 22, padding: 0 }}><IoChevronForward style={{ transform: 'scaleX(-1)' }} /></button>
-
-                            <button onClick={handleSend} disabled={loading} title="Tạo đơn" aria-label="Tạo đơn" style={footerPillStyle('linear-gradient(135deg,#15803d,#22c55e)', loading)}><IoDocumentTextOutline style={{ fontSize: 18 }} /><span>Tạo Đơn</span></button>
-
-                        </div>
-
-                    </>
-
-                ) : (
-
-                    <>
-
-                        <div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 9, color: '#64748b', fontWeight: 700, marginBottom: 4 }}>{totalLabel}</div><div data-sale-amount="true" style={S.totalAmt(total < 0)}>{totalPrefix}{fmtCalc(total)}</div></div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-
-                            <button onClick={handleSend} disabled={loading} title="Tạo đơn" aria-label="Tạo đơn" style={footerPillStyle('linear-gradient(135deg,#15803d,#22c55e)', loading)}><IoDocumentTextOutline style={{ fontSize: 18 }} /><span>Tạo Đơn</span></button>
-
-                        </div>
-
-                    </>
-
-                )}
+                </div>
 
             </div>
 
@@ -2422,15 +2676,15 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 open={voucherPreviewOpen}
 
-                loading={voucherPreviewLoading}
+                loading={modalPreviewState.loading}
 
-                imageUrl={voucherPreviewUrl}
+                imageUrl={modalPreviewState.url}
 
-                error={voucherPreviewError}
+                error={modalPreviewState.error}
 
-                title={voucherPreviewTitle}
+                title={modalPreviewState.title}
 
-                subtitle={voucherPreviewSubtitle}
+                subtitle={modalPreviewState.subtitle}
 
                 onClose={() => setVoucherPreviewOpen(false)}
 
@@ -2438,13 +2692,21 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                 onCopy={handleVoucherCopy}
 
-                onSendToAgent={() => queueVoucherToAgent()}
+                onSendToAgent={() => handlePreviewSend()}
 
-                actionMessage={voucherPreviewActionMessage}
+                onSendToPrinter={handlePreviewSend}
 
-                actionError={voucherPreviewActionError}
+                actionMessage={modalPreviewState.actionMessage}
 
-                sending={voucherSending}
+                actionError={modalPreviewState.actionError}
+
+                sending={modalPreviewState.sending || (voucherPreviewKind === 'receipt' && loading)}
+
+                sendLabel={voucherPreviewSendLabel}
+
+                showCopy={voucherPreviewKind !== 'receipt'}
+
+                printerOptions={voucherPreviewKind === 'receipt' ? RECEIPT_PREVIEW_PRINTER_OPTIONS : voucherPreviewKind === 'buy' ? BUY_VOUCHER_PREVIEW_PRINTER_OPTIONS : []}
 
             />
 

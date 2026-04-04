@@ -4,9 +4,15 @@ import { IoChevronDownOutline, IoChevronUpOutline } from 'react-icons/io5';
 import FormattedNumberInput from './FormattedNumberInput';
 import { S, TRADE_COMP_SUGGESTIONS, VN_MONEY_SUGGESTIONS, fmtCalc, normalizeTradeRate, parseWeight } from './shared';
 
+const TWO_COLUMN_FIELDS = 'minmax(0, 1fr) minmax(0, 1fr)';
+const FIELD_COLUMN_GAP = 6;
+const FIELD_STACK_GAP = 8;
+const FIELD_STEPPER_WIDTH = 30;
+const FIELD_STEPPER_GAP = 4;
+
 function StepButtons({ txTheme, lineAccent, onIncrease, onDecrease, increaseLabel, decreaseLabel }) {
     return (
-        <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: 4 }}>
+        <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: FIELD_STEPPER_GAP }}>
             <button
                 type="button"
                 onClick={onIncrease}
@@ -93,7 +99,7 @@ function GoldAdjustField({
     };
 
     return (
-        <div>
+        <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
                 <span style={S.label}>{activeLabel}</span>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -133,7 +139,7 @@ function GoldAdjustField({
                     })}
                 </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${FIELD_STEPPER_WIDTH}px`, gap: FIELD_STEPPER_GAP }}>
                 <FormattedNumberInput
                     style={S.inp}
                     inputMode="decimal"
@@ -185,6 +191,7 @@ export function MoneyField({
     return (
         <div
             ref={containerRef}
+            style={{ minWidth: 0 }}
             onFocus={() => suggestions && setSuggestOpen(true)}
             onBlur={(e) => {
                 if (suggestions && !e.currentTarget.contains(e.relatedTarget)) {
@@ -193,7 +200,7 @@ export function MoneyField({
             }}
         >
             <span style={S.label}>{label}</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${FIELD_STEPPER_WIDTH}px`, gap: FIELD_STEPPER_GAP }}>
                 <FormattedNumberInput
                     list={list}
                     style={{ ...S.inp, color: lineAccent }}
@@ -271,9 +278,9 @@ export default function TxLineExtras({
 
     return (
         <div style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'grid', gap: FIELD_STACK_GAP }}>
                 {!hideLaborField && (
-                    <div style={{ display: 'grid', gridTemplateColumns: showTradeComp ? '1fr 1fr' : '1fr', gap: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: showTradeComp ? TWO_COLUMN_FIELDS : 'minmax(0, 1fr)', gap: FIELD_COLUMN_GAP }}>
                         <MoneyField
                             label="Tiền công"
                             placeholder="Nhập tiền công"

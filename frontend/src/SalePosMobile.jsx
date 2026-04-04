@@ -5,7 +5,7 @@ import OrderScreen from './sale/OrderScreen';
 import PaymentScreen from './sale/PaymentScreen';
 import RepairJobScreen from './sale/RepairJobScreen';
 import { OrderListScreen, SavedTransactionsModal } from './sale/SavedScreens';
-import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldLineEffectiveQuantity, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
+import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldAgeProductValues, getGoldLineEffectiveQuantity, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeNetAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
 
 const serializeOrderLines = (saleLines = []) => saleLines.map((line, index) => ({
     stt: index + 1,
@@ -121,20 +121,27 @@ export default function SalePosMobile() {
             const hasCustomerCustomBuy = l.customerCustomBuy !== undefined && String(l.customerCustomBuy).trim() !== '';
             const customerRate = normalizeTradeRate('gold', hasCustomerCustomBuy ? l.customerCustomBuy : (rates.gold?.[l.customerProduct]?.[1] || 0));
             const customerQty = getTradeOldGoldQuantity(l);
-            const customerAmount = Math.round(customerQty * customerRate);
             const labor = getLineSellLaborAmount(l);
             const actualQty = getGoldLineEffectiveQuantity(l);
-            const newGoldAmount = Math.round(actualQty * rate + labor);
-            const manualAdjustment = Math.round(parseFmt(l.tradeLabor || 0));
+            const tradeDirection = getTradeQuantityDirection(l);
             const tradeCompQty = getTradeCompensationQuantity(l);
             const tradeCompUnitAmount = getTradeCompensationUnitAmount(l);
             const tradeCompAmount = getTradeCompensationAmount(l);
-            const tradeAdjustedAmount = manualAdjustment + tradeCompAmount;
+            const tradeAmount = getTradeNetAmount(l, rate, customerRate);
+            const baseLeftQty = tradeDirection === 'old' ? customerQty : actualQty;
+            const baseRightQty = tradeDirection === 'old' ? actualQty : customerQty;
+            const baseRate = tradeDirection === 'old' ? customerRate : rate;
+            const baseLabel = baseRightQty > 0
+                ? `(${formatWeight(baseLeftQty)}-${formatWeight(baseRightQty)}) x ${fmtVN(baseRate)}`
+                : `${formatWeight(baseLeftQty)} x ${fmtVN(baseRate)}`;
             const tradeNote = [
-                manualAdjustment > 0 ? ` | Chinh tay: ${fmtVN(manualAdjustment)}` : '',
-                tradeCompAmount > 0 ? ` | Bu: ${fmtVN(tradeCompUnitAmount)} x ${formatWeight(tradeCompQty)}` : '',
+                labor > 0 ? ` | Cong: ${fmtVN(labor)}` : '',
+                tradeCompAmount !== 0 ? ` | Bu ${tradeCompAmount > 0 ? '+' : '-'}: ${fmtVN(tradeCompUnitAmount)} x ${formatWeight(tradeCompQty)}` : '',
             ].join('');
-            return `${sign}Vang moi ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)} - De ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}${tradeNote} = ${fmtVN(newGoldAmount - customerAmount + tradeAdjustedAmount)}`;
+            const oldGoldSegment = customerQty > 0
+                ? ` - ${formatBuyGoldProductLabel(l.customerProduct)} ${fmtVN(customerRate)} x ${formatWeight(customerQty)}`
+                : '';
+            return `${sign}Vang moi ${l.product}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)}${oldGoldSegment} | Chenh lech: ${baseLabel}${tradeNote} = ${fmtVN(Math.abs(tradeAmount))}`;
         }
         if (l.tx === 'sell' && effectiveCat === 'gold') {
             const labor = parseFmt(l.sellLabor || 0);
@@ -216,11 +223,14 @@ export default function SalePosMobile() {
     }, []);
 
     useEffect(() => {
+        const goldAgeProductValues = getGoldAgeProductValues(rates);
         setLines(prev => {
             if (!prev.length) return [createDefaultLine(rates)];
             return prev.map(line => {
-                const availableProducts = line.tx === 'buy' && line.cat === 'gold'
-                    ? [...Object.keys(rates.gold || {}), BUY_GOLD_OTHER_OPTION]
+                const availableProducts = line.cat === 'gold'
+                    ? (line.tx === 'buy'
+                        ? [...goldAgeProductValues, BUY_GOLD_OTHER_OPTION]
+                        : goldAgeProductValues)
                     : Object.keys(rates[line.cat] || {});
                 if (!availableProducts.length || availableProducts.includes(line.product)) return line;
                 return { ...line, product: availableProducts[0] };
@@ -508,6 +518,8 @@ export default function SalePosMobile() {
     const handleSend = async (payload, options = {}) => {
         const finalize = options.finalize !== false;
         const markSold = options.markSold !== undefined ? options.markSold : finalize;
+        const preserveScreenOnFinalize = Boolean(options.preserveScreenOnFinalize);
+        const preserveStateOnFinalize = Boolean(options.preserveStateOnFinalize);
         setLoading(true);
         try {
             const { data } = await persistOrderToBackend(payload, {
@@ -516,13 +528,17 @@ export default function SalePosMobile() {
             });
             const soldUpdate = markSold ? await markSoldInventoryItems(lines) : { updatedCount: 0, failedCount: 0 };
             if (finalize) {
-                persistSavedDrafts(savedDrafts.filter(item => item.id !== orderId));
-                setOrderId(genOrderId());
-                setOrderCreatedAt(formatOrderDateTimeForStorage(new Date()));
-                setLines([createDefaultLine(rates)]);
-                setCustomerInfo(createEmptyCustomerInfo());
-                setCustomerInfoOpen(false);
-                setScreen('list');
+                if (!preserveStateOnFinalize) {
+                    persistSavedDrafts(savedDrafts.filter(item => item.id !== orderId));
+                    setOrderId(genOrderId());
+                    setOrderCreatedAt(formatOrderDateTimeForStorage(new Date()));
+                    setLines([createDefaultLine(rates)]);
+                    setCustomerInfo(createEmptyCustomerInfo());
+                    setCustomerInfoOpen(false);
+                }
+                if (!preserveScreenOnFinalize) {
+                    setScreen('order');
+                }
                 if (soldUpdate.failedCount > 0) {
                     alert(`Đơn đã tạo xong nhưng còn ${soldUpdate.failedCount} sản phẩm chưa đổi sang trạng thái đã bán.`);
                 }
@@ -651,7 +667,7 @@ export default function SalePosMobile() {
                         nhomHangList={nhomHangList}
                         quayNhoList={quayNhoList}
                         tuoiVangList={tuoiVangList}
-                        onSaved={() => { loadInventoryItems(); loadOrders(); setScreen('list'); }}
+                        onSaved={() => { loadInventoryItems(); loadOrders(); }}
                     />
                 )}
                 {screen === 'list' && (

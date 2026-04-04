@@ -74,10 +74,11 @@ const UI = {
     fieldLabel: { display: 'inline-flex', alignItems: 'baseline', flexShrink: 0, whiteSpace: 'nowrap', fontSize: 15 },
     fieldBox: { display: 'flex', alignItems: 'center', minHeight: 32, flex: 1, minWidth: 0, borderBottom: '1px dashed rgba(120,53,15,.42)' },
     fieldInput: { width: '100%', border: 'none', background: 'transparent', outline: 'none', padding: '4px 2px', fontSize: 15, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif" },
-    cellInput: { width: '100%', minHeight: 28, borderRadius: 10, border: '1px solid rgba(120,53,15,.18)', background: 'rgba(255,255,255,.82)', outline: 'none', padding: '4px 6px', fontSize: 10, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box' },
+    cellInput: { width: '100%', minHeight: 30, borderRadius: 10, border: '1px solid rgba(120,53,15,.18)', background: 'rgba(255,255,255,.82)', outline: 'none', padding: '5px 7px', fontSize: 11, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box' },
+    cellDisplay: { width: '100%', minHeight: 30, borderRadius: 10, border: '1px solid rgba(120,53,15,.14)', background: '#f8fafc', padding: '5px 7px', fontSize: 11, fontWeight: 700, color: '#111827', fontFamily: "'Times New Roman', serif", boxSizing: 'border-box', display: 'flex', alignItems: 'center' },
     cellLabel: { display: 'block', fontSize: 8, color: '#7c2d12', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3, fontWeight: 700, whiteSpace: 'nowrap' },
-    th: { border: '1px solid rgba(120,53,15,.22)', padding: '6px 3px', fontSize: 6, whiteSpace: 'nowrap', lineHeight: 1.15 },
-    td: { border: '1px solid rgba(120,53,15,.18)', padding: 5, verticalAlign: 'top' },
+    th: { border: '1px solid rgba(120,53,15,.22)', padding: '7px 4px', fontSize: 7, whiteSpace: 'nowrap', lineHeight: 1.15 },
+    td: { border: '1px solid rgba(120,53,15,.18)', padding: 4, verticalAlign: 'top' },
 };
 
 function PaperField({ label, en, value, onChange, type = 'text', align = 'left', readOnly = false }) {
@@ -123,6 +124,25 @@ function CellField({ label, value, onChange, align = 'left', inputMode = undefin
                     onChange={onChange}
                 />
             )}
+        </div>
+    );
+}
+
+function CellDisplay({ label, value, align = 'left', accent = false }) {
+    return (
+        <div>
+            <span style={UI.cellLabel}>{label}</span>
+            <div
+                style={{
+                    ...UI.cellDisplay,
+                    justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+                    background: accent ? 'rgba(240,253,244,.92)' : UI.cellDisplay.background,
+                    color: accent ? '#166534' : UI.cellDisplay.color,
+                    fontWeight: accent ? 800 : UI.cellDisplay.fontWeight,
+                }}
+            >
+                <span style={{ width: '100%', textAlign: align, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || ''}</span>
+            </div>
         </div>
     );
 }
@@ -251,12 +271,12 @@ export default function EasyInvoiceEditorModal({
                                     <table style={{ position: 'relative', zIndex: 1, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                                         <thead>
                                             <tr style={{ background: 'rgba(120,53,15,.08)' }}>
-                                                <th style={{ ...UI.th, width: '7%' }}>STT</th>
-                                                <th style={{ ...UI.th, width: '18%' }}>Tên hàng hóa, dịch vụ</th>
-                                                <th style={{ ...UI.th, width: '12%' }}>Đơn vị tính</th>
-                                                <th style={{ ...UI.th, width: '12%' }}>Số lượng</th>
-                                                <th style={{ ...UI.th, width: '25%' }}>Đơn giá / Công</th>
-                                                <th style={{ ...UI.th, width: '26%' }}>Thành tiền</th>
+                                                <th style={{ ...UI.th, width: '6%' }}>STT</th>
+                                                <th style={{ ...UI.th, width: '24%' }}>Tên hàng hóa, dịch vụ</th>
+                                                <th style={{ ...UI.th, width: '9%' }}>ĐVT</th>
+                                                <th style={{ ...UI.th, width: '10%' }}>SLG</th>
+                                                <th style={{ ...UI.th, width: '23%' }}>Giá TP / Công</th>
+                                                <th style={{ ...UI.th, width: '28%' }}>Thành tiền</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -274,27 +294,24 @@ export default function EasyInvoiceEditorModal({
                                                     </td>
                                                     <td style={UI.td}>
                                                         <div style={{ display: 'grid', gap: 8 }}>
-                                                            <CellField label="Mã hàng" value={item?.code || ''} onChange={(event) => onItemFieldChange(item.key, 'code', event.target.value)} />
-                                                            <CellField label="Tên hàng" value={item?.name || ''} onChange={(event) => onItemFieldChange(item.key, 'name', event.target.value)} />
+                                                            <CellDisplay label="Mã hàng" value={item?.code || ''} />
+                                                            <CellDisplay label="Tên hàng" value={item?.name || ''} />
                                                         </div>
                                                     </td>
                                                     <td style={UI.td}>
-                                                        <CellField label="Đơn vị" value={item?.unit || 'chi'} onChange={(event) => onItemFieldChange(item.key, 'unit', event.target.value)} align="center" />
+                                                        <CellDisplay label="ĐVT" value={item?.unit || 'chi'} align="center" />
                                                     </td>
                                                     <td style={UI.td}>
-                                                        <CellField label="Số lượng" value={item?.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" />
+                                                        <CellField label="SLG" value={item?.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" />
                                                     </td>
                                                     <td style={UI.td}>
                                                         <div style={{ display: 'grid', gap: 8 }}>
-                                                            <CellField label="Giá thành phần" value={item?.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" />
+                                                            <CellField label="Giá TP" value={item?.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" />
                                                             <CellField label="Tiền công" value={item?.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" />
                                                         </div>
                                                     </td>
                                                     <td style={UI.td}>
-                                                        <div>
-                                                            <span style={UI.cellLabel}>Thành tiền</span>
-                                                            <input style={{ ...UI.cellInput, textAlign: 'right', background: '#f8fafc', color: '#166534', fontWeight: 800 }} type="text" value={fmtMoney(item?.total || 0)} readOnly />
-                                                        </div>
+                                                        <CellDisplay label="Thành tiền" value={fmtMoney(item?.total || 0)} align="right" accent />
                                                     </td>
                                                 </tr>
                                             ))}

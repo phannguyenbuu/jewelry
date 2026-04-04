@@ -12,6 +12,7 @@ export default function SaleReceiptPreviewModal({
     onPrint,
     actionMessage,
     actionError,
+    printingPosNos = [],
 }) {
     if (!open) return null;
 
@@ -109,7 +110,8 @@ export default function SaleReceiptPreviewModal({
                             {[1, 2, 3, 4, 5].map(posNo => (
                                 (() => {
                                     const isLocked = LOCKED_POS_NUMBERS.has(posNo);
-                                    const isDisabled = loading || !imageUrl || isLocked;
+                                    const isPrinting = printingPosNos.includes(posNo);
+                                    const isDisabled = loading || !imageUrl || isLocked || isPrinting;
                                     return (
                                         <button
                                             key={posNo}
@@ -123,7 +125,7 @@ export default function SaleReceiptPreviewModal({
                                                 height: 38,
                                                 borderRadius: '50%',
                                                 border: 'none',
-                                                background: isLocked ? '#cbd5e1' : 'linear-gradient(135deg,#15803d,#22c55e)',
+                                                background: isLocked ? '#cbd5e1' : isPrinting ? 'linear-gradient(135deg,#0f172a,#334155)' : 'linear-gradient(135deg,#15803d,#22c55e)',
                                                 color: '#ffffff',
                                                 fontWeight: 900,
                                                 fontSize: 13,
@@ -131,7 +133,7 @@ export default function SaleReceiptPreviewModal({
                                                 display: 'inline-flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
-                                                boxShadow: isLocked ? 'none' : '0 10px 18px rgba(34,197,94,.24)',
+                                                boxShadow: isLocked ? 'none' : isPrinting ? '0 10px 18px rgba(15,23,42,.22)' : '0 10px 18px rgba(34,197,94,.24)',
                                                 opacity: isDisabled ? 0.55 : 1,
                                             }}
                                         >

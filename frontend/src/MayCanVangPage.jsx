@@ -59,11 +59,51 @@ export default function MayCanVangPage() {
   }, [selectedAgent?.id]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      loadAgents().catch(console.error);
-      if (selectedAgent?.id) loadReadings(selectedAgent.id).catch(console.error);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer = 0;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'hidden') {
+        try {
+          await loadAgents();
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 2500);
+    };
+
+    timer = window.setTimeout(tick, 2500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedAgent?.id) return undefined;
+
+    let cancelled = false;
+    let timer = 0;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'hidden') {
+        try {
+          await loadReadings(selectedAgent.id);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 1000);
+    };
+
+    timer = window.setTimeout(tick, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [selectedAgent?.id]);
 
   const openCreate = () => {
@@ -294,17 +334,30 @@ export default function MayCanVangPage() {
                 <div style={{ display: 'grid', gap: 10 }}>
                   {readings.map((reading) => {
                     const stableColor = reading.stable ? { bg: '#dcfce7', text: '#166534' } : { bg: '#fef3c7', text: '#92400e' };
+                    const sourceColor = reading.source === 'realtime'
+                      ? { bg: '#dbeafe', text: '#1d4ed8' }
+                      : { bg: '#f3e8ff', text: '#7c3aed' };
                     return (
                       <div key={reading.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 14px', background: '#fbfdff' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                           <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
                             {reading.weight_text || '—'} {reading.unit || ''}
                           </div>
-                          <span style={{ background: stableColor.bg, color: stableColor.text, borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700 }}>
-                            {reading.stable ? 'Ổn định' : 'Chưa ổn định'}
-                          </span>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <span style={{ background: '#e2e8f0', color: '#334155', borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700 }}>
+                              {reading.device_type || 'A&D'}
+                            </span>
+                            <span style={{ background: sourceColor.bg, color: sourceColor.text, borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700 }}>
+                              {reading.source === 'realtime' ? 'Realtime' : 'Command'}
+                            </span>
+                            <span style={{ background: stableColor.bg, color: stableColor.text, borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700 }}>
+                              {reading.stable ? 'Ổn định' : 'Chưa ổn định'}
+                            </span>
+                          </div>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 10, fontSize: 12, color: '#475569' }}>
+                          <div><strong>Nguồn:</strong> {reading.source || '—'}</div>
+                          <div><strong>Thiết bị:</strong> {reading.device_type || 'A&D'}</div>
                           <div><strong>Header:</strong> {reading.header || '—'}</div>
                           <div><strong>Value:</strong> {reading.weight_value ?? '—'}</div>
                           <div><strong>Raw:</strong> {reading.raw_line || '—'}</div>

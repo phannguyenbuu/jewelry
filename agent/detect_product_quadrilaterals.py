@@ -137,17 +137,25 @@ def choose_component(
 
 def order_quad(points: np.ndarray) -> np.ndarray:
     points = np.asarray(points, dtype=np.float32)
-    sums = points.sum(axis=1)
-    diffs = np.diff(points, axis=1).reshape(-1)
-    return np.array(
-        [
-            points[np.argmin(sums)],
-            points[np.argmin(diffs)],
-            points[np.argmax(sums)],
-            points[np.argmax(diffs)],
-        ],
-        dtype=np.float32,
-    )
+    x_sorted = points[np.argsort(points[:, 0])]
+    left_pair = x_sorted[:2]
+    right_pair = x_sorted[2:]
+
+    left_pair = left_pair[np.argsort(left_pair[:, 1])]
+    top_left, bottom_left = left_pair
+
+    right_pair = right_pair[np.argsort(right_pair[:, 1])]
+    top_right, bottom_right = right_pair
+
+    return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
+
+
+def quad_is_valid(quad: np.ndarray) -> bool:
+    rounded = {tuple(np.round(point, 1)) for point in quad}
+    if len(rounded) < 4:
+        return False
+    area = cv2.contourArea(quad.astype(np.float32).reshape((-1, 1, 2)))
+    return area > 500.0
 
 
 def simplify_to_quad(points: np.ndarray) -> np.ndarray:
@@ -157,7 +165,9 @@ def simplify_to_quad(points: np.ndarray) -> np.ndarray:
     for epsilon_ratio in (0.01, 0.015, 0.02, 0.03, 0.04, 0.05):
         approx = cv2.approxPolyDP(hull, epsilon_ratio * perimeter, True)
         if len(approx) == 4:
-            return order_quad(approx.reshape(-1, 2))
+            quad = order_quad(approx.reshape(-1, 2))
+            if quad_is_valid(quad):
+                return quad
 
     rect = cv2.minAreaRect(hull)
     return order_quad(cv2.boxPoints(rect))

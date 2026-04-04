@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { IoCloseOutline, IoImagesOutline } from 'react-icons/io5';
+
+import { createLiveBarcodeConstraints, detectLiveBarcode, LIVE_BARCODE_SCAN_INTERVAL_MS, tuneLiveBarcodeStream } from './liveBarcodeScan';
 import { S } from './shared';
 
 const INVENTORY_SCAN_FORMATS = ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8'];
@@ -18,6 +20,7 @@ export default function InventoryCodeScanModal({
     const scanIntervalRef = useRef(null);
     const scanningBusyRef = useRef(false);
     const detectorRef = useRef(null);
+    const scanCanvasRef = useRef(null);
     const [cameraReady, setCameraReady] = useState(false);
     const [cameraError, setCameraError] = useState('');
 
@@ -30,6 +33,7 @@ export default function InventoryCodeScanModal({
                 clearInterval(scanIntervalRef.current);
                 scanIntervalRef.current = null;
             }
+            scanningBusyRef.current = false;
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop());
                 streamRef.current = null;
@@ -41,13 +45,12 @@ export default function InventoryCodeScanModal({
 
         const beginScanning = () => {
             if (!detectorRef.current || scanIntervalRef.current) return;
-            scanIntervalRef.current = setInterval(async () => {
+            scanIntervalRef.current = window.setInterval(async () => {
                 const video = videoRef.current;
                 if (!video || scanningBusyRef.current || loading || video.readyState < 2) return;
                 scanningBusyRef.current = true;
                 try {
-                    const results = await detectorRef.current.detect(video);
-                    const match = results.find(item => item?.rawValue);
+                    const match = await detectLiveBarcode(detectorRef.current, video, scanCanvasRef, { preferFullFrame: true });
                     if (match?.rawValue) {
                         clearInterval(scanIntervalRef.current);
                         scanIntervalRef.current = null;
@@ -59,37 +62,38 @@ export default function InventoryCodeScanModal({
                         }
                     }
                 } catch {
-                    // Keep scanning on frame-level decode errors.
+                    // Ignore frame-level decode errors and keep scanning.
                 } finally {
                     scanningBusyRef.current = false;
                 }
-            }, 350);
+            }, LIVE_BARCODE_SCAN_INTERVAL_MS);
         };
 
         const startCamera = async () => {
             setCameraReady(false);
             setCameraError('');
+
             if (typeof window === 'undefined' || !('BarcodeDetector' in window)) {
                 throw new Error('Thiết bị này chưa hỗ trợ quét mã trực tiếp.');
             }
+
             detectorRef.current = new window.BarcodeDetector({ formats: INVENTORY_SCAN_FORMATS });
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 1280 },
-                },
+                video: createLiveBarcodeConstraints({ square: false }),
                 audio: false,
             });
+
             if (cancelled) {
                 stream.getTracks().forEach(track => track.stop());
                 return;
             }
+
+            await tuneLiveBarcodeStream(stream, { preferZoom: false });
             streamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 videoRef.current.onloadedmetadata = () => {
-                    videoRef.current?.play?.().catch(() => { });
+                    videoRef.current?.play?.().catch(() => {});
                     setCameraReady(true);
                     beginScanning();
                 };
@@ -112,7 +116,7 @@ export default function InventoryCodeScanModal({
 
     const helperMessage = loading
         ? 'Đang đọc mã...'
-        : message || (cameraReady ? 'Đưa QR hoặc mã vạch vào chính giữa khung vuông để hệ thống tự nhận.' : '');
+        : message || (cameraReady ? 'Đưa QR hoặc mã vạch ra trước camera, hệ thống sẽ tự tìm và nhận mã.' : '');
     const helperColor = loading
         ? '#f8fafc'
         : /^(Đã|Tìm thấy)/.test(message || '') ? '#0f766e' : message ? '#dc2626' : '#cbd5e1';
@@ -124,7 +128,7 @@ export default function InventoryCodeScanModal({
                     <div>
                         <div data-sale-title="true" style={{ fontSize: 15, fontWeight: 900 }}>Quét mã kho</div>
                         <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: '#cbd5e1' }}>
-                            Đưa mã sản phẩm vào khung vuông. Khi nhận được dữ liệu, hệ thống sẽ tự điền mã vào ô tìm kho của dòng hiện tại.
+                            Đưa mã sản phẩm ra trước camera. Khi nhận được dữ liệu, hệ thống sẽ tự điền mã vào ô tìm kho của dòng hiện tại.
                         </div>
                     </div>
                     <button
@@ -137,27 +141,13 @@ export default function InventoryCodeScanModal({
                 </div>
 
                 <div style={{ padding: '0 16px 16px' }}>
-                    <div style={{ position: 'relative', borderRadius: 24, overflow: 'hidden', background: '#020617', aspectRatio: '1 / 1' }}>
+                    <div style={{ position: 'relative', borderRadius: 24, overflow: 'hidden', background: '#020617', aspectRatio: '3 / 4' }}>
                         <video
                             ref={videoRef}
                             autoPlay
                             muted
                             playsInline
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: cameraError ? 0.2 : 1 }}
-                        />
-                        <div
-                            style={{
-                                position: 'absolute',
-                                left: '50%',
-                                top: '50%',
-                                width: '58%',
-                                aspectRatio: '1 / 1',
-                                transform: 'translate(-50%, -50%)',
-                                borderRadius: 24,
-                                border: '2px solid rgba(255,255,255,.96)',
-                                boxShadow: '0 0 0 9999px rgba(2,6,23,.45)',
-                                pointerEvents: 'none',
-                            }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', opacity: cameraError ? 0.2 : 1 }}
                         />
                         {loading && (
                             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,.4)', color: 'white', fontSize: 14, fontWeight: 900 }}>

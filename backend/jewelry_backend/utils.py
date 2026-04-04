@@ -291,6 +291,9 @@ def scale_command_json(cmd):
 
 
 def scale_reading_json(reading):
+    meta = reading.meta if isinstance(reading.meta, dict) else {}
+    source = _clean_text(meta.get('source') or '')
+    device_type = _clean_text(meta.get('device_type') or '')
     return {
         'id': reading.id,
         'agent_id': reading.agent_id,
@@ -301,7 +304,9 @@ def scale_reading_json(reading):
         'weight_value': reading.weight_value,
         'unit': reading.unit or '',
         'raw_line': reading.raw_line or '',
-        'meta': reading.meta or {},
+        'meta': meta,
+        'source': source or ('command' if reading.command_id else 'realtime'),
+        'device_type': device_type,
         'created_at': reading.created_at or '',
     }
 

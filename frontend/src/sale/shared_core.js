@@ -1,5 +1,6 @@
 import { API_BASE } from '../lib/api';
 import { printItemCertification } from '../lib/printItemCertification';
+import { scanBarcodeFromSource } from './liveBarcodeScan';
 
 const API = API_BASE;
 
@@ -89,7 +90,7 @@ const hasCustomerInfo = (info) => Object.entries(info || {}).some(([key, value])
 
 /* Default rate data (fallback khi API chưa có) */
 const DEFAULT_RATES = {
-    gold: { 'SJC': [85500000, 83000000], '1c': [8550000, 8300000], '0.5c': [4275000, 4150000] },
+    gold: {},
     money: { 'USD': [25400, 25000], 'EUR': [27500, 27000] },
 };
 
@@ -114,9 +115,17 @@ const sanitizeLineInventoryState = (line) => {
     };
 };
 
+const isStandardGoldAgeProduct = (product) => /^\d{3}$/.test(String(product || '').trim());
+const getGoldAgeProductValues = (rates) => Object.keys(rates?.gold || {}).filter(isStandardGoldAgeProduct);
+const getDefaultProductForCategory = (rates, category) => (
+    category === 'gold'
+        ? (getGoldAgeProductValues(rates)[0] || '')
+        : (Object.keys(rates?.[category] || {})[0] || '')
+);
+
 const createDefaultLine = (rates, overrides = {}) => {
     const firstCat = Object.keys(rates)[0] || 'gold';
-    const firstProd = Object.keys(rates[firstCat] || {})[0] || '';
+    const firstProd = getDefaultProductForCategory(rates, firstCat);
     return sanitizeLineInventoryState({
         id: Date.now(),
         cat: firstCat,
@@ -134,7 +143,7 @@ const createDefaultLine = (rates, overrides = {}) => {
         itemStoneWeight: '',
         tradeLabor: '',
         tradeComp: '',
-        tradeOldExpanded: true,
+        tradeOldExpanded: false,
         tradeNewExpanded: true,
         ...overrides,
     });
@@ -418,22 +427,62 @@ const getGoldLineEffectiveQuantity = (line) => {
     return Math.max(0, baseGoldQty + addGold - cutGold);
 };
 const getTradeOldGoldQuantity = (line) => (
-    line?.tx === 'trade' && !Boolean(line?.tradeOldExpanded)
+    line?.tx === 'trade' && !line?.tradeOldExpanded
         ? 0
         : Math.max(0, parseWeight(line?.customerQty || 0))
 );
+const getTradeQuantityDirection = (line) => {
+    if (line?.tx !== 'trade') return 'equal';
+    const oldGoldQty = getTradeOldGoldQuantity(line);
+    const newGoldQty = getGoldLineEffectiveQuantity(line);
+    if (newGoldQty > oldGoldQty) return 'new';
+    if (oldGoldQty > newGoldQty) return 'old';
+    return 'equal';
+};
+const getTradeDifferenceQuantity = (line) => {
+    if (line?.tx !== 'trade') return 0;
+    const oldGoldQty = getTradeOldGoldQuantity(line);
+    const newGoldQty = getGoldLineEffectiveQuantity(line);
+    return Math.max(0, Math.abs(newGoldQty - oldGoldQty));
+};
+const getTradeBaseAmount = (line, newGoldRate = 0, oldGoldRate = 0) => {
+    if (line?.tx !== 'trade') return 0;
+    const diffQty = getTradeDifferenceQuantity(line);
+    if (!diffQty) return 0;
+    const direction = getTradeQuantityDirection(line);
+    if (direction === 'new') {
+        return Math.round(diffQty * Math.max(0, parseFmt(newGoldRate)));
+    }
+    if (direction === 'old') {
+        return -Math.round(diffQty * Math.max(0, parseFmt(oldGoldRate)));
+    }
+    return 0;
+};
 const getTradeCompensationQuantity = (line) => {
     if (line?.tx !== 'trade') return 0;
     const oldGoldQty = getTradeOldGoldQuantity(line);
     const newGoldQty = getGoldLineEffectiveQuantity(line);
-    return Math.min(oldGoldQty, newGoldQty);
+    return Math.max(0, Math.min(newGoldQty, oldGoldQty));
 };
 const getTradeCompensationUnitAmount = (line) => (
-    line?.tx === 'trade' && !Boolean(line?.tradeOldExpanded)
+    line?.tx === 'trade' && !line?.tradeOldExpanded
         ? 0
         : Math.max(0, Math.round(parseFmt(line?.tradeComp || 0)))
 );
-const getTradeCompensationAmount = (line) => Math.round(getTradeCompensationQuantity(line) * getTradeCompensationUnitAmount(line));
+const getTradeCompensationAmount = (line) => {
+    if (line?.tx !== 'trade') return 0;
+    const amount = Math.round(getTradeCompensationQuantity(line) * getTradeCompensationUnitAmount(line));
+    if (!amount) return 0;
+    return getTradeQuantityDirection(line) === 'old' ? -amount : amount;
+};
+const getTradeNetAmount = (line, newGoldRate = 0, oldGoldRate = 0) => {
+    if (line?.tx !== 'trade') return 0;
+    return Math.round(
+        getTradeBaseAmount(line, newGoldRate, oldGoldRate)
+        + getLineSellLaborAmount(line)
+        + getTradeCompensationAmount(line),
+    );
+};
 const computeRepairNextWeight = (line, repairMode) => {
     const current = parseWeight(line?.tl_vang_hien_tai);
     if (repairMode !== 'sua') return line?.tl_vang_hien_tai || formatWeight(current);
@@ -478,11 +527,11 @@ async function scanCodeFromFile(file) {
         const detector = new window.BarcodeDetector({
             formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8'],
         });
-        const results = await detector.detect(bitmap);
-        if (!results.length || !results[0].rawValue) {
+        const match = await scanBarcodeFromSource(detector, bitmap, { preferFullFrame: true });
+        if (!match?.rawValue) {
             throw new Error('Không đọc được QR hoặc mã vạch.');
         }
-        return results[0].rawValue;
+        return match.rawValue;
     } finally {
         bitmap.close?.();
     }
@@ -516,6 +565,8 @@ export {
   isPositiveTransaction,
   usesInventoryLookup,
   sanitizeLineInventoryState,
+  isStandardGoldAgeProduct,
+  getGoldAgeProductValues,
   createDefaultLine,
   createRepairLine,
   readSavedSales,
@@ -542,9 +593,13 @@ export {
   getLineSellCutGoldWeight,
   getGoldLineEffectiveQuantity,
   getTradeOldGoldQuantity,
+  getTradeQuantityDirection,
+  getTradeDifferenceQuantity,
+  getTradeBaseAmount,
   getTradeCompensationQuantity,
   getTradeCompensationUnitAmount,
   getTradeCompensationAmount,
+  getTradeNetAmount,
   computeRepairNextWeight,
   BUY_GOLD_OTHER_OPTION,
   firstProductForCategory,

@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { IoChevronDownOutline, IoChevronUpOutline } from 'react-icons/io5';
 
 import FormattedNumberInput from './FormattedNumberInput';
@@ -5,7 +6,16 @@ import TxLineExtras, { MoneyField } from './TxLineExtras.jsx';
 import TxLineInventoryLookup, { InventoryProductLookupField } from './TxLineInventoryLookup';
 import { S, fmtCalc, normalizeTradeRate } from './shared';
 
+const TWO_COLUMN_FIELDS = 'minmax(0, 1fr) minmax(0, 1fr)';
+const FIELD_COLUMN_GAP = 6;
+const FIELD_STACK_GAP = 8;
+const FIELD_STEPPER_WIDTH = 30;
+const FIELD_STEPPER_GAP = 4;
+
 function ProductSelect({ value, onChange, options, disabled = false, width = '100%' }) {
+    const safeOptions = options.length ? options : [{ value: '', label: 'Loading...' }];
+    const safeValue = safeOptions.some(option => String(option.value) === String(value)) ? value : safeOptions[0].value;
+    const isDisabled = disabled || options.length === 0;
     return (
         <select
             style={{
@@ -20,22 +30,202 @@ function ProductSelect({ value, onChange, options, disabled = false, width = '10
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: 'calc(100% - 20px) center',
                 backgroundSize: '14px 14px',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled ? 0.72 : 1,
-                backgroundColor: disabled ? '#f8fafc' : 'rgba(255,255,255,.96)',
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                opacity: isDisabled ? 0.72 : 1,
+                backgroundColor: isDisabled ? '#f8fafc' : 'rgba(255,255,255,.96)',
                 width,
             }}
-            value={value}
-            disabled={disabled}
+            value={safeValue}
+            disabled={isDisabled}
             onChange={e => {
-                if (disabled) return;
+                if (isDisabled) return;
                 onChange(e.target.value);
             }}
         >
-            {options.map(option => (
+            {safeOptions.map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
             ))}
         </select>
+    );
+}
+
+function ProductGridPickerLegacy({
+    value,
+    onChange,
+    options,
+    txTheme,
+    width = '100%',
+    placeholder = 'Chọn tuổi vàng',
+    sectionLabel = 'Tuổi vàng',
+}) {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef(null);
+    const safeOptions = options.length ? options : [{ value: '', label: 'Loading...' }];
+    const selectedOption = safeOptions.find((option) => String(option.value) === String(value));
+    const loading = options.length === 0;
+    const pickerOpen = open && !loading;
+
+    return (
+        <div
+            ref={rootRef}
+            style={{ width, minWidth: 0 }}
+            onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setOpen(false);
+                }
+            }}
+        >
+            <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                    if (loading) return;
+                    setOpen((prev) => !prev);
+                }}
+                aria-expanded={pickerOpen}
+                aria-label={pickerOpen ? 'Thu gọn chọn tuổi vàng' : 'Mở chọn tuổi vàng'}
+                style={{
+                    ...S.inp,
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '9px 12px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    background: pickerOpen ? '#f8fbff' : S.inp.background,
+                    borderColor: pickerOpen ? txTheme.border : '#dbe4ee',
+                    opacity: loading ? 0.72 : 1,
+                }}
+            >
+                <span style={{ flex: 1, minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#111827' }}>
+                    {loading ? 'Loading...' : (selectedOption?.label || value || placeholder)}
+                </span>
+                <IoChevronDownOutline style={{ fontSize: 16, color: '#475569', flexShrink: 0, transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .18s ease' }} />
+            </button>
+
+            {pickerOpen ? (
+                <div style={{ marginTop: 8, borderRadius: 18, border: '1px solid #dbe4ee', background: '#ffffff', boxShadow: '0 18px 36px rgba(15,23,42,.12)', padding: 8, display: 'grid', gap: 6 }}>
+                    <span style={{ ...S.label, marginBottom: 0 }}>{sectionLabel}</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
+                        {safeOptions.map((option) => {
+                            const active = String(option.value) === String(value);
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => {
+                                        onChange(option.value);
+                                        setOpen(false);
+                                    }}
+                                    style={{
+                                        border: active ? 'none' : `1px solid ${txTheme.softBorder}`,
+                                        background: active ? txTheme.gradient : '#ffffff',
+                                        color: active ? '#ffffff' : '#111827',
+                                        borderRadius: 12,
+                                        padding: '10px 8px',
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        boxShadow: active ? '0 10px 20px rgba(15,23,42,.12)' : 'none',
+                                    }}
+                                >
+                                    {option.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function GridPickerTrigger({
+    value,
+    options,
+    txTheme,
+    open,
+    onToggle,
+    width = '100%',
+    placeholder = 'Chá»n tuá»•i vÃ ng',
+}) {
+    const safeOptions = options.length ? options : [{ value: '', label: 'Loading...' }];
+    const selectedOption = safeOptions.find((option) => String(option.value) === String(value));
+    const loading = options.length === 0;
+    const pickerOpen = open && !loading;
+
+    return (
+        <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+                if (loading) return;
+                onToggle?.();
+            }}
+            aria-expanded={pickerOpen}
+            aria-label={pickerOpen ? 'Thu gá»n chá»n tuá»•i vÃ ng' : 'Má»Ÿ chá»n tuá»•i vÃ ng'}
+            style={{
+                ...S.inp,
+                width,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '9px 12px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                background: pickerOpen ? '#f8fbff' : S.inp.background,
+                borderColor: pickerOpen ? txTheme.border : '#dbe4ee',
+                opacity: loading ? 0.72 : 1,
+            }}
+        >
+            <span style={{ flex: 1, minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#111827' }}>
+                {loading ? 'Loading...' : (selectedOption?.label || value || placeholder)}
+            </span>
+            <IoChevronDownOutline style={{ fontSize: 16, color: '#475569', flexShrink: 0, transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .18s ease' }} />
+        </button>
+    );
+}
+
+function GridPickerMenu({
+    value,
+    onChange,
+    options,
+    txTheme,
+    sectionLabel = 'Tuá»•i vÃ ng',
+}) {
+    if (!options.length) return null;
+
+    return (
+        <div style={{ marginTop: 8, borderRadius: 18, border: '1px solid #dbe4ee', background: '#ffffff', boxShadow: '0 18px 36px rgba(15,23,42,.12)', padding: 8, display: 'grid', gap: 6 }}>
+            <span style={{ ...S.label, marginBottom: 0 }}>{sectionLabel}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
+                {options.map((option) => {
+                    const active = String(option.value) === String(value);
+                    return (
+                        <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => onChange(option.value)}
+                            style={{
+                                minHeight: 54,
+                                border: active ? 'none' : `1px solid ${txTheme.softBorder}`,
+                                background: active ? txTheme.gradient : '#ffffff',
+                                color: active ? '#ffffff' : '#111827',
+                                borderRadius: 12,
+                                padding: '10px 8px',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                boxShadow: active ? '0 10px 20px rgba(15,23,42,.12)' : 'none',
+                            }}
+                        >
+                            {option.label}
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
     );
 }
 
@@ -51,9 +241,9 @@ function QuantityField({
     inputStyle,
 }) {
     return (
-        <div>
+        <div style={{ minWidth: 0 }}>
             <span style={S.label}>{label}</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${FIELD_STEPPER_WIDTH}px`, gap: FIELD_STEPPER_GAP }}>
                 <FormattedNumberInput
                     style={{ ...S.inp, ...inputStyle, opacity: disabled ? 0.72 : 1, background: disabled ? '#f8fafc' : S.inp.background }}
                     inputMode="decimal"
@@ -228,8 +418,8 @@ export function GoldSaleFieldGroup({
         />
     ) : (
         <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                <div style={{ width: '100%' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: TWO_COLUMN_FIELDS, gap: FIELD_COLUMN_GAP, alignItems: 'end' }}>
+                <div style={{ width: '100%', minWidth: 0 }}>
                     <ProductSelect
                         value={product}
                         onChange={onProductChange}
@@ -261,11 +451,11 @@ export function GoldSaleFieldGroup({
                             opacity: showGroupFields ? 1 : 0.72,
                         }}
                     >
-                        <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showGroupFields ? 2 : 0 }}>
+                        <div style={{ overflow: 'hidden', display: 'grid', gap: FIELD_STACK_GAP, paddingTop: showGroupFields ? 2 : 0 }}>
                             {titleProductBlock}
 
                             {inlineRateAndLabor ? (
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: TWO_COLUMN_FIELDS, gap: FIELD_COLUMN_GAP, alignItems: 'end' }}>
                                     {rateField}
                                     {laborField}
                                 </div>
@@ -281,7 +471,7 @@ export function GoldSaleFieldGroup({
                                     opacity: showSupplementalFields ? 1 : 0.72,
                                 }}
                             >
-                                <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
+                                <div style={{ overflow: 'hidden', display: 'grid', gap: FIELD_STACK_GAP, paddingTop: showSupplementalFields ? 2 : 0 }}>
                                     {!inlineRateAndLabor && laborField}
                                     {supplementalExtras}
                                 </div>
@@ -306,7 +496,7 @@ export function GoldSaleFieldGroup({
             {!title && <TxLineInventoryLookup {...inventoryLookupProps} />}
 
             {!title && (inlineRateAndLabor ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: TWO_COLUMN_FIELDS, gap: FIELD_COLUMN_GAP, alignItems: 'end' }}>
                     {rateField}
                     {laborField}
                 </div>
@@ -323,7 +513,7 @@ export function GoldSaleFieldGroup({
                         opacity: showSupplementalFields ? 1 : 0.72,
                     }}
                 >
-                    <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showSupplementalFields ? 2 : 0 }}>
+                    <div style={{ overflow: 'hidden', display: 'grid', gap: FIELD_STACK_GAP, paddingTop: showSupplementalFields ? 2 : 0 }}>
                         {!inlineRateAndLabor && laborField}
                         {supplementalExtras}
                     </div>
@@ -352,6 +542,9 @@ export function GoldBuyFieldGroup({
     headerToggle = null,
     panelStyle = null,
 }) {
+    const [productPickerOpen, setProductPickerOpen] = useState(false);
+    const pickerLoading = productOptions.length === 0;
+    const pickerOpen = productPickerOpen && !pickerLoading;
     const titledPanelStyle = panelStyle
         ? {
             gridColumn: '1 / -1',
@@ -367,7 +560,14 @@ export function GoldBuyFieldGroup({
     return (
         <>
             {title ? (
-                <div style={titledPanelStyle}>
+                <div
+                    style={titledPanelStyle}
+                    onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) {
+                            setProductPickerOpen(false);
+                        }
+                    }}
+                >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
                         <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#16a34a', letterSpacing: '.04em' }}>{title}</span>
                         {headerToggle}
@@ -380,16 +580,20 @@ export function GoldBuyFieldGroup({
                             opacity: showGroupFields ? 1 : 0.72,
                         }}
                     >
-                        <div style={{ overflow: 'hidden', display: 'grid', gap: 10, paddingTop: showGroupFields ? 2 : 0 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                                <div style={{ width: '100%' }}>
-                                    <ProductSelect
-                                        value={product}
-                                        onChange={onProductChange}
-                                        options={productOptions}
-                                        width={tradeComboWidth}
-                                    />
-                                </div>
+                        <div style={{ overflow: 'hidden', display: 'grid', gap: FIELD_STACK_GAP, paddingTop: showGroupFields ? 2 : 0 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: TWO_COLUMN_FIELDS, gap: FIELD_COLUMN_GAP, alignItems: 'end' }}>
+                                <GridPickerTrigger
+                                    value={product}
+                                    options={productOptions}
+                                    txTheme={txTheme}
+                                    open={pickerOpen}
+                                    onToggle={() => {
+                                        if (pickerLoading) return;
+                                        setProductPickerOpen((prev) => !prev);
+                                    }}
+                                    width={tradeComboWidth}
+                                    placeholder="Chọn tuổi vàng"
+                                />
                                 <QuantityField
                                     label="Số lượng"
                                     value={qty}
@@ -401,8 +605,21 @@ export function GoldBuyFieldGroup({
                                 />
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
-                                <div>
+                            {pickerOpen ? (
+                                <GridPickerMenu
+                                    value={product}
+                                    onChange={(nextProduct) => {
+                                        onProductChange(nextProduct);
+                                        setProductPickerOpen(false);
+                                    }}
+                                    options={productOptions}
+                                    txTheme={txTheme}
+                                    sectionLabel={title || 'Dẻ'}
+                                />
+                            ) : null}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: TWO_COLUMN_FIELDS, gap: FIELD_COLUMN_GAP, alignItems: 'end' }}>
+                                <div style={{ minWidth: 0 }}>
                                     <span style={S.label}>Giá mua</span>
                                     <FormattedNumberInput
                                         style={{ ...S.inp, color: lineAccent }}

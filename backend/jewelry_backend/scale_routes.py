@@ -15,6 +15,82 @@ from .models import *
 from .setup import *
 from .utils import *
 
+
+def _normalize_scale_device_type(value):
+    text = _clean_text(value).upper()
+    if text in {'A&D', 'AND', 'A+D', 'AD'}:
+        return 'A&D'
+    if text in {'SARTORIUS', 'STARTORIUS', 'SARTO'}:
+        return 'SARTORIUS'
+    return text
+
+
+def _create_scale_reading(agent, reading_payload, now, command_id=None, default_source='', default_device_type=''):
+    if not isinstance(reading_payload, dict):
+        return None
+
+    meta = reading_payload.get('meta') if isinstance(reading_payload.get('meta'), dict) else {}
+    merged_meta = dict(meta)
+
+    source = _clean_text(merged_meta.get('source') or reading_payload.get('source') or default_source)
+    if source:
+        merged_meta['source'] = source
+
+    device_type = _normalize_scale_device_type(
+        merged_meta.get('device_type') or reading_payload.get('device_type') or default_device_type
+    )
+    if device_type:
+        merged_meta['device_type'] = device_type
+
+    captured_at = _clean_text(reading_payload.get('captured_at') or merged_meta.get('captured_at'))
+    if captured_at:
+        merged_meta['captured_at'] = captured_at
+
+    reading_obj = ScaleReading(
+        agent_id=agent.id,
+        command_id=command_id,
+        stable=bool(reading_payload.get('stable')),
+        header=_clean_text(reading_payload.get('header')).upper(),
+        weight_text=_clean_text(reading_payload.get('weight_text')),
+        weight_value=_coerce_scale_weight(reading_payload.get('weight_value')),
+        unit=_clean_text(reading_payload.get('unit')),
+        raw_line=_clean_text(reading_payload.get('raw_line')),
+        meta=merged_meta,
+        created_at=now,
+    )
+    db.session.add(reading_obj)
+
+    agent.last_weight_text = reading_obj.weight_text
+    agent.last_weight_value = reading_obj.weight_value
+    agent.last_unit = reading_obj.unit
+    agent.last_stable = reading_obj.stable
+    agent.last_raw_line = reading_obj.raw_line
+    agent.last_read_at = now
+    return reading_obj
+
+
+def _apply_scale_agent_runtime(agent, payload, now):
+    if payload.get('device_name'):
+        agent.device_name = _clean_text(payload.get('device_name')) or agent.device_name
+    if payload.get('model'):
+        agent.model = _clean_text(payload.get('model')) or agent.model
+    if 'location' in payload:
+        agent.location = _clean_text(payload.get('location'))
+    if 'machine_name' in payload:
+        agent.machine_name = _clean_text(payload.get('machine_name'))
+    if 'serial_port' in payload:
+        agent.serial_port = _clean_text(payload.get('serial_port'))
+    if 'serial_settings' in payload:
+        agent.serial_settings = _normalize_scale_settings(payload.get('serial_settings'))
+    if 'last_error' in payload:
+        agent.last_error = _clean_text(payload.get('last_error'))
+    if not agent.desired_settings and 'serial_settings' in payload:
+        agent.desired_settings = _normalize_scale_settings(payload.get('serial_settings'))
+    agent.status = 'online'
+    agent.last_seen = now
+    agent.updated_at = now
+
+
 @app.route('/api/scale/agents', methods=['GET'])
 def get_scale_agents():
     agents = ScaleAgent.query.order_by(ScaleAgent.id.desc()).all()
@@ -199,25 +275,7 @@ def scale_agent_heartbeat():
         )
         db.session.add(agent)
 
-    if d.get('device_name'):
-        agent.device_name = _clean_text(d.get('device_name')) or agent.device_name
-    if d.get('model'):
-        agent.model = _clean_text(d.get('model')) or agent.model
-    if 'location' in d:
-        agent.location = _clean_text(d.get('location'))
-    if 'machine_name' in d:
-        agent.machine_name = _clean_text(d.get('machine_name'))
-    if 'serial_port' in d:
-        agent.serial_port = _clean_text(d.get('serial_port'))
-    if 'serial_settings' in d:
-        agent.serial_settings = _normalize_scale_settings(d.get('serial_settings'))
-    if 'last_error' in d:
-        agent.last_error = _clean_text(d.get('last_error'))
-    if not agent.desired_settings:
-        agent.desired_settings = _normalize_scale_settings(d.get('serial_settings'))
-    agent.status = 'online'
-    agent.last_seen = now
-    agent.updated_at = now
+    _apply_scale_agent_runtime(agent, d, now)
     db.session.commit()
     return jsonify({'msg': 'ok', 'created': created, 'agent': scale_agent_json(agent)})
 
@@ -295,28 +353,14 @@ def scale_agent_command_result(command_id):
     cmd.result = d.get('result') if isinstance(d.get('result'), dict) else {}
 
     reading_payload = d.get('reading') if isinstance(d.get('reading'), dict) else None
-    reading_obj = None
-    if reading_payload:
-        reading_obj = ScaleReading(
-            agent_id=agent.id,
-            command_id=cmd.id,
-            stable=bool(reading_payload.get('stable')),
-            header=_clean_text(reading_payload.get('header')).upper(),
-            weight_text=_clean_text(reading_payload.get('weight_text')),
-            weight_value=_coerce_scale_weight(reading_payload.get('weight_value')),
-            unit=_clean_text(reading_payload.get('unit')),
-            raw_line=_clean_text(reading_payload.get('raw_line')),
-            meta=reading_payload.get('meta') if isinstance(reading_payload.get('meta'), dict) else {},
-            created_at=now,
-        )
-        db.session.add(reading_obj)
-
-        agent.last_weight_text = reading_obj.weight_text
-        agent.last_weight_value = reading_obj.weight_value
-        agent.last_unit = reading_obj.unit
-        agent.last_stable = reading_obj.stable
-        agent.last_raw_line = reading_obj.raw_line
-        agent.last_read_at = now
+    reading_obj = _create_scale_reading(
+        agent,
+        reading_payload,
+        now,
+        command_id=cmd.id,
+        default_source='command',
+        default_device_type=(cmd.result or {}).get('device_type'),
+    )
 
     agent.status = 'online'
     agent.last_seen = now
@@ -328,3 +372,47 @@ def scale_agent_command_result(command_id):
         cmd.result = {**(cmd.result or {}), 'reading_id': reading_obj.id}
     db.session.commit()
     return jsonify({'msg': 'ok', 'command': scale_command_json(cmd)})
+
+
+@app.route('/api/scale/agent/live-reading', methods=['POST'])
+def scale_agent_live_reading():
+    d = request.get_json(force=True, silent=True) or {}
+    agent_key = _clean_text(d.get('agent_key'))
+    if not agent_key:
+        return jsonify({'error': 'Thieu agent_key'}), 400
+
+    reading_payload = d.get('reading') if isinstance(d.get('reading'), dict) else None
+    if not reading_payload:
+        return jsonify({'error': 'Thieu reading'}), 400
+
+    now = now_str()
+    agent = ScaleAgent.query.filter_by(agent_key=agent_key).first()
+    created = False
+    if agent is None:
+        created = True
+        agent = ScaleAgent(
+            agent_key=agent_key,
+            device_name=_clean_text(d.get('device_name')) or 'May can vang',
+            model=_clean_text(d.get('model')) or 'Weight Indicator Bundle',
+            location=_clean_text(d.get('location')),
+            created_at=now,
+        )
+        db.session.add(agent)
+
+    _apply_scale_agent_runtime(agent, d, now)
+    agent.last_error = ''
+    reading_obj = _create_scale_reading(
+        agent,
+        reading_payload,
+        now,
+        default_source='realtime',
+        default_device_type=d.get('device_type'),
+    )
+    db.session.flush()
+    db.session.commit()
+    return jsonify({
+        'msg': 'ok',
+        'created': created,
+        'agent': scale_agent_json(agent),
+        'reading': scale_reading_json(reading_obj) if reading_obj else None,
+    })

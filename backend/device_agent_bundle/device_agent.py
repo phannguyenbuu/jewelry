@@ -74,6 +74,9 @@ DEFAULT_CONFIG = {
         'enabled': True,
         'poll_interval_seconds': 3,
         'heartbeat_interval_seconds': 15,
+        'realtime_enabled': True,
+        'realtime_interval_seconds': 1,
+        'realtime_keepalive_seconds': 10,
         'serial': {
             'port': 'COM3',
             'baudrate': 2400,
@@ -170,6 +173,9 @@ def normalize_config(raw):
     config['scale']['enabled'] = coerce_bool(config['scale'].get('enabled'), True)
     config['scale']['poll_interval_seconds'] = coerce_float(config['scale'].get('poll_interval_seconds'), 3)
     config['scale']['heartbeat_interval_seconds'] = coerce_float(config['scale'].get('heartbeat_interval_seconds'), 15)
+    config['scale']['realtime_enabled'] = coerce_bool(config['scale'].get('realtime_enabled'), True)
+    config['scale']['realtime_interval_seconds'] = coerce_float(config['scale'].get('realtime_interval_seconds'), 1)
+    config['scale']['realtime_keepalive_seconds'] = coerce_float(config['scale'].get('realtime_keepalive_seconds'), 10)
     config['printer']['enabled'] = coerce_bool(config['printer'].get('enabled'), True)
     config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 1)
     config['printer']['heartbeat_interval_seconds'] = coerce_float(config['printer'].get('heartbeat_interval_seconds'), 15)
@@ -208,6 +214,9 @@ def parse_request_config(payload):
             'enabled': payload.get('scale_enabled'),
             'poll_interval_seconds': payload.get('scale_poll_interval_seconds'),
             'heartbeat_interval_seconds': payload.get('scale_heartbeat_interval_seconds'),
+            'realtime_enabled': payload.get('scale_realtime_enabled'),
+            'realtime_interval_seconds': payload.get('scale_realtime_interval_seconds'),
+            'realtime_keepalive_seconds': payload.get('scale_realtime_keepalive_seconds'),
             'serial': {
                 'port': payload.get('scale_port'),
                 'baudrate': payload.get('scale_baudrate'),
@@ -1158,6 +1167,10 @@ class DeviceAgentService:
         self.printers = []
         self.serial_ports = list_serial_ports()
         self.desired_scale_settings = {}
+        self.last_live_scale_sent_at = 0.0
+        self.last_live_scale_signature = ''
+        self.last_live_scale_error_text = ''
+        self.last_live_scale_error_log_at = 0.0
         self._thread = None
         self._config = load_config()
         self._state = {
@@ -1219,6 +1232,58 @@ class DeviceAgentService:
             self.last_local_reading = item
             self.scale_readings.appendleft(item)
 
+    def scale_reading_signature(self, reading):
+        return '|'.join((
+            clean_text(reading.get('header')),
+            clean_text(reading.get('weight_text')),
+            clean_text(reading.get('unit')),
+            clean_text(reading.get('raw_line')),
+            '1' if bool(reading.get('stable')) else '0',
+        ))
+
+    def remember_live_scale_publish(self, reading, published_at=None):
+        self.last_live_scale_signature = self.scale_reading_signature(reading)
+        self.last_live_scale_sent_at = time.monotonic() if published_at is None else float(published_at)
+        self.last_live_scale_error_text = ''
+
+    def sync_scale_server_agent(self, agent):
+        if not isinstance(agent, dict):
+            return
+        self.scale_server_agent = agent
+        desired = agent.get('desired_settings')
+        if isinstance(desired, dict):
+            self.desired_scale_settings = desired
+
+    def should_publish_live_scale_reading(self, reading, monotonic_now, scale_config):
+        signature = self.scale_reading_signature(reading)
+        keepalive_seconds = max(3.0, coerce_float(scale_config.get('realtime_keepalive_seconds'), 10.0))
+        if signature != self.last_live_scale_signature:
+            return True
+        return monotonic_now - self.last_live_scale_sent_at >= keepalive_seconds
+
+    def log_live_scale_error(self, exc):
+        message = str(exc)
+        now = time.monotonic()
+        self.last_scale_error = message
+        if message != self.last_live_scale_error_text or now - self.last_live_scale_error_log_at >= 15.0:
+            log(f'Realtime scale read failed: {message}', level='error')
+            self.last_live_scale_error_text = message
+            self.last_live_scale_error_log_at = now
+
+    def build_scale_serial_payload(self, serial_settings):
+        return {
+            'baudrate': serial_settings.get('baudrate') if serial_settings else '',
+            'bytesize': serial_settings.get('bytesize') if serial_settings else '',
+            'parity': serial_settings.get('parity') if serial_settings else '',
+            'stopbits': serial_settings.get('stopbits') if serial_settings else '',
+            'timeout_seconds': serial_settings.get('timeout_seconds') if serial_settings else '',
+            'listen_seconds': serial_settings.get('listen_seconds') if serial_settings else '',
+            'encoding': serial_settings.get('encoding') if serial_settings else '',
+            'command': serial_settings.get('command') if serial_settings else '',
+            'line_ending': serial_settings.get('line_ending').encode('unicode_escape').decode('ascii') if serial_settings else '',
+            'data_format': serial_settings.get('data_format') if serial_settings else '',
+        }
+
     def append_print_job(self, job_id, status, printer_name, detail):
         item = {
             'id': job_id,
@@ -1271,18 +1336,7 @@ class DeviceAgentService:
             'location': config['location'],
             'machine_name': self._state['machine_name'],
             'serial_port': serial_settings['port'],
-            'serial_settings': {
-                'baudrate': serial_settings['baudrate'],
-                'bytesize': serial_settings['bytesize'],
-                'parity': serial_settings['parity'],
-                'stopbits': serial_settings['stopbits'],
-                'timeout_seconds': serial_settings['timeout_seconds'],
-                'listen_seconds': serial_settings['listen_seconds'],
-                'encoding': serial_settings['encoding'],
-                'command': serial_settings['command'],
-                'line_ending': serial_settings['line_ending'].encode('unicode_escape').decode('ascii'),
-                'data_format': serial_settings['data_format'],
-            },
+            'serial_settings': self.build_scale_serial_payload(serial_settings),
             'last_error': self.last_scale_error,
         }
 
@@ -1295,12 +1349,7 @@ class DeviceAgentService:
         )
         response.raise_for_status()
         data = response.json()
-        agent = data.get('agent') if isinstance(data, dict) else {}
-        if isinstance(agent, dict):
-            self.scale_server_agent = agent
-            desired = agent.get('desired_settings')
-            if isinstance(desired, dict):
-                self.desired_scale_settings = desired
+        self.sync_scale_server_agent(data.get('agent') if isinstance(data, dict) else {})
         return data
 
     def poll_scale_command(self):
@@ -1325,18 +1374,10 @@ class DeviceAgentService:
             'status': status,
             'error': error or '',
             'result': {
+                'device_type': 'A&D',
                 'serial_settings': {
                     'port': serial_settings.get('port') if serial_settings else '',
-                    'baudrate': serial_settings.get('baudrate') if serial_settings else '',
-                    'bytesize': serial_settings.get('bytesize') if serial_settings else '',
-                    'parity': serial_settings.get('parity') if serial_settings else '',
-                    'stopbits': serial_settings.get('stopbits') if serial_settings else '',
-                    'timeout_seconds': serial_settings.get('timeout_seconds') if serial_settings else '',
-                    'listen_seconds': serial_settings.get('listen_seconds') if serial_settings else '',
-                    'encoding': serial_settings.get('encoding') if serial_settings else '',
-                    'command': serial_settings.get('command') if serial_settings else '',
-                    'line_ending': serial_settings.get('line_ending').encode('unicode_escape').decode('ascii') if serial_settings else '',
-                    'data_format': serial_settings.get('data_format') if serial_settings else '',
+                    **self.build_scale_serial_payload(serial_settings),
                 },
             },
         }
@@ -1350,6 +1391,57 @@ class DeviceAgentService:
         response.raise_for_status()
         return response.json()
 
+    def build_live_scale_payload(self, reading, serial_settings):
+        config = self.get_config()
+        reading_payload = copy.deepcopy(reading)
+        reading_payload['captured_at'] = now_str()
+        meta = reading_payload.get('meta') if isinstance(reading_payload.get('meta'), dict) else {}
+        reading_payload['meta'] = {
+            **meta,
+            'source': clean_text(meta.get('source') or 'realtime') or 'realtime',
+            'device_type': clean_text(meta.get('device_type') or 'A&D') or 'A&D',
+        }
+        return {
+            'agent_key': config['agent_key'],
+            'device_name': config['device_name'] or 'May can hang',
+            'model': 'Unified device agent',
+            'location': config['location'],
+            'machine_name': self._state['machine_name'],
+            'serial_port': serial_settings.get('port') if serial_settings else '',
+            'serial_settings': {
+                'port': serial_settings.get('port') if serial_settings else '',
+                **self.build_scale_serial_payload(serial_settings),
+            },
+            'device_type': 'A&D',
+            'last_error': '',
+            'reading': reading_payload,
+        }
+
+    def post_live_scale_reading(self, reading, serial_settings):
+        config = self.get_config()
+        response = self.session.post(
+            f"{config['server_url']}/api/scale/agent/live-reading",
+            json=self.build_live_scale_payload(reading, serial_settings),
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.sync_scale_server_agent(data.get('agent') if isinstance(data, dict) else {})
+        return data
+
+    def poll_live_scale_reading(self, monotonic_now=None):
+        config = self.get_config()
+        scale_config = config['scale']
+        serial_settings = normalize_serial_settings(config['scale']['serial'], self.desired_scale_settings)
+        reading = read_scale_once(serial_settings)
+        self.append_scale_reading(reading, source='realtime')
+        self.last_scale_error = ''
+        current_time = time.monotonic() if monotonic_now is None else float(monotonic_now)
+        if self.should_publish_live_scale_reading(reading, current_time, scale_config):
+            self.post_live_scale_reading(reading, serial_settings)
+            self.remember_live_scale_publish(reading, current_time)
+        return reading
+
     def process_scale_command(self, command):
         payload = command.get('payload') if isinstance(command.get('payload'), dict) else {}
         config = self.get_config()
@@ -1360,6 +1452,7 @@ class DeviceAgentService:
             self.append_scale_reading(reading, source='server')
             self.send_scale_result(command['id'], 'completed', reading=reading, serial_settings=serial_settings)
             self.last_scale_error = ''
+            self.remember_live_scale_publish(reading)
             log(f"Scale command #{command['id']} completed.")
         except Exception as exc:
             self.last_scale_error = str(exc)
@@ -1444,6 +1537,7 @@ class DeviceAgentService:
         self.bootstrap()
         last_scale_heartbeat = 0.0
         last_scale_poll = 0.0
+        last_live_scale_poll = 0.0
         last_print_heartbeat = 0.0
         last_print_poll = 0.0
         last_printer_scan = 0.0
@@ -1476,6 +1570,20 @@ class DeviceAgentService:
                     last_scale_poll = now
                     if command:
                         self.process_scale_command(command)
+                        last_live_scale_poll = time.monotonic()
+
+                if (
+                    config['scale']['enabled']
+                    and coerce_bool(config['scale'].get('realtime_enabled'), True)
+                    and now - last_live_scale_poll >= max(0.5, config['scale'].get('realtime_interval_seconds') or 1.0)
+                ):
+                    try:
+                        self.poll_live_scale_reading(monotonic_now=now)
+                    except requests.RequestException:
+                        raise
+                    except Exception as exc:
+                        self.log_live_scale_error(exc)
+                    last_live_scale_poll = time.monotonic()
 
                 if config['printer']['enabled'] and now - last_print_poll >= max(1.0, config['printer']['poll_interval_seconds']):
                     command = self.poll_print_command()

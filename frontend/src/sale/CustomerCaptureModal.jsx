@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { IoCameraOutline, IoCheckmarkCircle, IoCloseOutline, IoDocumentTextOutline, IoImagesOutline, IoQrCodeOutline, IoTrashOutline } from 'react-icons/io5';
+import { createLiveBarcodeConstraints, detectLiveBarcode, LIVE_BARCODE_SCAN_INTERVAL_MS, tuneLiveBarcodeStream } from './liveBarcodeScan';
 import { S } from './shared';
 import { ConfirmDialog } from './Dialogs';
 
@@ -16,7 +17,7 @@ const TAB_OPTIONS = [
 ];
 
 const PHOTO_HELPER_TEXT    = 'Chụp nhiều ảnh nếu cần. Tất cả ảnh sẽ được giữ lại trong hồ sơ khách hàng.';
-const QR_HELPER_TEXT       = 'Đưa mã QR vào giữa khung, hệ thống sẽ quét liên tục cho tới khi nhận được dữ liệu.';
+const QR_HELPER_TEXT       = 'Đưa mã QR ra trước camera, hệ thống sẽ tự tìm và nhận dữ liệu liên tục.';
 const OCR_FRONT_HELPER_TEXT = 'Chụp mặt trước CCCD trong khung — OCR sẽ tự điền tên, ngày sinh, địa chỉ.';
 const OCR_BACK_HELPER_TEXT  = 'Chụp mặt sau CCCD trong khung — OCR sẽ bổ sung thông tin nơi thường trú.';
 
@@ -126,6 +127,8 @@ export default function CustomerCaptureModal({
     const streamRef = useRef(null);
     const scanIntervalRef = useRef(null);
     const detectorRef = useRef(null);
+    const qrScanCanvasRef = useRef(null);
+    const qrScanningBusyRef = useRef(false);
     const qrDetectedRef = useRef(onQrDetected);
     const objectUrlsRef = useRef([]);
     const [cameraReady, setCameraReady] = useState(false);
@@ -156,6 +159,7 @@ export default function CustomerCaptureModal({
                 clearInterval(scanIntervalRef.current);
                 scanIntervalRef.current = null;
             }
+            qrScanningBusyRef.current = false;
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach((track) => track.stop());
                 streamRef.current = null;
@@ -169,10 +173,10 @@ export default function CustomerCaptureModal({
             if (!detectorRef.current || scanIntervalRef.current) return;
             scanIntervalRef.current = window.setInterval(async () => {
                 const video = videoRef.current;
-                if (!video || video.readyState < 2 || qrLoading) return;
+                if (!video || qrScanningBusyRef.current || video.readyState < 2 || qrLoading) return;
+                qrScanningBusyRef.current = true;
                 try {
-                    const results = await detectorRef.current.detect(video);
-                    const match = results.find((item) => item?.rawValue);
+                    const match = await detectLiveBarcode(detectorRef.current, video, qrScanCanvasRef, { preferFullFrame: true });
                     if (match?.rawValue) {
                         clearInterval(scanIntervalRef.current);
                         scanIntervalRef.current = null;
@@ -180,8 +184,10 @@ export default function CustomerCaptureModal({
                     }
                 } catch {
                     // Keep scanning until a valid QR frame is detected.
+                } finally {
+                    qrScanningBusyRef.current = false;
                 }
-            }, 350);
+            }, LIVE_BARCODE_SCAN_INTERVAL_MS);
         };
 
         const startCamera = async () => {
@@ -201,13 +207,15 @@ export default function CustomerCaptureModal({
                 detectorRef.current = null;
             }
 
-            const wantsSquare = activeTab === QR_TAB;
+            const wantsLiveBarcodeScan = activeTab === QR_TAB;
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: wantsSquare ? 1280 : 1080 },
-                    height: { ideal: wantsSquare ? 1280 : 1920 },
-                },
+                video: wantsLiveBarcodeScan
+                    ? createLiveBarcodeConstraints({ square: false })
+                    : {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1080 },
+                        height: { ideal: 1920 },
+                    },
                 audio: false,
             });
 
@@ -217,6 +225,9 @@ export default function CustomerCaptureModal({
             }
 
             streamRef.current = stream;
+            if (wantsLiveBarcodeScan) {
+                await tuneLiveBarcodeStream(stream, { preferZoom: false });
+            }
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 videoRef.current.onloadedmetadata = () => {
@@ -246,7 +257,7 @@ export default function CustomerCaptureModal({
     const currentTab = TAB_OPTIONS.some((option) => option.key === activeTab) ? activeTab : PHOTO_TAB;
     const isOcrTab = currentTab === OCR_FRONT_TAB || currentTab === OCR_BACK_TAB;
     const derivedSide = currentTab === OCR_FRONT_TAB ? 'front' : 'back';
-    const previewAspect = currentTab === QR_TAB ? '1 / 1' : isOcrTab ? '16 / 9' : '4 / 3';
+    const previewAspect = currentTab === QR_TAB ? '3 / 4' : isOcrTab ? '16 / 9' : '4 / 3';
     const loading = currentTab === QR_TAB ? qrLoading : isOcrTab ? ocrLoading : false;
     const helperMessage = loading
         ? currentTab === QR_TAB ? 'Đang parse QR...' : 'Đang đọc CCCD...'
@@ -398,25 +409,10 @@ export default function CustomerCaptureModal({
                             autoPlay
                             muted
                             playsInline
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: cameraError ? 0.18 : 1 }}
+                            style={{ width: '100%', height: '100%', objectFit: currentTab === QR_TAB ? 'contain' : 'cover', opacity: cameraError ? 0.18 : 1 }}
                         />
 
-                        {currentTab === QR_TAB ? (
-                            <div
-                                style={{
-                                    position: 'absolute',
-                                    left: '50%',
-                                    top: '50%',
-                                    width: '58%',
-                                    aspectRatio: '1 / 1',
-                                    transform: 'translate(-50%, -50%)',
-                                    borderRadius: 24,
-                                    border: '2px solid rgba(255,255,255,.96)',
-                                    boxShadow: '0 0 0 9999px rgba(2,6,23,.45)',
-                                    pointerEvents: 'none',
-                                }}
-                            />
-                        ) : (
+                        {currentTab === QR_TAB ? null : (
                             <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16, padding: '10px 12px', borderRadius: 16, background: 'rgba(15,23,42,.58)', color: '#f8fafc', fontSize: 11, lineHeight: 1.45, textAlign: 'center', backdropFilter: 'blur(10px)' }}>
                                 {currentTab === PHOTO_TAB
                                     ? 'Chụp nhiều ảnh liên tiếp nếu cần. Mọi ảnh chụp sẽ được giữ lại trong hồ sơ khách.'

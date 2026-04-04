@@ -2,11 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { IoCameraOutline, IoDocumentTextOutline, IoImagesOutline, IoListOutline } from 'react-icons/io5';
 import { pickChecklistItemId } from './SavedScreens';
 import { API, S, printItemCertification } from './shared';
+import { readAndCropImageAsBase64 } from './imageCrop';
 import InventoryChecklistBanner from './InventoryChecklistBanner';
 import InventoryFooter from './InventoryFooter';
 import InventoryCostSection from './InventoryCostSection';
 import InventoryWeightSection from './InventoryWeightSection';
 import { STOCK_STATUS_OPTIONS, emptyStockForm } from './InventoryShared';
+
+const OCR_LABEL_FRAME_SCALE = 0.5;
+
+const revokeObjectUrl = (value) => {
+    if (String(value || '').startsWith('blob:')) {
+        URL.revokeObjectURL(value);
+    }
+};
 
 export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangList, onSaved }) {
     const fileRef = useRef(null);
@@ -29,7 +38,7 @@ export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangLis
     useEffect(() => () => previews.forEach(url => URL.revokeObjectURL(url)), [previews]);
     useEffect(() => () => {
         if (ocrPreview) {
-            URL.revokeObjectURL(ocrPreview);
+            revokeObjectUrl(ocrPreview);
         }
     }, [ocrPreview]);
 
@@ -49,7 +58,7 @@ export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangLis
         setPreviews([]);
         setOcrText('');
         setOcrPreview(prev => {
-            if (prev) URL.revokeObjectURL(prev);
+            revokeObjectUrl(prev);
             return '';
         });
         setOcrFileName('');
@@ -89,20 +98,18 @@ export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangLis
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const runOcr = async (file) => {
+    const runOcr = async (file, processedBase64 = '') => {
         if (!file) return;
         setOcrLoading(true);
         setMessage('');
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-            try {
-                const base64 = ev.target.result.split(',')[1];
-                const res = await fetch(`${API}/api/ocr`, {
+        try {
+            const base64 = processedBase64 || await readAndCropImageAsBase64(file, { cropScale: OCR_LABEL_FRAME_SCALE });
+            const res = await fetch(`${API}/api/ocr`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         image_base64: base64,
-                        mime_type: file.type || 'image/jpeg',
+                        mime_type: 'image/jpeg',
                         file_name: file.name,
                     }),
                 });
@@ -118,8 +125,6 @@ export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangLis
             } finally {
                 setOcrLoading(false);
             }
-        };
-        reader.readAsDataURL(file);
     };
 
     const onPickFiles = (e) => {
@@ -132,18 +137,23 @@ export default function InventoryScreen({ nhomHangList, quayNhoList, tuoiVangLis
         e.target.value = '';
     };
 
-    const onPickOcrFile = (e) => {
+    const onPickOcrFile = async (e) => {
         const picked = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
         const file = picked[0];
         e.target.value = '';
         if (!file) return;
-        setOcrPreview(prev => {
-            if (prev) URL.revokeObjectURL(prev);
-            return URL.createObjectURL(file);
-        });
-        setOcrFileName(file.name || 'tem-ocr');
         setMessage('');
-        runOcr(file);
+        try {
+            const processedBase64 = await readAndCropImageAsBase64(file, { cropScale: OCR_LABEL_FRAME_SCALE });
+            setOcrPreview(prev => {
+                revokeObjectUrl(prev);
+                return processedBase64 ? `data:image/jpeg;base64,${processedBase64}` : '';
+            });
+            setOcrFileName(file.name || 'tem-ocr');
+            await runOcr(file, processedBase64);
+        } catch (err) {
+            setMessage(err.message || 'Không đọc được ảnh tem.');
+        }
     };
 
     const uploadImages = async () => {

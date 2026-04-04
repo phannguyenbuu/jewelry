@@ -1,4 +1,5 @@
 import { API, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldLineEffectiveQuantity, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, normalizeTradeRate, parseFmt, parseWeight } from './shared';
+import { drawQrCode } from './printSaleReceipt';
 
 const SALE_PAGE = {
     width: 1240,
@@ -15,6 +16,7 @@ const BUY_PAGE = {
     imageMaxHeightMm: '132mm',
     renderScale: 4,
 };
+const RECEIPT_NOTICE_PAGE = BUY_PAGE;
 const PADDING_X = 72;
 const UI_FONT = "'Times New Roman', 'Be Vietnam Pro', serif";
 const NUMBER_FONT = "'Roboto Condensed', 'Be Vietnam Pro', sans-serif";
@@ -64,6 +66,68 @@ const buildSyntheticEasyInvoiceCode = ({ orderId, line, index }) => {
         index,
     ].join('|'));
     return ((timestampSeed + lineSeed) % HEX10_MOD).toString(16).toUpperCase().padStart(10, '0');
+};
+const resolveEasyInvoiceLineCode = ({ orderId, line, index }) => safeText(line?.productCode, buildSyntheticEasyInvoiceCode({ orderId, line, index }));
+const formatReceiptWeight = (value, decimals = 3) => {
+    const amount = parseWeight(value || 0);
+    return amount > 0 ? amount.toFixed(decimals) : '';
+};
+const upperReceiptText = (value, fallback = '') => safeText(value, fallback).toLocaleUpperCase('vi-VN');
+const formatReceiptNoticeDateTime = (value = new Date()) => {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const formatter = new Intl.DateTimeFormat('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour12: false,
+    });
+    const parts = {};
+    formatter.formatToParts(date).forEach((part) => {
+        if (part.type !== 'literal') parts[part.type] = part.value;
+    });
+    const hour = parts.hour || '00';
+    const minute = parts.minute || '00';
+    const day = parts.day || '00';
+    const month = parts.month || '00';
+    const year = parts.year || '0000';
+    return `${hour}:${minute} - ngày ${day}/${month}/${year} (GMT+7)`;
+};
+const txLabel = (tx) => {
+    if (tx === 'trade') return 'Mua - Bán';
+    if (tx === 'buy') return 'Mua';
+    if (tx === 'sell') return 'Bán';
+    return 'Mua - Bán';
+};
+const resolveTxDisplay = (txSet) => {
+    const labels = Array.from(txSet);
+    if (!labels.length) return 'Mua - Bán';
+    if (labels.includes('Mua - Bán')) return 'Mua - Bán';
+    if (labels.includes('Mua') && labels.includes('Bán')) return 'Mua - Bán';
+    return labels.join(' - ');
+};
+const resolveReceiptTxDisplay = ({ txSet, hasOldSection = false, hasNewSection = false }) => {
+    if (hasOldSection && hasNewSection) return 'Đổi';
+    return resolveTxDisplay(txSet);
+};
+const resolveReceiptNoticeTxDisplay = (lines = []) => {
+    const txSet = new Set();
+    let hasOldSection = false;
+    let hasNewSection = false;
+    (lines || []).forEach((line) => {
+        if (!line) return;
+        txSet.add(txLabel(line.tx));
+        if (line.tx === 'buy' && parseWeight(line.qty || 0) > 0) hasOldSection = true;
+        if (line.tx === 'sell' && getGoldLineEffectiveQuantity(line) > 0) hasNewSection = true;
+        if (line.tx === 'trade') {
+            if (getTradeOldGoldQuantity(line) > 0) hasOldSection = true;
+            if (getTradeNewGoldQuantity(line) > 0) hasNewSection = true;
+        }
+    });
+    return resolveReceiptTxDisplay({ txSet, hasOldSection, hasNewSection });
 };
 const wrapText = (ctx, text, width, maxLines = 3, font = `34px ${UI_FONT}`) => {
     ctx.save();
@@ -347,12 +411,11 @@ const getSaleVoucherRows = (lines, rates) => {
             const compensationQty = getTradeCompensationQuantity(line);
             const compensationUnitAmount = getTradeCompensationUnitAmount(line);
             const compensationAmount = getTradeCompensationAmount(line);
-            if (compensationAmount > 0 && compensationQty > 0) {
+            if (compensationAmount !== 0 && compensationQty > 0) {
                 rows.push({
                     stt: rows.length + 1,
                     name: 'Bù',
                     code: '',
-                    unit: 'đồng',
                     unit: 'chi',
                     qty: formatWeight(compensationQty),
                     price: moneyText(compensationUnitAmount),
@@ -435,6 +498,120 @@ const getBuyVoucherRows = (lines, rates) => {
         totalAmount,
     };
 };
+const formatSignedMoneyText = (value) => {
+    const amount = Math.round(Number(value || 0));
+    if (!amount) return '0 VND';
+    return `${amount < 0 ? '- ' : ''}${moneyText(amount)} VND`;
+};
+const _buildReceiptNoticeRowsLegacy = (lines, rates) => {
+    const { rows } = getSaleVoucherRows(lines, rates);
+    if (!rows.length) return [];
+
+    const visibleRows = rows.slice(0, 5).map((row, index) => ({
+        stt: index + 1,
+        name: row.code ? `${safeText(row.name)} (${safeText(row.code)})` : safeText(row.name),
+        qtyText: [safeText(row.qty, ''), safeText(row.unit, '')].filter(Boolean).join(' '),
+        amountText: formatSignedMoneyText(row.amount),
+    }));
+
+    if (rows.length > visibleRows.length) {
+        visibleRows.push({
+            stt: '',
+            name: `+${rows.length - visibleRows.length} dòng khác`,
+            qtyText: '',
+            amountText: '',
+        });
+    }
+
+    return visibleRows;
+};
+const buildReceiptNoticeRowsV2 = (orderId, lines) => {
+    const rows = [];
+
+    (lines || []).forEach((line, index) => {
+        if (!line) return;
+
+        if (line.tx === 'buy' && line.cat === 'gold') {
+            const goldWeight = formatReceiptWeight(parseWeight(line.qty || 0));
+            if (safeText(line.product || '') || goldWeight) {
+                rows.push({
+                    code: safeText(line.productCode),
+                    itemName: formatBuyProductName(line.product),
+                    goldType: safeText(line.product),
+                    stoneWeight: '',
+                    goldWeight,
+                });
+            }
+            return;
+        }
+
+        if (line.tx === 'trade') {
+            const oldGoldWeight = formatReceiptWeight(getTradeOldGoldQuantity(line));
+            if (safeText(line.customerProduct || '') || oldGoldWeight) {
+                rows.push({
+                    code: '',
+                    itemName: formatBuyProductName(line.customerProduct),
+                    goldType: safeText(line.customerProduct),
+                    stoneWeight: '',
+                    goldWeight: oldGoldWeight,
+                });
+            }
+        }
+
+        if (line.tx === 'sell' || line.tx === 'trade') {
+            const goldWeight = formatReceiptWeight(getGoldLineEffectiveQuantity(line));
+            const stoneWeight = formatReceiptWeight(line.itemStoneWeight || 0);
+            if (safeText(line.productCode || line.itemName || line.product || '') || goldWeight || stoneWeight) {
+                rows.push({
+                    code: resolveEasyInvoiceLineCode({ orderId, line, index }),
+                    itemName: safeText(line.itemName || (line.tx === 'trade' ? `Vàng mới ${line.product || ''}` : line.product), ''),
+                    goldType: safeText(line.product),
+                    stoneWeight,
+                    goldWeight,
+                });
+            }
+        }
+    });
+
+    if (rows.length <= 6) return rows;
+    return [
+        ...rows.slice(0, 6),
+        { code: '', itemName: `+${rows.length - 6} món khác`, goldType: '', stoneWeight: '', goldWeight: '' },
+    ];
+};
+const buildReceiptNoticeModel = ({ orderId, total, customerInfo, lines, settlement }) => {
+    const rows = buildReceiptNoticeRowsV2(orderId, lines);
+    if (!rows.length) throw new Error('Chưa có nội dung để in biên nhận.');
+
+    const createdAt = new Date();
+    const resolvedCustomerInfo = resolveBuyVoucherCustomerInfo(customerInfo);
+    const totalAmount = Math.abs(Math.round(Number(total || 0)));
+    const cashAmount = Math.max(0, Math.round(Number(settlement?.cash || 0)));
+    const bankAmount = Math.max(0, Math.round(Number(settlement?.bank || 0)));
+    const txDisplay = resolveReceiptNoticeTxDisplay(lines);
+
+    return {
+        mode: 'receipt',
+        page: RECEIPT_NOTICE_PAGE,
+        orderId: safeText(orderId, 'PHIEU-TAM'),
+        createdAt,
+        title: 'BIÊN NHẬN',
+        customerName: safeText(resolvedCustomerInfo?.name, 'Khách lẻ'),
+        cccd: safeText(resolvedCustomerInfo?.cccd),
+        phone: safeText(resolvedCustomerInfo?.phone),
+        address: safeText(resolvedCustomerInfo?.address || resolvedCustomerInfo?.residence),
+        paymentMethod: resolvePaymentMethodText(settlement),
+        cashAmount,
+        bankAmount,
+        totalAmount,
+        totalInWords: moneyToVietnamese(totalAmount),
+        note: safeText(settlement?.note || settlement?.paymentMethod),
+        receiptDateTimeText: formatReceiptNoticeDateTime(createdAt),
+        txDisplay,
+        unitText: 'chỉ',
+        rows,
+    };
+};
 
 const buildSaleVoucherModel = ({ orderId, total, customerInfo, lines, rates, settlement }) => {
     const { rows, offsetAmount } = getSaleVoucherRows(lines, rates);
@@ -465,7 +642,7 @@ const buildSaleVoucherModel = ({ orderId, total, customerInfo, lines, rates, set
 };
 const buildBuyVoucherModel = ({ orderId, customerInfo, lines, rates, settlement, serialNoOverride }) => {
     const { rows, offsetAmount, totalAmount } = getBuyVoucherRows(lines, rates);
-    if (!rows.length) throw new Error('Chưa có mua dẻ hoặc đổi dẻ để xuất bill mua.');
+    if (!rows.length) throw new Error('Chưa có mua Dẻ hoặc đổi Dẻ để xuất bill mua.');
     const today = new Date();
     const resolvedCustomerInfo = resolveBuyVoucherCustomerInfo(customerInfo);
     return {
@@ -495,6 +672,9 @@ const buildBuyVoucherModel = ({ orderId, customerInfo, lines, rates, settlement,
 const buildVoucherModel = ({ orderId, total, customerInfo, lines, rates, settlement, serialNoOverride, modeOverride }) => {
     if (modeOverride === 'buy') {
         return buildBuyVoucherModel({ orderId, customerInfo, lines, rates, settlement, serialNoOverride });
+    }
+    if (modeOverride === 'receipt') {
+        return buildReceiptNoticeModel({ orderId, total, customerInfo, lines, rates, settlement });
     }
     if (modeOverride === 'sale') {
         return buildSaleVoucherModel({ orderId, total, customerInfo, lines, rates, settlement });
@@ -564,7 +744,7 @@ const createEasyInvoiceDraft = ({ orderId, customerInfo, lines, rates }) => {
         if (!quantity) return;
 
         const labor = getLineSellLaborAmount(line);
-        const resolvedCode = safeText(line.productCode, buildSyntheticEasyInvoiceCode({ orderId, line, index }));
+        const resolvedCode = resolveEasyInvoiceLineCode({ orderId, line, index });
         items.push({
             key: String(line.id || `${index + 1}`),
             lineId: line.id ?? null,
@@ -583,7 +763,7 @@ const createEasyInvoiceDraft = ({ orderId, customerInfo, lines, rates }) => {
     return {
         orderId,
         customer: {
-            code: safeText(customerInfo?.cccd || customerInfo?.phone || orderId, orderId),
+            code: '',
             name: safeText(customerInfo?.name, 'Khách lẻ'),
             address: safeText(customerInfo?.address || customerInfo?.residence),
             phone: safeText(customerInfo?.phone),
@@ -711,7 +891,7 @@ const buildEasyInvoicePayload = ({ orderId, customerInfo, lines, rates, settleme
     return {
         orderId,
         customer: {
-            code: safeText(invoiceCustomer?.code || invoiceCustomer?.cccd || invoiceCustomer?.phone || orderId, orderId),
+            code: safeText(invoiceCustomer?.code),
             buyer: safeText(invoiceCustomer?.name, 'Khách lẻ'),
             name: safeText(invoiceCustomer?.name, 'Khách lẻ'),
             address: safeText(invoiceCustomer?.address),
@@ -872,6 +1052,340 @@ const drawSaleVoucher = (ctx, model) => {
     drawTextLine(ctx, model.buyerName, PADDING_X + 160, y, 300, 'center', `400 30px ${UI_FONT}`);
     drawTextLine(ctx, model.sellerName, pageWidth - PADDING_X - 340, y, 300, 'center', `400 30px ${UI_FONT}`);
 };
+const _drawReceiptNoticeLegacy = (ctx, model) => {
+    const pageWidth = model.page.width;
+    const pageHeight = model.page.height;
+    const pagePaddingX = 56;
+    const qrSize = 216;
+    const contentWidth = Math.round(pageWidth * 0.8);
+    const contentX = Math.round((pageWidth - contentWidth) / 2);
+    const verticalAnchor = Math.max(pagePaddingX, Math.round(pageHeight / 3) - 200) + 200;
+    const qrX = contentX + contentWidth - qrSize;
+    const qrY = verticalAnchor + 50;
+    const contentY = verticalAnchor;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pageWidth, pageHeight);
+    ctx.fillStyle = '#111827';
+
+    drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
+    drawTextLine(ctx, `Mã đơn: ${model.orderId}`, qrX, qrY + qrSize + 24, qrSize, 'center', `700 20px ${NUMBER_FONT}`);
+
+    const metaFont = `400 24px ${UI_FONT}`;
+    let metaY = contentY + 200;
+
+    drawTextLine(ctx, `Khách hàng: ${model.customerName}`, contentX + 28, metaY, contentWidth - 56, 'left', metaFont);
+    metaY += 42;
+    drawTextLine(ctx, `CCCD: ${model.cccd || '..........................'}`, contentX + 28, metaY, contentWidth - 56, 'left', metaFont);
+    metaY += 42;
+    drawTextLine(ctx, `Địa chỉ: ${model.address || '........................................'}`, contentX + 28, metaY, contentWidth - 56, 'left', metaFont);
+
+    const tableTop = Math.max(metaY + 46, qrY + qrSize + 56);
+    const tableLeft = contentX + 28;
+    const tableWidth = contentWidth - 56;
+    const columnWidths = fitColumnWidths(tableWidth, [84, 760, 220, 260]);
+    const columnXs = [
+        tableLeft,
+        tableLeft + columnWidths[0],
+        tableLeft + columnWidths[0] + columnWidths[1],
+        tableLeft + columnWidths[0] + columnWidths[1] + columnWidths[2],
+    ];
+    const headerHeight = 54;
+    const rowHeight = 46;
+    const visibleRows = model.rows.length;
+
+    ctx.save();
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 1.3;
+    ctx.strokeRect(tableLeft, tableTop, tableWidth, headerHeight + rowHeight * (visibleRows + 1));
+    columnXs.slice(1).forEach((x) => {
+        ctx.beginPath();
+        ctx.moveTo(x, tableTop);
+        ctx.lineTo(x, tableTop + headerHeight + rowHeight * (visibleRows + 1));
+        ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.moveTo(tableLeft, tableTop + headerHeight);
+    ctx.lineTo(tableLeft + tableWidth, tableTop + headerHeight);
+    ctx.stroke();
+    for (let index = 0; index < visibleRows; index += 1) {
+        const lineY = tableTop + headerHeight + rowHeight * (index + 1);
+        ctx.beginPath();
+        ctx.moveTo(tableLeft, lineY);
+        ctx.lineTo(tableLeft + tableWidth, lineY);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    ['STT', 'Nội dung', 'Số lượng', 'Thành tiền'].forEach((header, index) => {
+        drawTextLine(ctx, header, columnXs[index], tableTop + headerHeight / 2, columnWidths[index], 'center', `700 20px ${UI_FONT}`);
+    });
+
+    model.rows.forEach((row, index) => {
+        const rowTop = tableTop + headerHeight + rowHeight * index;
+        const rowFont = `400 20px ${UI_FONT}`;
+        drawTextLine(ctx, String(row.stt || ''), columnXs[0], rowTop + rowHeight / 2, columnWidths[0], 'center', rowFont);
+        const nameLines = wrapText(ctx, row.name, columnWidths[1] - 16, 2, rowFont);
+        nameLines.forEach((line, lineIndex) => {
+            drawTextLine(ctx, line, columnXs[1] + 8, rowTop + 15 + lineIndex * 16, columnWidths[1] - 16, 'left', rowFont);
+        });
+        drawTextLine(ctx, row.qtyText || '', columnXs[2], rowTop + rowHeight / 2, columnWidths[2], 'center', `400 20px ${NUMBER_FONT}`);
+        drawTextLine(ctx, row.amountText || '', columnXs[3] + 8, rowTop + rowHeight / 2, columnWidths[3] - 16, 'right', `400 20px ${NUMBER_FONT}`);
+    });
+
+    const totalRowTop = tableTop + headerHeight + rowHeight * visibleRows;
+    drawTextLine(ctx, 'Tổng cộng', tableLeft, totalRowTop + rowHeight / 2, columnXs[3] - tableLeft, 'center', `700 22px ${UI_FONT}`);
+    drawTextLine(ctx, `${moneyText(model.totalAmount)} VND`, columnXs[3] + 8, totalRowTop + rowHeight / 2, columnWidths[3] - 16, 'right', `700 22px ${NUMBER_FONT}`);
+
+    let footerY = totalRowTop + rowHeight + 42;
+    drawTextLine(ctx, `Tiền mặt: ${formatSignedMoneyText(model.cashAmount)}`, contentX + 28, footerY, 420, 'left', `400 22px ${UI_FONT}`);
+    drawTextLine(ctx, `Chuyển khoản: ${formatSignedMoneyText(model.bankAmount)}`, contentX + 520, footerY, 440, 'left', `400 22px ${UI_FONT}`);
+    footerY += 34;
+    const totalInWordsLines = wrapText(ctx, `Bằng chữ: ${model.totalInWords}`, contentWidth - 56, 2, `400 20px ${UI_FONT}`);
+    totalInWordsLines.forEach((line, index) => {
+        drawTextLine(ctx, line, contentX + 28, footerY + index * 22, contentWidth - 56, 'left', `400 20px ${UI_FONT}`);
+    });
+    footerY += totalInWordsLines.length * 22 + 12;
+    drawTextLine(ctx, `Ghi chú: ${model.note || '........................................'}`, contentX + 28, footerY, contentWidth - 56, 'left', `400 20px ${UI_FONT}`);
+};
+const drawReceiptNoticeV2 = (ctx, model) => {
+    const pageWidth = model.page.width;
+    const pageHeight = model.page.height;
+    const pagePaddingX = 56;
+    const qrSize = 216;
+    const contentWidth = Math.round(pageWidth * 0.8);
+    const contentX = Math.round((pageWidth - contentWidth) / 2);
+    const verticalAnchor = Math.max(pagePaddingX, Math.round(pageHeight / 3) - 200) + 200;
+    const qrX = contentX + contentWidth - qrSize;
+    const qrY = verticalAnchor;
+    const contentY = verticalAnchor;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pageWidth, pageHeight);
+    ctx.fillStyle = '#111827';
+
+    drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
+    const receiptFontSize = 30;
+    const receiptLineHeight = 36;
+    const receiptTextFont = `600 ${receiptFontSize}px ${UI_FONT}`;
+    const receiptNumberFont = receiptTextFont;
+    const drawUpperBlock = (text, x, centerY, width, align = 'left', maxLines = 2, font = receiptTextFont) => {
+        const lines = wrapText(ctx, upperReceiptText(text), width, maxLines, font).filter(Boolean);
+        if (!lines.length) return;
+        const startY = centerY - ((lines.length - 1) * receiptLineHeight) / 2;
+        lines.forEach((line, index) => {
+            drawTextLine(ctx, line, x, startY + index * receiptLineHeight, width, align, font);
+        });
+    };
+
+    let metaY = contentY + 200;
+
+    drawUpperBlock(`Khách hàng: ${model.customerName}`, contentX + 28, metaY, contentWidth - 56, 'left', 1);
+    metaY += 54;
+    drawUpperBlock(`CCCD: ${model.cccd || '..........................'}`, contentX + 28, metaY, contentWidth - 56, 'left', 1);
+    metaY += 54;
+    drawUpperBlock(`Địa chỉ: ${model.address || '........................................'}`, contentX + 28, metaY, contentWidth - 56, 'left', 2);
+
+    const tableTop = Math.max(metaY + 42, qrY + qrSize + 24);
+    const tableLeft = contentX + 28;
+    const tableWidth = contentWidth - 56;
+    const columnWidths = fitColumnWidths(tableWidth, [300, 560, 220, 150, 150]);
+    const columnXs = [
+        tableLeft,
+        tableLeft + columnWidths[0],
+        tableLeft + columnWidths[0] + columnWidths[1],
+        tableLeft + columnWidths[0] + columnWidths[1] + columnWidths[2],
+        tableLeft + columnWidths[0] + columnWidths[1] + columnWidths[2] + columnWidths[3],
+    ];
+    const headerTopHeight = 74;
+    const headerBottomHeight = 58;
+    const headerHeight = headerTopHeight + headerBottomHeight;
+    const rowHeight = 96;
+    const visibleRows = Math.max(model.rows.length, 1);
+    const tableHeight = headerHeight + rowHeight * visibleRows;
+    const weightGroupStartX = columnXs[3];
+    const weightGroupWidth = columnWidths[3] + columnWidths[4];
+
+    ctx.save();
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 1.3;
+    ctx.strokeRect(tableLeft, tableTop, tableWidth, tableHeight);
+
+    [columnXs[1], columnXs[2], columnXs[3]].forEach((x) => {
+        ctx.beginPath();
+        ctx.moveTo(x, tableTop);
+        ctx.lineTo(x, tableTop + tableHeight);
+        ctx.stroke();
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(columnXs[4], tableTop + headerTopHeight);
+    ctx.lineTo(columnXs[4], tableTop + tableHeight);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(weightGroupStartX, tableTop + headerTopHeight);
+    ctx.lineTo(tableLeft + tableWidth, tableTop + headerTopHeight);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(tableLeft, tableTop + headerHeight);
+    ctx.lineTo(tableLeft + tableWidth, tableTop + headerHeight);
+    ctx.stroke();
+
+    for (let index = 0; index < visibleRows; index += 1) {
+        const lineY = tableTop + headerHeight + rowHeight * (index + 1);
+        ctx.beginPath();
+        ctx.moveTo(tableLeft, lineY);
+        ctx.lineTo(tableLeft + tableWidth, lineY);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    drawUpperBlock('Mã hàng', tableLeft + 8, tableTop + headerHeight / 2, columnWidths[0] - 16, 'center', 2);
+    drawUpperBlock('Tên món hàng', columnXs[1] + 8, tableTop + headerHeight / 2, columnWidths[1] - 16, 'center', 2);
+    drawUpperBlock('Loại vàng', columnXs[2] + 8, tableTop + headerHeight / 2, columnWidths[2] - 16, 'center', 2);
+    drawUpperBlock('Cân trọng lượng', weightGroupStartX + 8, tableTop + headerTopHeight / 2, weightGroupWidth - 16, 'center', 2);
+    drawUpperBlock('Hột', columnXs[3] + 8, tableTop + headerTopHeight + headerBottomHeight / 2, columnWidths[3] - 16, 'center', 1);
+    drawUpperBlock('Vàng', columnXs[4] + 8, tableTop + headerTopHeight + headerBottomHeight / 2, columnWidths[4] - 16, 'center', 1);
+
+    model.rows.forEach((row, index) => {
+        const rowTop = tableTop + headerHeight + rowHeight * index;
+        drawUpperBlock(row.code || '', tableLeft + 8, rowTop + rowHeight / 2, columnWidths[0] - 16, 'left', 2, receiptNumberFont);
+        drawUpperBlock(row.itemName || '', columnXs[1] + 8, rowTop + rowHeight / 2, columnWidths[1] - 16, 'left', 2);
+        drawUpperBlock(row.goldType || '', columnXs[2] + 8, rowTop + rowHeight / 2, columnWidths[2] - 16, 'left', 2);
+        drawUpperBlock(row.stoneWeight || '', columnXs[3] + 8, rowTop + rowHeight / 2, columnWidths[3] - 16, 'center', 1, receiptNumberFont);
+        drawUpperBlock(row.goldWeight || '', columnXs[4] + 8, rowTop + rowHeight / 2, columnWidths[4] - 16, 'center', 1, receiptNumberFont);
+    });
+};
+const drawReceiptNoticeV3 = (ctx, model) => {
+    const pageWidth = model.page.width;
+    const pageHeight = model.page.height;
+    const pagePaddingX = 56;
+    const qrSize = 216;
+    const contentWidth = Math.max(0, Math.round(pageWidth * 0.8) - 50);
+    const contentX = Math.round((pageWidth - contentWidth) / 2);
+    const verticalAnchor = Math.max(pagePaddingX, Math.round(pageHeight / 3) - 200) + 200;
+    const qrX = contentX + contentWidth - qrSize;
+    const qrY = verticalAnchor + 50;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pageWidth, pageHeight);
+    ctx.fillStyle = '#111827';
+
+    drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
+
+    const receiptFontSize = 30;
+    const receiptLineHeight = 36;
+    const receiptTextFont = `600 ${receiptFontSize}px ${UI_FONT}`;
+    const receiptNumberFont = receiptTextFont;
+    const drawUpperBlock = (text, x, centerY, width, align = 'center', maxLines = 2, font = receiptTextFont) => {
+        const lines = wrapText(ctx, upperReceiptText(text), width, maxLines, font).filter(Boolean);
+        if (!lines.length) return;
+        const startY = centerY - ((lines.length - 1) * receiptLineHeight) / 2;
+        lines.forEach((line, index) => {
+            drawTextLine(ctx, line, x, startY + index * receiptLineHeight, width, align, font);
+        });
+    };
+
+    const metaX = contentX;
+    const metaWidth = Math.max(0, qrX - metaX - 28);
+    let metaY = qrY + receiptLineHeight / 2;
+
+    drawUpperBlock(`Kh\u00e1ch h\u00e0ng: ${model.customerName}`, metaX, metaY, metaWidth, 'left', 1);
+    metaY += 54;
+    drawUpperBlock(`CCCD: ${model.cccd || '..........................'}`, metaX, metaY, metaWidth, 'left', 1);
+    metaY += 54;
+    drawUpperBlock(`\u0110\u1ecba ch\u1ec9: ${model.address || '........................................'}`, metaX, metaY, metaWidth, 'left', 2);
+    const receiptMetaLine = [
+        model.receiptDateTimeText,
+        `Loại giao dịch: ${model.txDisplay || 'Mua - Bán'}`,
+        `Đơn vị tính: ${model.unitText || 'chỉ'}`,
+    ].filter(Boolean).join('   |   ');
+
+    const tableTop = Math.max(metaY + 42, qrY + qrSize + 24);
+    const tableLeft = contentX + 28;
+    const tableWidth = contentWidth - 56;
+    const columnWidths = fitColumnWidths(tableWidth, [300, 560, 220, 150, 150]);
+    const columnXs = [
+        tableLeft,
+        tableLeft + columnWidths[0],
+        tableLeft + columnWidths[0] + columnWidths[1],
+        tableLeft + columnWidths[0] + columnWidths[1] + columnWidths[2],
+        tableLeft + columnWidths[0] + columnWidths[1] + columnWidths[2] + columnWidths[3],
+    ];
+    const headerTopHeight = 74;
+    const headerBottomHeight = 58;
+    const headerHeight = headerTopHeight + headerBottomHeight;
+    const rowHeight = 96;
+    const visibleRows = Math.max(model.rows.length, 1);
+    const tableHeight = headerHeight + rowHeight * visibleRows;
+    const weightGroupStartX = columnXs[3];
+    const weightGroupWidth = columnWidths[3] + columnWidths[4];
+
+    ctx.save();
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 1.3;
+    ctx.strokeRect(tableLeft, tableTop, tableWidth, tableHeight);
+
+    [columnXs[1], columnXs[2], columnXs[3]].forEach((x) => {
+        ctx.beginPath();
+        ctx.moveTo(x, tableTop);
+        ctx.lineTo(x, tableTop + tableHeight);
+        ctx.stroke();
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(columnXs[4], tableTop + headerTopHeight);
+    ctx.lineTo(columnXs[4], tableTop + tableHeight);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(weightGroupStartX, tableTop + headerTopHeight);
+    ctx.lineTo(tableLeft + tableWidth, tableTop + headerTopHeight);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(tableLeft, tableTop + headerHeight);
+    ctx.lineTo(tableLeft + tableWidth, tableTop + headerHeight);
+    ctx.stroke();
+
+    for (let index = 0; index < visibleRows; index += 1) {
+        const lineY = tableTop + headerHeight + rowHeight * (index + 1);
+        ctx.beginPath();
+        ctx.moveTo(tableLeft, lineY);
+        ctx.lineTo(tableLeft + tableWidth, lineY);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    drawUpperBlock('M\u00e3 h\u00e0ng', tableLeft + 8, tableTop + headerHeight / 2, columnWidths[0] - 16, 'center', 2);
+    drawUpperBlock('T\u00ean m\u00f3n h\u00e0ng', columnXs[1] + 8, tableTop + headerHeight / 2, columnWidths[1] - 16, 'center', 2);
+    drawUpperBlock('Lo\u1ea1i v\u00e0ng', columnXs[2] + 8, tableTop + headerHeight / 2, columnWidths[2] - 16, 'center', 2);
+    drawTextLine(
+        ctx,
+        upperReceiptText('C\u00e2n tr\u1ecdng l\u01b0\u1ee3ng'),
+        weightGroupStartX + 8,
+        tableTop + headerTopHeight / 2,
+        weightGroupWidth - 16,
+        'center',
+        `600 28px ${UI_FONT}`,
+    );
+    drawUpperBlock('H\u1ed9t', columnXs[3] + 8, tableTop + headerTopHeight + headerBottomHeight / 2, columnWidths[3] - 16, 'center', 1);
+    drawUpperBlock('V\u00e0ng', columnXs[4] + 8, tableTop + headerTopHeight + headerBottomHeight / 2, columnWidths[4] - 16, 'center', 1);
+
+    model.rows.forEach((row, index) => {
+        const rowTop = tableTop + headerHeight + rowHeight * index;
+        drawUpperBlock(row.code || '', tableLeft + 8, rowTop + rowHeight / 2, columnWidths[0] - 16, 'center', 2, receiptNumberFont);
+        drawUpperBlock(row.itemName || '', columnXs[1] + 8, rowTop + rowHeight / 2, columnWidths[1] - 16, 'center', 2);
+        drawUpperBlock(row.goldType || '', columnXs[2] + 8, rowTop + rowHeight / 2, columnWidths[2] - 16, 'center', 2);
+        drawUpperBlock(row.stoneWeight || '', columnXs[3] + 8, rowTop + rowHeight / 2, columnWidths[3] - 16, 'center', 1, receiptNumberFont);
+        drawUpperBlock(row.goldWeight || '', columnXs[4] + 8, rowTop + rowHeight / 2, columnWidths[4] - 16, 'center', 1, receiptNumberFont);
+    });
+
+    const footerMetaY = Math.min(pageHeight - 52, tableTop + tableHeight + 48);
+    drawTextLine(ctx, receiptMetaLine, contentX, footerMetaY, contentWidth, 'center', `italic 400 22px ${UI_FONT}`);
+};
 const drawBuyVoucher = (ctx, model, assets) => {
     const pageWidth = model.page.width;
     const pageHeight = model.page.height;
@@ -923,7 +1437,7 @@ const drawBuyVoucher = (ctx, model, assets) => {
     ];
     const headerHeight = 58;
     const rowHeight = 46;
-    const visibleRows = Math.max(model.rows.length, 4);
+    const visibleRows = model.rows.length;
 
     ctx.strokeStyle = '#111827';
     ctx.lineWidth = 1.2;
@@ -969,8 +1483,6 @@ const drawBuyVoucher = (ctx, model, assets) => {
     });
 
     const totalRowTop = tableTop + headerHeight + rowHeight * visibleRows;
-    drawTextLine(ctx, 'Cộng', tableLeft, totalRowTop + rowHeight / 2, columnXs[5] - tableLeft, 'center', `700 22px ${UI_FONT}`);
-    drawTextLine(ctx, moneyText(model.totalAmount), columnXs[5] + 8, totalRowTop + rowHeight / 2, columnWidths[5] - 16, 'right', `700 24px ${NUMBER_FONT}`);
     ctx.save();
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(tableLeft + 1, totalRowTop + 1, columnXs[5] - tableLeft - 2, rowHeight - 2);
@@ -982,17 +1494,6 @@ const drawBuyVoucher = (ctx, model, assets) => {
     drawTextLine(ctx, `- Tổng số tiền bằng chữ: ${model.totalInWords}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
     footerY += 34;
     drawTextLine(ctx, `- Ghi chú thanh toán: ${model.paymentNote || '..............................................................'}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
-    footerY += 34;
-    drawTextLine(ctx, `+ Số tiền thanh toán chuyển khoản: ${model.bankAmount ? moneyText(model.bankAmount) : '........................................'}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
-    footerY += 34;
-    drawTextLine(ctx, `+ Số tiền bù trừ khoản vàng mua lại: ${model.offsetAmount ? moneyText(model.offsetAmount) : '........................................'}`, leftX, footerY, leftWidth, 'left', `400 20px ${UI_FONT}`);
-
-    const bankLineY = footerY - 34;
-    ctx.save();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(leftX, bankLineY - 16, leftWidth, 32);
-    ctx.restore();
-    drawTextLine(ctx, `${BUY_VOUCHER_BANK_TRANSFER_LABEL}${model.bankAmount ? `${moneyText(model.bankAmount)} VND` : '........................................'}`, leftX, bankLineY, leftWidth, 'left', `400 20px ${buyFont}`);
     const signatureTop = Math.max(footerY + 84, pageHeight - 250);
     drawTextLine(ctx, 'Người duyệt mua', leftX + 44, signatureTop, 260, 'center', `700 24px ${UI_FONT}`);
     drawTextLine(ctx, 'Người bán', leftX + leftWidth - 304, signatureTop, 260, 'center', `700 24px ${UI_FONT}`);
@@ -1034,6 +1535,8 @@ const createPaymentVoucherPreview = async ({ orderId, total, customerInfo, lines
     if (model.mode === 'buy') {
         const [frontImage, backImage] = await Promise.all([loadImage(model.frontImage), loadImage(model.backImage)]);
         drawBuyVoucher(ctx, model, { frontImage, backImage });
+    } else if (model.mode === 'receipt') {
+        drawReceiptNoticeV3(ctx, model);
     } else {
         drawSaleVoucher(ctx, model);
     }

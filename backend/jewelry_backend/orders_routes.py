@@ -822,7 +822,7 @@ def _easyinvoice_invoice_xml(invoice_data):
     inv = ET.SubElement(root, 'Inv')
     invoice_node = ET.SubElement(inv, 'Invoice')
     add_text(invoice_node, 'Ikey', normalize_ikey(order_key))
-    add_text(invoice_node, 'CusCode', _clean_text(customer.get('code')))
+    add_text(invoice_node, 'CusCode', '')
     add_text(invoice_node, 'Buyer', _clean_text(customer.get('buyer') or customer.get('name') or 'Khach le'))
     add_text(invoice_node, 'CusName', _clean_text(customer.get('name') or customer.get('buyer') or 'Khach le'))
     add_optional_text(invoice_node, 'CusEmails', _clean_text(customer.get('emails')))

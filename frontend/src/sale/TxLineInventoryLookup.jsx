@@ -10,7 +10,7 @@ function InventorySuggestionList({
 }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {suggestionItems.map(item => {
+            {suggestionItems.map((item) => {
                 const disabled = isUnavailableInventoryItem(item);
                 return (
                     <button
@@ -51,18 +51,61 @@ function InventorySuggestionList({
 
 function SelectedInventoryInfo({ line, lineAccent, marginTop = 8 }) {
     if (!(line.productCode || line.itemName)) return null;
+
+    const detailParts = [line.itemName, line.product].filter(Boolean);
+
     return (
-        <div style={{ marginTop, fontSize: 10, color: lineAccent, lineHeight: 1.45 }}>
-            Đã chọn {line.productCode || 'sản phẩm'}
-            {line.itemName ? ` · ${line.itemName}` : ''}
+        <div
+            style={{
+                marginTop,
+                borderRadius: 14,
+                border: `1px solid ${lineAccent}33`,
+                background: '#f8fbff',
+                padding: '9px 12px',
+                boxShadow: '0 10px 22px rgba(15,23,42,.06)',
+            }}
+        >
+            <div style={{ fontSize: 10, fontWeight: 800, color: lineAccent, lineHeight: 1.35 }}>
+                Sản phẩm đã chọn
+            </div>
+            <div style={{ marginTop: 2, fontSize: 11, fontWeight: 800, color: '#0f172a', lineHeight: 1.4 }}>
+                {line.productCode || 'Chưa có mã'}
+            </div>
+            {detailParts.length ? (
+                <div style={{ marginTop: 2, fontSize: 10, color: '#475569', lineHeight: 1.45 }}>
+                    {detailParts.join(' · ')}
+                </div>
+            ) : null}
         </div>
     );
 }
 
 function getLookupMessageColor(message) {
     if (!message) return '#64748b';
-    if (/^(Đã|Tìm thấy)/i.test(message)) return '#0f766e';
+    if (/^(Da|Đã|Tim thay|Tìm thấy)/i.test(message)) return '#0f766e';
     return '#dc2626';
+}
+
+function normalizeLookupMessage(message) {
+    const text = String(message || '').trim();
+    if (!text) return '';
+
+    const normalized = foldText(text);
+    if (normalized.includes('khong tim thay') || normalized.includes('ma trong kho')) {
+        return 'Sản phẩm không tìm thấy.';
+    }
+    if (normalized.startsWith('da chon san pham')) {
+        return text
+            .replace(/^Da chon san pham/i, 'Đã chọn sản phẩm')
+            .replace(/khong ro ma/gi, 'không rõ mã');
+    }
+    if (normalized.startsWith('khong doc duoc ma san pham')) {
+        return 'Không đọc được mã sản phẩm.';
+    }
+    if (normalized.startsWith('khong doc duoc qr hoac ma vach')) {
+        return 'Không đọc được QR hoặc mã vạch.';
+    }
+    return text;
 }
 
 export function InventoryProductLookupField({
@@ -87,6 +130,7 @@ export function InventoryProductLookupField({
 }) {
     const [scanOpen, setScanOpen] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [keepPickerOpenAfterScan, setKeepPickerOpenAfterScan] = useState(false);
     const inputRef = useRef(null);
 
     const hasQuery = !!String(catalogQuery || '').trim();
@@ -95,28 +139,24 @@ export function InventoryProductLookupField({
         && !(line.itemId && String(line.productCode || '').trim() === String(catalogQuery || '').trim());
     const normalizedQuery = foldText(catalogQuery);
     const filteredProductOptions = (hasQuery
-        ? productOptions.filter(option => [option.label, option.value].some(value => foldText(value).includes(normalizedQuery)))
+        ? productOptions.filter((option) => [option.label, option.value].some((value) => foldText(value).includes(normalizedQuery)))
         : productOptions
     ).slice(0, 9);
-    const selectedOption = productOptions.find(option => String(option.value) === String(product));
-    const helperColor = getLookupMessageColor(scanMessage);
+    const selectedOption = productOptions.find((option) => String(option.value) === String(product));
+    const pickerLoading = productOptions.length === 0;
+    const hasExactInventorySelection = line.itemId && String(line.productCode || '').trim() === String(catalogQuery || '').trim();
+    const pickerVisible = pickerOpen && (keepPickerOpenAfterScan || !hasExactInventorySelection);
+    const displayMessage = normalizeLookupMessage(scanMessage);
+    const helperColor = getLookupMessageColor(displayMessage);
+    const triggerLabel = pickerLoading
+        ? 'Loading...'
+        : (line.itemId ? '\u00A0' : (selectedOption?.label || product || 'Chọn tuổi vàng'));
 
     useEffect(() => {
-        if (!pickerOpen) return;
+        if (!pickerVisible) return;
         inputRef.current?.focus();
         inputRef.current?.select?.();
-    }, [pickerOpen]);
-
-    useEffect(() => {
-        if (!usesInventory) setPickerOpen(false);
-    }, [usesInventory]);
-
-    useEffect(() => {
-        if (!pickerOpen) return;
-        if (line.itemId && String(line.productCode || '').trim() === String(catalogQuery || '').trim()) {
-            setPickerOpen(false);
-        }
-    }, [catalogQuery, line.itemId, line.productCode, pickerOpen]);
+    }, [pickerVisible]);
 
     if (!usesInventory) return null;
 
@@ -125,16 +165,17 @@ export function InventoryProductLookupField({
     return (
         <div
             style={{ width: '100%' }}
-            onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget)) {
+            onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setKeepPickerOpenAfterScan(false);
                     setPickerOpen(false);
                 }
             }}
         >
-            <InventoryCodeScanModal
+                <InventoryCodeScanModal
                 open={scanOpen}
                 loading={scanLoading}
-                message={scanMessage}
+                message={displayMessage}
                 onClose={() => setScanOpen(false)}
                 onDetected={handleScanDetected}
                 onPickFile={handleScanFile}
@@ -145,9 +186,18 @@ export function InventoryProductLookupField({
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 42px', gap: 6, alignItems: 'center' }}>
                         <button
                             type="button"
-                            onClick={() => setPickerOpen(prev => !prev)}
-                            aria-expanded={pickerOpen}
-                            aria-label={pickerOpen ? 'Thu gọn chọn tuổi vàng' : 'Mở chọn tuổi vàng hoặc tìm mã kho'}
+                            onClick={() => {
+                                if (pickerLoading) return;
+                                if (pickerVisible) {
+                                    setKeepPickerOpenAfterScan(false);
+                                    setPickerOpen(false);
+                                    return;
+                                }
+                                setKeepPickerOpenAfterScan(hasExactInventorySelection);
+                                setPickerOpen(true);
+                            }}
+                            aria-expanded={pickerVisible}
+                            aria-label={pickerVisible ? 'Thu gọn chọn tuổi vàng' : 'Mở chọn tuổi vàng hoặc tìm mã kho'}
                             style={{
                                 ...S.inp,
                                 display: 'flex',
@@ -155,22 +205,24 @@ export function InventoryProductLookupField({
                                 justifyContent: 'space-between',
                                 gap: 8,
                                 padding: '9px 12px',
-                                cursor: 'pointer',
-                                background: pickerOpen ? '#f8fbff' : S.inp.background,
-                                borderColor: pickerOpen ? txTheme.border : '#dbe4ee',
+                                cursor: pickerLoading ? 'not-allowed' : 'pointer',
+                                background: pickerVisible ? '#f8fbff' : S.inp.background,
+                                borderColor: pickerVisible ? txTheme.border : '#dbe4ee',
+                                opacity: pickerLoading ? 0.72 : 1,
                             }}
                         >
                             <span style={{ flex: 1, minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#111827' }}>
-                                {selectedOption?.label || product || 'Chọn tuổi vàng'}
+                                {triggerLabel}
                             </span>
-                            <IoChevronDownOutline style={{ fontSize: 16, color: '#475569', flexShrink: 0, transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .18s ease' }} />
+                            <IoChevronDownOutline style={{ fontSize: 16, color: '#475569', flexShrink: 0, transform: pickerVisible ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .18s ease' }} />
                         </button>
                         <button
                             type="button"
                             title={scanLoading ? 'Đang quét...' : 'Quét QR / mã vạch'}
                             aria-label="Quét QR / mã vạch"
                             onClick={() => {
-                                setPickerOpen(false);
+                                setKeepPickerOpenAfterScan(true);
+                                setPickerOpen(true);
                                 setScanOpen(true);
                             }}
                             style={{
@@ -190,9 +242,14 @@ export function InventoryProductLookupField({
                 {qtyField}
             </div>
 
-            {!pickerOpen ? <SelectedInventoryInfo line={line} lineAccent={lineAccent} marginTop={6} /> : null}
+            {!pickerVisible ? <SelectedInventoryInfo line={line} lineAccent={lineAccent} marginTop={6} /> : null}
+            {!pickerVisible && displayMessage ? (
+                <div style={{ marginTop: 6, fontSize: 10, color: helperColor, lineHeight: 1.45 }}>
+                    {displayMessage}
+                </div>
+            ) : null}
 
-            {pickerOpen ? (
+            {pickerVisible ? (
                 <div style={{ marginTop: 8, borderRadius: 18, border: '1px solid #dbe4ee', background: '#ffffff', boxShadow: '0 18px 36px rgba(15,23,42,.12)', padding: 8, display: 'grid', gap: 8 }}>
                     <div style={{ position: 'relative' }}>
                         <input
@@ -200,7 +257,10 @@ export function InventoryProductLookupField({
                             className="sale-pos-catalog-input"
                             style={{ ...S.inp, textAlign: 'left', width: '100%', borderRadius: 14, paddingRight: 34 }}
                             value={catalogQuery}
-                            onChange={e => handleCatalogInputChange(e.target.value)}
+                            onChange={(event) => {
+                                setKeepPickerOpenAfterScan(false);
+                                handleCatalogInputChange(event.target.value);
+                            }}
                             placeholder="Chọn tuổi vàng hoặc nhập mã để tìm trong kho"
                         />
                         {hasQuery ? (
@@ -208,7 +268,10 @@ export function InventoryProductLookupField({
                                 type="button"
                                 title="Xóa nhanh"
                                 aria-label="Xóa nhanh"
-                                onClick={() => handleCatalogInputChange('')}
+                                onClick={() => {
+                                    setKeepPickerOpenAfterScan(false);
+                                    handleCatalogInputChange('');
+                                }}
                                 style={{
                                     position: 'absolute',
                                     right: 8,
@@ -233,10 +296,15 @@ export function InventoryProductLookupField({
 
                     {line.itemId ? (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                            <SelectedInventoryInfo line={line} lineAccent={lineAccent} marginTop={0} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <SelectedInventoryInfo line={line} lineAccent={lineAccent} marginTop={0} />
+                            </div>
                             <button
                                 type="button"
-                                onClick={() => handleCatalogInputChange('')}
+                                onClick={() => {
+                                    setKeepPickerOpenAfterScan(false);
+                                    handleCatalogInputChange('');
+                                }}
                                 style={{
                                     border: `1px solid ${txTheme.softBorder}`,
                                     background: '#ffffff',
@@ -260,6 +328,7 @@ export function InventoryProductLookupField({
                             <InventorySuggestionList
                                 suggestionItems={suggestionItems}
                                 onSelectSuggestion={(item) => {
+                                    setKeepPickerOpenAfterScan(false);
                                     onSelectSuggestion?.(item);
                                     setPickerOpen(false);
                                 }}
@@ -271,13 +340,14 @@ export function InventoryProductLookupField({
                         <div style={{ display: 'grid', gap: 6 }}>
                             <span style={{ ...S.label, marginBottom: 0 }}>Tuổi vàng</span>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
-                                {filteredProductOptions.map(option => {
+                                {filteredProductOptions.map((option) => {
                                     const active = String(option.value) === String(product);
                                     return (
                                         <button
                                             key={option.value}
                                             type="button"
                                             onClick={() => {
+                                                setKeepPickerOpenAfterScan(false);
                                                 onProductChange?.(option.value);
                                                 setPickerOpen(false);
                                             }}
@@ -307,9 +377,9 @@ export function InventoryProductLookupField({
                         </div>
                     ) : null}
 
-                    {scanMessage ? (
+                    {displayMessage ? (
                         <div style={{ fontSize: 10, color: helperColor, lineHeight: 1.45 }}>
-                            {scanMessage}
+                            {displayMessage}
                         </div>
                     ) : null}
                 </div>
@@ -337,15 +407,17 @@ export default function TxLineInventoryLookup({
     const showSuggestions = !!suggestionItems?.length
         && String(catalogQuery || '').trim()
         && !(line.itemId && String(line.productCode || '').trim() === String(catalogQuery || '').trim());
+    const displayMessage = normalizeLookupMessage(scanMessage);
+    const helperColor = getLookupMessageColor(displayMessage);
 
     if (!usesInventory) return null;
 
     return (
         <div style={{ gridColumn: '1 / -1' }}>
-            <InventoryCodeScanModal
+                <InventoryCodeScanModal
                 open={scanOpen}
                 loading={scanLoading}
-                message={scanMessage}
+                message={displayMessage}
                 onClose={() => setScanOpen(false)}
                 onDetected={handleScanDetected}
                 onPickFile={handleScanFile}
@@ -356,10 +428,10 @@ export default function TxLineInventoryLookup({
                         className="sale-pos-catalog-input"
                         style={{ ...S.inp, textAlign: 'left', width: '100%', borderRadius: 16, paddingRight: 34 }}
                         value={catalogQuery}
-                        onChange={e => handleCatalogInputChange(e.target.value)}
+                        onChange={(event) => handleCatalogInputChange(event.target.value)}
                         placeholder="Nhập hoặc quét mã để tìm trong kho"
                     />
-                    {!!String(catalogQuery || '').trim() ? (
+                    {String(catalogQuery || '').trim() ? (
                         <button
                             type="button"
                             title="Xóa nhanh"
@@ -412,6 +484,11 @@ export default function TxLineInventoryLookup({
                 </div>
             ) : null}
             <SelectedInventoryInfo line={line} lineAccent={lineAccent} />
+            {displayMessage ? (
+                <div style={{ marginTop: 6, fontSize: 10, color: helperColor, lineHeight: 1.45 }}>
+                    {displayMessage}
+                </div>
+            ) : null}
         </div>
     );
 }

@@ -1,4 +1,5 @@
 import { IoCloseOutline, IoCopyOutline, IoDownloadOutline, IoPrintOutline } from 'react-icons/io5';
+
 import { S } from './shared';
 
 export default function DocumentPreviewModal({
@@ -15,8 +16,17 @@ export default function DocumentPreviewModal({
     actionMessage,
     actionError,
     sending,
+    sendLabel = 'In Phiếu Kê',
+    showCopy = true,
+    printerOptions = [],
+    onSendToPrinter,
 }) {
     if (!open) return null;
+
+    const resolvedSendLabel = String(sendLabel || 'In Phiếu Kê').trim() || 'In Phiếu Kê';
+    const sendingLabel = `Đang ${resolvedSendLabel.toLowerCase()}`;
+    const hasPrinterOptions = Array.isArray(printerOptions) && printerOptions.length > 0;
+    const actionDisabled = loading || !imageUrl;
 
     return (
         <div
@@ -33,7 +43,7 @@ export default function DocumentPreviewModal({
             }}
         >
             <div
-                onClick={event => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
                 style={{
                     width: '100%',
                     maxWidth: 430,
@@ -51,7 +61,7 @@ export default function DocumentPreviewModal({
                     <div style={{ minWidth: 0 }}>
                         <div data-sale-title="true" style={{ fontSize: 15, fontWeight: 900, color: '#111827' }}>{title || 'Xem trước PNG'}</div>
                         <div style={{ marginTop: 4, fontSize: 10, lineHeight: 1.5, color: '#64748b' }}>
-                            {subtitle || 'Phiếu kê mua hàng PNG'}
+                            {subtitle || 'Preview PNG tài liệu in'}
                         </div>
                     </div>
                     <button
@@ -107,34 +117,72 @@ export default function DocumentPreviewModal({
                             {actionMessage}
                         </div>
                     ) : null}
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                        <button
-                            type="button"
-                            onClick={onDownload}
-                            disabled={loading || !imageUrl}
-                            style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', opacity: loading || !imageUrl ? 0.55 : 1 }}
-                        >
-                            <IoDownloadOutline />
-                            <span>PNG</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onCopy}
-                            disabled={loading || !imageUrl}
-                            style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', opacity: loading || !imageUrl ? 0.55 : 1 }}
-                        >
-                            <IoCopyOutline />
-                            <span>Copy</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onSendToAgent}
-                            disabled={loading || !imageUrl || sending}
-                            style={{ ...S.pillBtn('linear-gradient(135deg,#15803d,#22c55e)', '#ffffff'), opacity: loading || !imageUrl || sending ? 0.55 : 1 }}
-                        >
-                            <IoPrintOutline />
-                            <span>{sending ? 'Đang in Phiếu Kê' : 'In Phiếu Kê'}</span>
-                        </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', width: '100%' }}>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                                type="button"
+                                onClick={onDownload}
+                                disabled={actionDisabled}
+                                style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', opacity: actionDisabled ? 0.55 : 1 }}
+                            >
+                                <IoDownloadOutline />
+                                <span>PNG</span>
+                            </button>
+                            {showCopy ? (
+                                <button
+                                    type="button"
+                                    onClick={onCopy}
+                                    disabled={actionDisabled}
+                                    style={{ ...S.pillBtn('#ffffff', '#111827'), border: '1px solid #dbe4ee', boxShadow: 'none', opacity: actionDisabled ? 0.55 : 1 }}
+                                >
+                                    <IoCopyOutline />
+                                    <span>Copy</span>
+                                </button>
+                            ) : null}
+                            {!hasPrinterOptions ? (
+                                <button
+                                    type="button"
+                                    onClick={onSendToAgent}
+                                    disabled={actionDisabled || sending}
+                                    style={{ ...S.pillBtn('linear-gradient(135deg,#15803d,#22c55e)', '#ffffff'), opacity: actionDisabled || sending ? 0.55 : 1 }}
+                                >
+                                    <IoPrintOutline />
+                                    <span>{sending ? sendingLabel : resolvedSendLabel}</span>
+                                </button>
+                            ) : null}
+                        </div>
+                        {hasPrinterOptions ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                                {printerOptions.map((printer) => (
+                                    <button
+                                        key={printer.key}
+                                        type="button"
+                                        onClick={() => onSendToPrinter?.(printer.key)}
+                                        disabled={actionDisabled || sending}
+                                        title={printer.title || `Máy in ${printer.label}`}
+                                        aria-label={printer.title || `Máy in ${printer.label}`}
+                                        style={{
+                                            width: 38,
+                                            height: 38,
+                                            borderRadius: '50%',
+                                            border: 'none',
+                                            background: 'linear-gradient(135deg,#15803d,#22c55e)',
+                                            color: '#ffffff',
+                                            fontWeight: 900,
+                                            fontSize: 13,
+                                            cursor: actionDisabled || sending ? 'not-allowed' : 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            boxShadow: '0 10px 18px rgba(34,197,94,.24)',
+                                            opacity: actionDisabled || sending ? 0.55 : 1,
+                                        }}
+                                    >
+                                        {printer.label}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </div>

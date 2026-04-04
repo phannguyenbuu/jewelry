@@ -72,7 +72,7 @@ HOST_ALIAS_CACHE = {}
 
 AND_SERIAL_DEFAULTS = {
     'port': 'COM3',
-    'baudrate': 1200,
+    'baudrate': 2400,
     'bytesize': 7,
     'parity': 'E',
     'stopbits': 1,
@@ -80,7 +80,7 @@ AND_SERIAL_DEFAULTS = {
     'listen_seconds': 3.0,
     'encoding': 'ascii',
     'command': 'Q',
-    'line_ending': '\\r',
+    'line_ending': '\\r\\n',
     'data_format': 'A&D',
 }
 
@@ -108,12 +108,18 @@ DEFAULT_CONFIG = {
         'enabled': True,
         'poll_interval_seconds': 3,
         'heartbeat_interval_seconds': 15,
+        'realtime_enabled': True,
+        'realtime_interval_seconds': 1,
+        'realtime_keepalive_seconds': 10,
         'serial': AND_SERIAL_DEFAULTS,
     },
     'sartorius': {
         'enabled': True,
         'poll_interval_seconds': 3,
         'heartbeat_interval_seconds': 15,
+        'realtime_enabled': True,
+        'realtime_interval_seconds': 1,
+        'realtime_keepalive_seconds': 10,
         'serial': SARTORIUS_SERIAL_DEFAULTS,
     },
     'printer': {
@@ -150,6 +156,18 @@ def deep_merge(base, override):
         else:
             result[key] = copy.deepcopy(value)
     return result
+
+
+def prune_none_values(value):
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            normalized = prune_none_values(item)
+            if normalized is None:
+                continue
+            cleaned[key] = normalized
+        return cleaned
+    return value
 
 
 def coerce_bool(value, default=False):
@@ -485,9 +503,15 @@ def normalize_config(raw):
     config['scale']['enabled'] = coerce_bool(config['scale'].get('enabled'), True)
     config['scale']['poll_interval_seconds'] = coerce_float(config['scale'].get('poll_interval_seconds'), 3)
     config['scale']['heartbeat_interval_seconds'] = coerce_float(config['scale'].get('heartbeat_interval_seconds'), 15)
+    config['scale']['realtime_enabled'] = coerce_bool(config['scale'].get('realtime_enabled'), True)
+    config['scale']['realtime_interval_seconds'] = coerce_float(config['scale'].get('realtime_interval_seconds'), 1)
+    config['scale']['realtime_keepalive_seconds'] = coerce_float(config['scale'].get('realtime_keepalive_seconds'), 10)
     config['sartorius']['enabled'] = coerce_bool(config['sartorius'].get('enabled'), True)
     config['sartorius']['poll_interval_seconds'] = coerce_float(config['sartorius'].get('poll_interval_seconds'), 3)
     config['sartorius']['heartbeat_interval_seconds'] = coerce_float(config['sartorius'].get('heartbeat_interval_seconds'), 15)
+    config['sartorius']['realtime_enabled'] = coerce_bool(config['sartorius'].get('realtime_enabled'), True)
+    config['sartorius']['realtime_interval_seconds'] = coerce_float(config['sartorius'].get('realtime_interval_seconds'), 1)
+    config['sartorius']['realtime_keepalive_seconds'] = coerce_float(config['sartorius'].get('realtime_keepalive_seconds'), 10)
     config['printer']['enabled'] = coerce_bool(config['printer'].get('enabled'), True)
     config['printer']['poll_interval_seconds'] = coerce_float(config['printer'].get('poll_interval_seconds'), 1)
     config['printer']['heartbeat_interval_seconds'] = coerce_float(config['printer'].get('heartbeat_interval_seconds'), 15)
@@ -518,7 +542,7 @@ def save_config(config):
 def parse_request_config(payload):
     payload = payload if isinstance(payload, dict) else {}
     current = load_config()
-    next_config = deep_merge(current, {
+    overrides = prune_none_values({
         'server_url': payload.get('server_url'),
         'agent_key': payload.get('agent_key'),
         'device_name': payload.get('device_name'),
@@ -527,6 +551,9 @@ def parse_request_config(payload):
             'enabled': payload.get('scale_enabled'),
             'poll_interval_seconds': payload.get('scale_poll_interval_seconds'),
             'heartbeat_interval_seconds': payload.get('scale_heartbeat_interval_seconds'),
+            'realtime_enabled': payload.get('scale_realtime_enabled'),
+            'realtime_interval_seconds': payload.get('scale_realtime_interval_seconds'),
+            'realtime_keepalive_seconds': payload.get('scale_realtime_keepalive_seconds'),
             'serial': {
                 'port': payload.get('scale_port'),
                 'baudrate': payload.get('scale_baudrate'),
@@ -545,6 +572,9 @@ def parse_request_config(payload):
             'enabled': payload.get('sartorius_enabled'),
             'poll_interval_seconds': payload.get('sartorius_poll_interval_seconds'),
             'heartbeat_interval_seconds': payload.get('sartorius_heartbeat_interval_seconds'),
+            'realtime_enabled': payload.get('sartorius_realtime_enabled'),
+            'realtime_interval_seconds': payload.get('sartorius_realtime_interval_seconds'),
+            'realtime_keepalive_seconds': payload.get('sartorius_realtime_keepalive_seconds'),
             'serial': {
                 'auto_detect_port': payload.get('sartorius_auto_detect_port'),
                 'port': payload.get('sartorius_port'),
@@ -569,6 +599,7 @@ def parse_request_config(payload):
             'network_host_limit': payload.get('printer_network_host_limit'),
         },
     })
+    next_config = deep_merge(current, overrides)
     return normalize_config(next_config)
 
 
@@ -601,6 +632,7 @@ NEWLINE_MAP = {
 }
 
 WEIGHT_RE = re.compile(r'([+-]?\d+(?:\.\d+)?)\s*([A-Za-z%]+)?')
+A_AND_READING_RE = re.compile(r'(ST|US),\s*([+-]?\d+(?:\.\d+)?)\s*([A-Za-z%]+)?')
 PORT_LOCK = threading.Lock()
 
 
@@ -804,28 +836,33 @@ def decode_payload(payload, encoding):
     return payload.decode(encoding, errors='replace').strip()
 
 
+def has_binary_noise(value):
+    text = str(value or '')
+    return any(ord(char) < 32 and char not in '\r\n\t' for char in text)
+
+
 def parse_weight_line(raw_line, data_format='AUTO'):
     line = clean_text(raw_line)
     if not line:
         raise RuntimeError('Scale did not return any data.')
 
     if data_format in {'AUTO', 'A&D', 'AND'}:
-        match = re.match(r'^(ST|US|OL),(.+)$', line)
+        if 'OL,' in line:
+            return {
+                'stable': False,
+                'header': 'OL',
+                'weight_text': '',
+                'weight_value': None,
+                'unit': '',
+                'raw_line': line,
+                'meta': {'status': 'overload'},
+            }
+
+        match = A_AND_READING_RE.search(line)
         if match:
             header = match.group(1)
-            body = match.group(2)
-            if header == 'OL':
-                return {
-                    'stable': False,
-                    'header': header,
-                    'weight_text': '',
-                    'weight_value': None,
-                    'unit': '',
-                    'raw_line': line,
-                    'meta': {'status': 'overload'},
-                }
-            unit = body[-3:].strip() if len(body) >= 3 else ''
-            weight_text = body[:-3].strip() if len(body) >= 3 else body.strip()
+            weight_text = clean_text(match.group(2))
+            unit = clean_text(match.group(3))
             try:
                 weight_value = float(weight_text.replace(' ', ''))
             except ValueError:
@@ -839,6 +876,9 @@ def parse_weight_line(raw_line, data_format='AUTO'):
                 'raw_line': line,
                 'meta': {'status': 'stable' if header == 'ST' else 'unstable'},
             }
+
+        if has_binary_noise(raw_line):
+            raise RuntimeError(f'Cannot parse noisy serial line: {repr(str(raw_line or "")[:80])}')
 
     generic = WEIGHT_RE.search(line)
     if generic:
@@ -953,18 +993,106 @@ def enrich_reading(reading, config, port_info):
     }
 
 
-def read_scale_once(serial_settings):
+def build_and_read_candidates(serial_settings):
     normalized = normalize_serial_settings(serial_settings, defaults=AND_SERIAL_DEFAULTS)
-    candidates = [normalized]
-    if normalized.get('baudrate') != 1200:
-        fallback = {**normalized, 'baudrate': 1200}
-        candidates.append(fallback)
+    seen = set()
+    candidates = []
 
+    def add_candidate(command=None, line_ending=None, baudrate=None, bytesize=None, parity=None, stopbits=None):
+        candidate = {**normalized}
+        if command is not None:
+            candidate['command'] = command
+        if line_ending is not None:
+            candidate['line_ending'] = line_ending
+        if baudrate is not None:
+            candidate['baudrate'] = baudrate
+        if bytesize is not None:
+            candidate['bytesize'] = bytesize
+        if parity is not None:
+            candidate['parity'] = parity
+        if stopbits is not None:
+            candidate['stopbits'] = stopbits
+        candidate = normalize_serial_settings(candidate, defaults=AND_SERIAL_DEFAULTS)
+        signature = (
+            clean_text(candidate.get('port')).upper(),
+            int(candidate.get('baudrate') or 0),
+            int(candidate.get('bytesize') or 0),
+            clean_text(candidate.get('parity')).upper(),
+            float(candidate.get('stopbits') or 0),
+            clean_text(candidate.get('encoding')).lower(),
+            str(candidate.get('command') or ''),
+            candidate.get('line_ending') or '',
+            clean_text(candidate.get('data_format')).upper(),
+        )
+        if signature in seen:
+            return
+        seen.add(signature)
+        candidates.append(candidate)
+
+    configured_command = clean_text(normalized.get('command')).upper()
+    configured_line = normalized.get('line_ending') or '\r\n'
+    configured_baud = int(normalized.get('baudrate') or 2400)
+
+    add_candidate()
+    for fallback_line in (configured_line, '\r\n', '\r'):
+        add_candidate(command=configured_command or 'Q', line_ending=fallback_line, baudrate=configured_baud)
+    for fallback_command, fallback_line in (
+        ('Q', '\r\n'),
+        ('Q', '\r'),
+        ('SI', '\r\n'),
+        ('SI', '\r'),
+        ('S', '\r\n'),
+        ('S', '\r'),
+    ):
+        add_candidate(command=fallback_command, line_ending=fallback_line, baudrate=configured_baud)
+    add_candidate(command='', line_ending='', baudrate=configured_baud)
+    for fallback_baud, fallback_bytesize, fallback_parity, fallback_stopbits in (
+        (2400, 7, 'E', 1),
+        (1200, 7, 'E', 1),
+        (1200, 8, 'N', 1),
+    ):
+        for fallback_command, fallback_line in (
+            (configured_command or 'Q', '\r\n'),
+            ('Q', '\r\n'),
+            ('Q', '\r'),
+            ('SI', '\r\n'),
+            ('SI', '\r'),
+            ('S', '\r\n'),
+            ('S', '\r'),
+            ('', ''),
+        ):
+            add_candidate(
+                command=fallback_command,
+                line_ending=fallback_line,
+                baudrate=fallback_baud,
+                bytesize=fallback_bytesize,
+                parity=fallback_parity,
+                stopbits=fallback_stopbits,
+            )
+    return candidates
+
+
+def read_scale_once(serial_settings):
+    candidates = build_and_read_candidates(serial_settings)
     errors = []
+
+    def attach_read_meta(reading, config):
+        reading['meta'] = {
+            **(reading.get('meta') if isinstance(reading.get('meta'), dict) else {}),
+            'command_used': config.command,
+            'line_ending_used': config.newline,
+            'baudrate_used': config.baudrate,
+            'bytesize_used': config.bytesize,
+            'parity_used': config.parity,
+            'stopbits_used': config.stopbits,
+        }
+        return reading
+
     for current in candidates:
         config = build_read_config(current)
         port_info = get_port_metadata(config.port)
         request_payload = request_bytes(config)
+        parse_errors = []
         try:
             with PORT_LOCK:
                 with open_port(config) as port:
@@ -986,16 +1114,36 @@ def read_scale_once(serial_settings):
                             text = decode_payload(payload, config.encoding)
                             if not text:
                                 continue
-                            return enrich_reading(parse_weight_line(text, config.data_format), config, port_info)
+                            try:
+                                reading = enrich_reading(parse_weight_line(text, config.data_format), config, port_info)
+                            except Exception as exc:
+                                parse_errors.append(f"{clean_text(str(exc))} [raw={repr(text[:80])}]")
+                                continue
+                            return attach_read_meta(reading, config)
 
                     if pending:
                         text = decode_payload(bytes(pending), config.encoding)
                         if text:
-                            return enrich_reading(parse_weight_line(text, config.data_format), config, port_info)
+                            try:
+                                reading = enrich_reading(parse_weight_line(text, config.data_format), config, port_info)
+                            except Exception as exc:
+                                parse_errors.append(f"{clean_text(str(exc))} [raw={repr(text[:80])}]")
+                            else:
+                                return attach_read_meta(reading, config)
         except Exception as exc:
-            errors.append(str(exc))
+            errors.append(
+                f"{str(exc)} [port={config.port} baud={config.baudrate} cmd={config.command or '<listen>'} newline={config.newline}]"
+            )
             continue
-        errors.append(f"Scale did not return data on {config.port} at {config.baudrate} baud.")
+        if parse_errors:
+            errors.append(
+                f"Could not parse data on {config.port} at {config.baudrate} baud using "
+                f"{config.command or '<listen>'}/{config.newline}/{config.bytesize}{config.parity}{config.stopbits}: {parse_errors[-1]}"
+            )
+            continue
+        errors.append(
+            f"Scale did not return data on {config.port} at {config.baudrate} baud using {config.command or '<listen>'}/{config.newline}."
+        )
 
     if errors:
         raise RuntimeError(errors[-1])
@@ -2362,6 +2510,10 @@ class DeviceAgentService:
         self.serial_ports = list_serial_ports()
         self.desired_scale_settings = {}
         self.desired_sartorius_settings = {}
+        self.live_scale_sent_at = {'and': 0.0, 'sartorius': 0.0}
+        self.live_scale_signature = {'and': '', 'sartorius': ''}
+        self.live_scale_error_text = {'and': '', 'sartorius': ''}
+        self.live_scale_error_log_at = {'and': 0.0, 'sartorius': 0.0}
         self._thread = None
         self._config = load_config()
         self._state = {
@@ -2439,6 +2591,78 @@ class DeviceAgentService:
             self.last_sartorius_reading = item
             self.sartorius_readings.appendleft(item)
 
+    def indicator_label(self, device_kind):
+        return 'Sartorius' if device_kind == 'sartorius' else 'A&D'
+
+    def indicator_device_type(self, device_kind):
+        return 'SARTORIUS' if device_kind == 'sartorius' else 'A&D'
+
+    def scale_reading_signature(self, reading):
+        return '|'.join((
+            clean_text(reading.get('header')),
+            clean_text(reading.get('weight_text')),
+            clean_text(reading.get('unit')),
+            clean_text(reading.get('raw_line')),
+            '1' if bool(reading.get('stable')) else '0',
+        ))
+
+    def remember_live_publish(self, device_kind, reading, published_at=None):
+        key = 'sartorius' if device_kind == 'sartorius' else 'and'
+        self.live_scale_signature[key] = self.scale_reading_signature(reading)
+        self.live_scale_sent_at[key] = time.monotonic() if published_at is None else float(published_at)
+        self.live_scale_error_text[key] = ''
+
+    def should_publish_live_reading(self, device_kind, reading, monotonic_now, channel_config):
+        key = 'sartorius' if device_kind == 'sartorius' else 'and'
+        keepalive_seconds = max(3.0, coerce_float(channel_config.get('realtime_keepalive_seconds'), 10.0))
+        signature = self.scale_reading_signature(reading)
+        if signature != self.live_scale_signature[key]:
+            return True
+        return monotonic_now - self.live_scale_sent_at[key] >= keepalive_seconds
+
+    def log_live_error(self, device_kind, exc):
+        key = 'sartorius' if device_kind == 'sartorius' else 'and'
+        label = self.indicator_label(key)
+        message = str(exc)
+        now = time.monotonic()
+        if key == 'sartorius':
+            self.last_sartorius_error = message
+        else:
+            self.last_scale_error = message
+        if message != self.live_scale_error_text[key] or now - self.live_scale_error_log_at[key] >= 15.0:
+            log(f'{label} realtime read failed: {message}', level='error')
+            self.live_scale_error_text[key] = message
+            self.live_scale_error_log_at[key] = now
+
+    def build_scale_serial_payload(self, serial_settings):
+        return {
+            'baudrate': serial_settings.get('baudrate') if serial_settings else '',
+            'bytesize': serial_settings.get('bytesize') if serial_settings else '',
+            'parity': serial_settings.get('parity') if serial_settings else '',
+            'stopbits': serial_settings.get('stopbits') if serial_settings else '',
+            'timeout_seconds': serial_settings.get('timeout_seconds') if serial_settings else '',
+            'listen_seconds': serial_settings.get('listen_seconds') if serial_settings else '',
+            'encoding': serial_settings.get('encoding') if serial_settings else '',
+            'command': serial_settings.get('command') if serial_settings else '',
+            'line_ending': serial_settings.get('line_ending').encode('unicode_escape').decode('ascii') if serial_settings else '',
+            'data_format': serial_settings.get('data_format') if serial_settings else '',
+        }
+
+    def sync_scale_server_agent(self, agent):
+        if not isinstance(agent, dict):
+            return
+        self.scale_server_agent = agent
+        desired = agent.get('desired_settings')
+        if isinstance(desired, dict):
+            device_kind = normalize_indicator_kind(
+                agent.get('device_type') or desired.get('device_type') or desired.get('indicator_type'),
+                default='and',
+            )
+            if device_kind == 'sartorius':
+                self.desired_sartorius_settings = desired
+            else:
+                self.desired_scale_settings = desired
+
     def append_print_job(self, job_id, status, printer_name, detail):
         item = {
             'id': job_id,
@@ -2510,18 +2734,7 @@ class DeviceAgentService:
             'location': config['location'],
             'machine_name': self._state['machine_name'],
             'serial_port': serial_settings['port'],
-            'serial_settings': {
-                'baudrate': serial_settings['baudrate'],
-                'bytesize': serial_settings['bytesize'],
-                'parity': serial_settings['parity'],
-                'stopbits': serial_settings['stopbits'],
-                'timeout_seconds': serial_settings['timeout_seconds'],
-                'listen_seconds': serial_settings['listen_seconds'],
-                'encoding': serial_settings['encoding'],
-                'command': serial_settings['command'],
-                'line_ending': serial_settings['line_ending'].encode('unicode_escape').decode('ascii'),
-                'data_format': serial_settings['data_format'],
-            },
+            'serial_settings': self.build_scale_serial_payload(serial_settings),
             'last_error': self.last_scale_error,
             'supported_scale_types': ['A&D', 'SARTORIUS'],
             'device_catalog': {
@@ -2553,16 +2766,7 @@ class DeviceAgentService:
         )
         response.raise_for_status()
         data = response.json()
-        agent = data.get('agent') if isinstance(data, dict) else {}
-        if isinstance(agent, dict):
-            self.scale_server_agent = agent
-            desired = agent.get('desired_settings')
-            if isinstance(desired, dict):
-                device_kind = normalize_indicator_kind(agent.get('device_type') or desired.get('device_type') or desired.get('indicator_type'))
-                if device_kind == 'sartorius':
-                    self.desired_sartorius_settings = desired
-                else:
-                    self.desired_scale_settings = desired
+        self.sync_scale_server_agent(data.get('agent') if isinstance(data, dict) else {})
         return data
 
     def poll_scale_command(self):
@@ -2594,19 +2798,10 @@ class DeviceAgentService:
             'status': status,
             'error': error or '',
             'result': {
-                'device_type': 'SARTORIUS' if device_kind == 'sartorius' else 'A&D',
+                'device_type': self.indicator_device_type(device_kind),
                 'serial_settings': {
                     'port': serial_settings.get('port') if serial_settings else '',
-                    'baudrate': serial_settings.get('baudrate') if serial_settings else '',
-                    'bytesize': serial_settings.get('bytesize') if serial_settings else '',
-                    'parity': serial_settings.get('parity') if serial_settings else '',
-                    'stopbits': serial_settings.get('stopbits') if serial_settings else '',
-                    'timeout_seconds': serial_settings.get('timeout_seconds') if serial_settings else '',
-                    'listen_seconds': serial_settings.get('listen_seconds') if serial_settings else '',
-                    'encoding': serial_settings.get('encoding') if serial_settings else '',
-                    'command': serial_settings.get('command') if serial_settings else '',
-                    'line_ending': serial_settings.get('line_ending').encode('unicode_escape').decode('ascii') if serial_settings else '',
-                    'data_format': serial_settings.get('data_format') if serial_settings else '',
+                    **self.build_scale_serial_payload(serial_settings),
                 },
             },
         }
@@ -2619,6 +2814,69 @@ class DeviceAgentService:
         )
         response.raise_for_status()
         return response.json()
+
+    def build_live_scale_payload(self, reading, serial_settings, device_kind='and'):
+        config = self.get_config()
+        reading_payload = copy.deepcopy(reading)
+        reading_payload['captured_at'] = now_str()
+        meta = reading_payload.get('meta') if isinstance(reading_payload.get('meta'), dict) else {}
+        reading_payload['meta'] = {
+            **meta,
+            'source': clean_text(meta.get('source') or 'realtime') or 'realtime',
+            'device_type': clean_text(meta.get('device_type') or self.indicator_device_type(device_kind)) or self.indicator_device_type(device_kind),
+        }
+        return {
+            'agent_key': config['agent_key'],
+            'device_name': config['device_name'] or 'May can hang',
+            'model': 'Unified device agent (A&D + Sartorius + LAN printer)',
+            'location': config['location'],
+            'machine_name': self._state['machine_name'],
+            'serial_port': serial_settings.get('port') if serial_settings else '',
+            'serial_settings': {
+                'port': serial_settings.get('port') if serial_settings else '',
+                **self.build_scale_serial_payload(serial_settings),
+            },
+            'device_type': self.indicator_device_type(device_kind),
+            'last_error': '',
+            'reading': reading_payload,
+        }
+
+    def post_live_scale_reading(self, reading, serial_settings, device_kind='and'):
+        config = self.get_config()
+        response = self.session.post(
+            f"{config['server_url']}/api/scale/agent/live-reading",
+            json=self.build_live_scale_payload(reading, serial_settings, device_kind=device_kind),
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.sync_scale_server_agent(data.get('agent') if isinstance(data, dict) else {})
+        return data
+
+    def poll_live_indicator(self, device_kind='and', monotonic_now=None):
+        key = 'sartorius' if device_kind == 'sartorius' else 'and'
+        config = self.get_config()
+        channel_config = config['sartorius'] if key == 'sartorius' else config['scale']
+        if key == 'sartorius':
+            serial_settings = normalize_sartorius_settings(config['sartorius']['serial'], self.desired_sartorius_settings)
+            reading = read_sartorius_once(serial_settings)
+            self.append_sartorius_reading(reading, source='realtime')
+            self.last_sartorius_error = ''
+        else:
+            serial_settings = normalize_serial_settings(
+                config['scale']['serial'],
+                self.desired_scale_settings,
+                defaults=AND_SERIAL_DEFAULTS,
+            )
+            reading = read_scale_once(serial_settings)
+            self.append_scale_reading(reading, source='realtime')
+            self.last_scale_error = ''
+
+        current_time = time.monotonic() if monotonic_now is None else float(monotonic_now)
+        if self.should_publish_live_reading(key, reading, current_time, channel_config):
+            self.post_live_scale_reading(reading, serial_settings, device_kind=key)
+            self.remember_live_publish(key, reading, current_time)
+        return reading
 
     def process_scale_command(self, command):
         payload = command.get('payload') if isinstance(command.get('payload'), dict) else {}
@@ -2652,6 +2910,7 @@ class DeviceAgentService:
                 serial_settings=serial_settings,
                 device_kind=device_kind,
             )
+            self.remember_live_publish(device_kind, reading)
             log(f"{serial_label} command #{command['id']} completed.")
         except Exception as exc:
             if device_kind == 'sartorius':
@@ -2668,6 +2927,7 @@ class DeviceAgentService:
                 device_kind=device_kind,
             )
             log(f"{serial_label} command #{command['id']} failed: {exc}", level='error')
+        return device_kind
 
     def print_heartbeat_payload(self):
         config = self.get_config()
@@ -2759,6 +3019,8 @@ class DeviceAgentService:
         self.bootstrap()
         last_scale_heartbeat = 0.0
         last_scale_poll = 0.0
+        last_and_live_poll = 0.0
+        last_sartorius_live_poll = 0.0
         last_print_heartbeat = 0.0
         last_print_poll = 0.0
         last_printer_scan = 0.0
@@ -2800,7 +3062,37 @@ class DeviceAgentService:
                     command = self.poll_scale_command()
                     last_scale_poll = now
                     if command:
-                        self.process_scale_command(command)
+                        processed_kind = self.process_scale_command(command)
+                        if processed_kind == 'sartorius':
+                            last_sartorius_live_poll = time.monotonic()
+                        else:
+                            last_and_live_poll = time.monotonic()
+
+                if (
+                    config['scale']['enabled']
+                    and coerce_bool(config['scale'].get('realtime_enabled'), True)
+                    and now - last_and_live_poll >= max(0.5, coerce_float(config['scale'].get('realtime_interval_seconds'), 1.0))
+                ):
+                    try:
+                        self.poll_live_indicator('and', monotonic_now=now)
+                    except requests.RequestException:
+                        raise
+                    except Exception as exc:
+                        self.log_live_error('and', exc)
+                    last_and_live_poll = time.monotonic()
+
+                if (
+                    config['sartorius']['enabled']
+                    and coerce_bool(config['sartorius'].get('realtime_enabled'), True)
+                    and now - last_sartorius_live_poll >= max(0.5, coerce_float(config['sartorius'].get('realtime_interval_seconds'), 1.0))
+                ):
+                    try:
+                        self.poll_live_indicator('sartorius', monotonic_now=now)
+                    except requests.RequestException:
+                        raise
+                    except Exception as exc:
+                        self.log_live_error('sartorius', exc)
+                    last_sartorius_live_poll = time.monotonic()
 
                 if config['printer']['enabled'] and now - last_print_poll >= max(1.0, config['printer']['poll_interval_seconds']):
                     command = self.poll_print_command()
@@ -3669,6 +3961,26 @@ DASHBOARD_HTML = """
       const row = reading || {};
       return row.weight_text ? `${row.weight_text} ${row.unit || ''}`.trim() : '-';
     }
+    function formatReadingCapturedAt(reading) {
+      return escapeHtml((reading || {}).captured_at || '-');
+    }
+    function formatReadingSource(reading) {
+      return escapeHtml((reading || {}).source || '-');
+    }
+    function formatReadingCommand(reading) {
+      const meta = ((reading || {}).meta || {});
+      const command = meta.command_used || ((meta.settings || {}).command) || '';
+      const newline = meta.line_ending_used || ((meta.settings || {}).newline) || '';
+      const baudrate = meta.baudrate_used || ((meta.settings || {}).baudrate) || '';
+      const bytesize = meta.bytesize_used || ((meta.settings || {}).bytesize) || '';
+      const parity = meta.parity_used || ((meta.settings || {}).parity) || '';
+      const stopbits = meta.stopbits_used || ((meta.settings || {}).stopbits) || '';
+      const commandLabel = command ? command : '<listen>';
+      const newlineLabel = newline || '-';
+      const baudLabel = baudrate || '-';
+      const profileLabel = bytesize && parity && stopbits ? `${bytesize}${parity}${stopbits}` : '-';
+      return escapeHtml(`${commandLabel} / ${newlineLabel} / ${baudLabel} / ${profileLabel}`);
+    }
     function localDeviceStatus(enabled, lastReading, lastError) {
       if (!enabled) return 'disabled';
       if (lastError) return 'error';
@@ -4020,12 +4332,12 @@ DASHBOARD_HTML = """
 
       const andConfig = ((config.scale || {}).serial || {});
       const sartoriusConfig = ((config.sartorius || {}).serial || {});
-      const andStatusHtml = `<div>Local status: ${badge(andStatus)}</div><div class="muted" style="margin-top:10px;">Scale command channel: ${badge(scaleAgent.status || 'offline')}</div><div class="muted">Configured COM: ${escapeHtml(andConfig.port || '-')}</div><div class="muted">Last weight: ${escapeHtml(formatWeight(andReading))}</div><div class="muted">Last error: ${escapeHtml(andIndicator.last_error || scaleAgent.last_error || '-')}</div>`;
+      const andStatusHtml = `<div>Local status: ${badge(andStatus)}</div><div class="muted" style="margin-top:10px;">Scale command channel: ${badge(scaleAgent.status || 'offline')}</div><div class="muted">Configured COM: ${escapeHtml(andConfig.port || '-')}</div><div class="muted">Last weight: ${escapeHtml(formatWeight(andReading))}</div><div class="muted">Last command: ${formatReadingCommand(andReading)}</div><div class="muted">Last source: ${formatReadingSource(andReading)}</div><div class="muted">Last update: ${formatReadingCapturedAt(andReading)}</div><div class="muted">Last error: ${escapeHtml(andIndicator.last_error || scaleAgent.last_error || '-')}</div>`;
       document.getElementById('andStatusMeta').innerHTML = andStatusHtml;
       document.getElementById('andStatusDetail').innerHTML = andStatusHtml;
 
       const resolvedSartoriusPort = ((((sartoriusReading.meta || {}).device || {}).device) || sartoriusConfig.port || (sartoriusConfig.auto_detect_port ? 'auto-detect' : '-'));
-      const sartoriusStatusHtml = `<div>Local status: ${badge(sartoriusStatus)}</div><div class="muted" style="margin-top:10px;">Scale command channel: ${badge(scaleAgent.status || 'offline')}</div><div class="muted">Configured COM: ${escapeHtml(sartoriusConfig.port || '-')}</div><div class="muted">Resolved COM: ${escapeHtml(resolvedSartoriusPort)}</div><div class="muted">Auto-detect: ${escapeHtml(String(!!sartoriusConfig.auto_detect_port))}</div><div class="muted">Last weight: ${escapeHtml(formatWeight(sartoriusReading))}</div><div class="muted">Last error: ${escapeHtml(sartorius.last_error || '-')}</div>`;
+      const sartoriusStatusHtml = `<div>Local status: ${badge(sartoriusStatus)}</div><div class="muted" style="margin-top:10px;">Scale command channel: ${badge(scaleAgent.status || 'offline')}</div><div class="muted">Configured COM: ${escapeHtml(sartoriusConfig.port || '-')}</div><div class="muted">Resolved COM: ${escapeHtml(resolvedSartoriusPort)}</div><div class="muted">Auto-detect: ${escapeHtml(String(!!sartoriusConfig.auto_detect_port))}</div><div class="muted">Last weight: ${escapeHtml(formatWeight(sartoriusReading))}</div><div class="muted">Last command: ${formatReadingCommand(sartoriusReading)}</div><div class="muted">Last source: ${formatReadingSource(sartoriusReading)}</div><div class="muted">Last update: ${formatReadingCapturedAt(sartoriusReading)}</div><div class="muted">Last error: ${escapeHtml(sartorius.last_error || '-')}</div>`;
       document.getElementById('sartoriusStatusMeta').innerHTML = sartoriusStatusHtml;
       document.getElementById('sartoriusStatusDetail').innerHTML = sartoriusStatusHtml;
 
@@ -4105,7 +4417,7 @@ DASHBOARD_HTML = """
     navItems.forEach((button) => button.addEventListener('click', () => activateView(button.dataset.view)));
     activateView('overview');
     refreshState().catch(console.error);
-    window.setInterval(() => refreshState().catch(console.error), 5000);
+    window.setInterval(() => refreshState().catch(console.error), 1000);
   </script>
 </body>
 </html>

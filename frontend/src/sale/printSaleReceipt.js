@@ -5,10 +5,12 @@ import {
     getLineSellAddedGoldWeight,
     getLineSellCutGoldWeight,
     getLineSellLaborAmount,
+    getTradeBaseAmount,
     getTradeCompensationAmount,
     getTradeCompensationQuantity,
     getTradeCompensationUnitAmount,
     getTradeOldGoldQuantity,
+    getTradeQuantityDirection,
     INVENTORY_TXS,
     normalizeTradeRate,
     parseFmt,
@@ -17,6 +19,7 @@ import {
 
 const RECEIPT_WIDTH = 620;
 const RECEIPT_PADDING = 28;
+const RECEIPT_RIGHT_SAFE_INSET = 10;
 const RECEIPT_MEASURE_SCALE = 1;
 const RECEIPT_OUTPUT_SCALE = 4;
 const RECEIPT_LAYOUT_SCALE = 1;
@@ -115,6 +118,11 @@ const resolveTxDisplay = (txSet) => {
     if (labels.includes('Mua - Bán')) return 'Mua - Bán';
     if (labels.includes('Mua') && labels.includes('Bán')) return 'Mua - Bán';
     return labels.join(' - ');
+};
+
+const resolveReceiptTxDisplay = ({ txSet, hasOldSection = false, hasNewSection = false }) => {
+    if (hasOldSection && hasNewSection) return 'Đổi';
+    return resolveTxDisplay(txSet);
 };
 
 const ellipsisText = (ctx, text, maxWidth) => {
@@ -601,7 +609,11 @@ const buildReceiptRows = (lines, rates) => {
             { key: 'new', title: 'Vàng mới', rows: newRows },
         ].filter((section) => section.rows.length > 0),
         summary,
-        txDisplay: resolveTxDisplay(txSet),
+        txDisplay: resolveReceiptTxDisplay({
+            txSet,
+            hasOldSection: oldRows.length > 0,
+            hasNewSection: newRows.length > 0,
+        }),
         hasTrade,
     };
 };
@@ -634,6 +646,131 @@ const buildDetailedReceiptFormulaLines = (formulaText = '') => (
         .map(line => String(line || '').trim())
         .filter(line => line && !/^TOTAL\s*:/i.test(line))
 );
+
+const formatSummaryAmountText = (amount, { signed = false } = {}) => {
+    const normalizedAmount = Math.round(Number(amount || 0));
+    if (!normalizedAmount) return '';
+    if (signed) {
+        return `${normalizedAmount < 0 ? '-' : ''}${moneyText(normalizedAmount)}`;
+    }
+    return moneyText(normalizedAmount);
+};
+
+const buildPosSummaryTable = (totals, total) => {
+    const items = [];
+    const pushSummaryItem = ({ label, qty = '', rate = '', displayAmount = 0, formulaAmount = 0, mergeToAmount = false, labelFitMinScale = null }) => {
+        const normalizedFormulaAmount = Math.round(Number(formulaAmount || 0));
+        const normalizedDisplayAmount = Math.round(Number(displayAmount || 0));
+        const hasQty = String(qty || '').trim() !== '';
+        const hasRate = String(rate || '').trim() !== '';
+        if (!normalizedFormulaAmount && !normalizedDisplayAmount && !hasQty && !hasRate) return;
+        items.push({
+            baseLabel: label,
+            qty,
+            rate,
+            displayAmount: normalizedDisplayAmount,
+            formulaAmount: normalizedFormulaAmount,
+            mergeToAmount,
+            labelFitMinScale,
+        });
+    };
+
+    pushSummaryItem({
+        label: 'T.Vàng:',
+        qty: totals.baseGoldWeight > 0 ? fixedWeightText(totals.baseGoldWeight, 3, '') : '',
+        rate: weightedTicketRateText(totals.baseGoldAmount, totals.baseGoldWeight),
+        displayAmount: totals.baseGoldAmount,
+        formulaAmount: totals.baseGoldAmount,
+        labelFitMinScale: 0.6,
+    });
+    pushSummaryItem({
+        label: 'Công:',
+        displayAmount: totals.laborAmount,
+        formulaAmount: totals.laborAmount,
+        mergeToAmount: true,
+    });
+    pushSummaryItem({
+        label: 'Tiền bù:',
+        displayAmount: totals.compensationAmount,
+        formulaAmount: totals.compensationAmount,
+        mergeToAmount: true,
+    });
+    pushSummaryItem({
+        label: 'Tiền vàng thêm:',
+        qty: totals.addedGoldWeight > 0 ? fixedWeightText(totals.addedGoldWeight, 3, '') : '',
+        rate: weightedRateText(totals.addedGoldAmount, totals.addedGoldWeight),
+        displayAmount: totals.addedGoldAmount,
+        formulaAmount: totals.addedGoldAmount,
+        mergeToAmount: true,
+    });
+    pushSummaryItem({
+        label: 'Tiền bớt:',
+        qty: totals.deductionWeight > 0 ? fixedWeightText(totals.deductionWeight, 3, '') : '',
+        rate: weightedRateText(totals.deductionAmount, totals.deductionWeight),
+        displayAmount: totals.deductionAmount,
+        formulaAmount: -totals.deductionAmount,
+        mergeToAmount: true,
+    });
+
+    const rows = items.map((item, index) => ({
+        label: `${item.baseLabel} (${index + 1})`,
+        qty: item.qty,
+        rate: item.rate,
+        amount: formatSummaryAmountText(item.displayAmount, {
+            signed: item.baseLabel === 'Tiền bù:',
+        }),
+        mergeToAmount: item.mergeToAmount,
+        labelFitMinScale: item.labelFitMinScale ?? undefined,
+        formulaAmount: item.formulaAmount,
+        marker: index + 1,
+    }));
+
+    const buildPositiveExpression = () => {
+        const parts = [];
+        rows.forEach((row) => {
+            if (!row.formulaAmount) return;
+            const sign = row.formulaAmount < 0 ? '-' : '+';
+            const token = String(row.marker);
+            if (!parts.length) {
+                parts.push(sign === '-' ? `-${token}` : token);
+                return;
+            }
+            parts.push(sign, token);
+        });
+        return parts.join('');
+    };
+
+    const buildNegativeExpression = () => {
+        const negativeRows = rows.filter(row => row.formulaAmount < 0);
+        const positiveRows = rows.filter(row => row.formulaAmount > 0);
+        const parts = [];
+        negativeRows.forEach((row) => {
+            if (!parts.length) parts.push(String(row.marker));
+            else parts.push('+', String(row.marker));
+        });
+        positiveRows.forEach((row) => {
+            if (!parts.length) parts.push(`-${row.marker}`);
+            else parts.push('-', String(row.marker));
+        });
+        return parts.join('');
+    };
+
+    const isNegativeTotal = Number(total || 0) < 0;
+    const expression = isNegativeTotal ? buildNegativeExpression() : buildPositiveExpression();
+
+    return {
+        headers: ['Vàng Thêm / Dư', 'Giá', 'Thành Tiền'],
+        rows: rows.map((row) => ({
+            label: row.label,
+            qty: row.qty,
+            rate: row.rate,
+            amount: row.amount,
+            mergeToAmount: row.mergeToAmount,
+            labelFitMinScale: row.labelFitMinScale,
+        })),
+        totalLabel: `${isNegativeTotal ? 'Chi trả' : 'Thanh toán'}: (${expression || '0'})`,
+    };
+};
 
 const resolvePosOldGoldLabel = (value) => {
     const text = safeText(value, '');
@@ -674,6 +811,10 @@ const getPosLineMetrics = (line, rates) => {
     const cutGoldAmount = Math.round(sellCutGold * Math.max(0, goldRate));
     const buyAmount = Math.round(baseQty * Math.max(0, buyRate));
     const tradeCustomerAmount = Math.round(customerQty * Math.max(0, customerRate));
+    const tradeDirection = line?.tx === 'trade' ? getTradeQuantityDirection(line) : 'equal';
+    const tradeBaseWeight = line?.tx === 'trade' ? Math.max(0, Math.abs(effectiveGoldQty - customerQty)) : 0;
+    const tradeBaseRate = tradeDirection === 'old' ? customerRate : tradeRate;
+    const tradeBaseAmount = getTradeBaseAmount(line, tradeRate, customerRate);
     const compensationQty = getTradeCompensationQuantity(line);
     const compensationAmount = getTradeCompensationAmount(line);
 
@@ -695,6 +836,10 @@ const getPosLineMetrics = (line, rates) => {
         cutGoldAmount,
         buyAmount,
         tradeCustomerAmount,
+        tradeDirection,
+        tradeBaseWeight,
+        tradeBaseRate,
+        tradeBaseAmount,
         compensationQty,
         compensationAmount,
     };
@@ -737,13 +882,23 @@ const buildPosReceiptRows = (lines, rates) => {
             totals.soldGoldWeight += metrics.effectiveGoldQty;
             totals.soldStoneWeight += metrics.stoneWeight;
             totals.soldLabor += metrics.sellLabor;
-            totals.baseGoldWeight += metrics.baseGoldWeight;
-            totals.baseGoldAmount += metrics.baseGoldAmount;
             totals.laborAmount += metrics.sellLabor;
-            totals.addedGoldWeight += metrics.sellAddedGold;
-            totals.addedGoldAmount += metrics.addGoldAmount;
-            totals.deductionWeight += metrics.sellCutGold;
-            totals.deductionAmount += metrics.cutGoldAmount;
+            if (line.tx === 'sell') {
+                totals.baseGoldWeight += metrics.baseGoldWeight;
+                totals.baseGoldAmount += metrics.baseGoldAmount;
+                totals.addedGoldWeight += metrics.sellAddedGold;
+                totals.addedGoldAmount += metrics.addGoldAmount;
+                totals.deductionWeight += metrics.sellCutGold;
+                totals.deductionAmount += metrics.cutGoldAmount;
+            } else if (line.tx === 'trade') {
+                if (metrics.tradeBaseAmount > 0) {
+                    totals.baseGoldWeight += metrics.tradeBaseWeight;
+                    totals.baseGoldAmount += metrics.tradeBaseAmount;
+                } else if (metrics.tradeBaseAmount < 0) {
+                    totals.deductionWeight += metrics.tradeBaseWeight;
+                    totals.deductionAmount += Math.abs(metrics.tradeBaseAmount);
+                }
+            }
         }
 
         if (line.tx === 'buy' && metrics.buyAmount > 0) {
@@ -772,11 +927,9 @@ const buildPosReceiptRows = (lines, rates) => {
             });
             totals.oldGrossWeight += metrics.customerQty;
             totals.oldGoldWeight += metrics.customerQty;
-            totals.deductionWeight += metrics.customerQty;
-            totals.deductionAmount += metrics.tradeCustomerAmount;
         }
 
-        if (metrics.compensationAmount > 0) {
+        if (metrics.compensationAmount !== 0) {
             totals.compensationAmount += metrics.compensationAmount;
         }
     });
@@ -787,7 +940,7 @@ const buildPosReceiptRows = (lines, rates) => {
 const buildPosReceiptModel = ({ orderId, customerInfo, lines, rates, total, formula = '', printSourceLabel = '' }) => {
     const { soldRows, oldRows, totals } = buildPosReceiptRows(lines, rates);
     if (!soldRows.length && !oldRows.length) {
-        throw new Error('Ch\u01b0a c\u00f3 n\u1ed9i dung giao d\u1ecbch \u0111\u1ec3 in.');
+        throw new Error('Chưa có nội dung giao dịch để in.');
     }
 
     const paymentAmount = Math.abs(Math.round(Number(total || 0)));
@@ -798,16 +951,17 @@ const buildPosReceiptModel = ({ orderId, customerInfo, lines, rates, total, form
             || resolveHostName(),
         DEFAULT_MACHINE_NAME
     );
+    const summaryTable = buildPosSummaryTable(totals, total);
     void formula;
 
     return {
         orderId: safeText(orderId, 'POS-SALE'),
         headerLines: [
-            'Nh\u00e2n vi\u00ean: ---',
-            `Giao d\u1ecbch: ${resolveTxDisplay(txSet)}`,
+            'Nhân viên: ---',
+            `Giao dịch: ${resolveReceiptTxDisplay({ txSet, hasOldSection: oldRows.length > 0, hasNewSection: soldRows.length > 0 })}`,
         ],
         soldTable: {
-            headers: ['M\u00e3 s\u1ed1', 'TL V\u00e0ng', 'TL H\u1ed9t', 'TC'],
+            headers: ['Mã số', 'TL Vàng', 'TL Hột', 'TC'],
             rows: soldRows.length ? soldRows : [{
                 key: 'sold-empty',
                 code: '',
@@ -816,82 +970,36 @@ const buildPosReceiptModel = ({ orderId, customerInfo, lines, rates, total, form
                 labor: '',
             }],
             total: {
-                label: `S\u1ed1 m\u00f3n: ${soldRows.length}`,
+                label: `Số món: ${soldRows.length}`,
                 goldWeight: soldRows.length ? fixedWeightText(totals.soldGoldWeight, 4, '0.0000') : '0.0000',
                 stoneWeight: soldRows.length ? fixedWeightText(totals.soldStoneWeight, 3, '0.000') : '0.000',
                 labor: soldRows.length ? ticketMoneyText(totals.soldLabor) : '0',
             },
         },
         oldTable: oldRows.length ? {
-            headers: ['Lo\u1ea1i D\u1ebb', 'TL V+H', 'TL H\u1ed9t', 'TL V\u00e0ng', 'Gi\u00e1 B\u00f9'],
+            headers: ['Loại Dẻ', 'TL V+H', 'TL Hột', 'TL Vàng', 'Giá Bù'],
             rows: oldRows,
         } : null,
         summaryTable: {
-            headers: ['V\u00e0ng Th\u00eam / D\u01b0', 'Gi\u00e1', 'Th\u00e0nh Ti\u1ec1n'],
-            rows: [
-                {
-                    label: 'T.V\u00e0ng(1)',
-                    qty: totals.baseGoldWeight > 0 ? fixedWeightText(totals.baseGoldWeight, 3, '') : '',
-                    rate: weightedTicketRateText(totals.baseGoldAmount, totals.baseGoldWeight),
-                    amount: totals.baseGoldAmount > 0 ? moneyText(totals.baseGoldAmount) : '',
-                    labelFitMinScale: 0.6,
-                },
-                {
-                    label: 'C\u00f4ng (2)',
-                    qty: '',
-                    rate: '',
-                    amount: totals.laborAmount > 0 ? moneyText(totals.laborAmount) : '',
-                    mergeToAmount: true,
-                },
-                {
-                    label: 'Ti\u1ec1n b\u00f9: (3)',
-                    qty: '',
-                    rate: '',
-                    amount: totals.compensationAmount > 0 ? moneyText(totals.compensationAmount) : '',
-                    mergeToAmount: true,
-                },
-                {
-                    label: 'Ti\u1ec1n v\u00e0ng th\u00eam: (4)',
-                    qty: totals.addedGoldWeight > 0 ? fixedWeightText(totals.addedGoldWeight, 3, '') : '',
-                    rate: weightedRateText(totals.addedGoldAmount, totals.addedGoldWeight),
-                    amount: totals.addedGoldAmount > 0 ? moneyText(totals.addedGoldAmount) : '',
-                    mergeToAmount: true,
-                },
-                {
-                    label: 'MS4: (5)',
-                    qty: '',
-                    rate: '',
-                    amount: '',
-                    mergeToAmount: true,
-                },
-                {
-                    label: 'Ti\u1ec1n b\u1edbt: (6)',
-                    qty: totals.deductionWeight > 0 ? fixedWeightText(totals.deductionWeight, 3, '') : '0',
-                    rate: weightedRateText(totals.deductionAmount, totals.deductionWeight),
-                    amount: totals.deductionAmount > 0 ? moneyText(totals.deductionAmount) : '0',
-                    mergeToAmount: true,
-                },
-            ],
-            totalLabel: Number(total || 0) < 0
-                ? 'Chi tr\u1ea3: (6-1-2-3-4-5)'
-                : 'Thanh to\u00e1n: (1+2+3+4+5-6)',
+            ...summaryTable,
             totalAmount: moneyText(paymentAmount),
         },
         footerBlocks: [
             [
-                'Bi\u00ean nh\u1eadn c\u00f3 gi\u00e1 tr\u1ecb l\u01b0u h\u00e0nh n\u1ed9i b\u1ed9.',
-                '\u0110\u1ec1 ngh\u1ecb qu\u00fd kh\u00e1ch l\u1ea5y h\u00f3a \u0111\u01a1n t\u00e0i ch\u00ednh trong ng\u00e0y.',
+                'Biên nhận có giá trị lưu hành nội bộ.',
+                'Đề nghị quý khách cung cấp thông tin liên hệ để nhận HĐTC.',
             ],
             [
-                'Xin qu\u00fd kh\u00e1ch ki\u1ec3m ti\u1ec1n v\u00e0 h\u00e0ng',
-                'tr\u01b0\u1edbc khi r\u1eddi kh\u1ecfi qu\u1ea7y. C\u1ea3m \u01a1n v\u00e0 H\u1eb9n g\u1eb7p l\u1ea1i.',
+                'Xin quý khách kiểm tiền và hàng',
+                'trước khi rời khỏi quầy. Cảm ơn và Hẹn gặp lại.',
             ],
         ],
-        sourceLine: safeText(printSourceLabel, '') || `In t\u1eeb m\u00e1y t\u00ednh: ${machineName}`,
+        sourceLine: safeText(printSourceLabel, '') || `In từ máy tính: ${machineName}`,
     };
 };
 
 const sumWidths = (widths) => widths.reduce((sum, value) => sum + value, 0);
+const getReceiptRightPadding = () => RECEIPT_PADDING + RECEIPT_RIGHT_SAFE_INSET;
 
 const drawTableRow = (ctx, { x, y, widths, height, cells, fill = '', defaultFont = `400 ${px(25)}px ${RECEIPT_FONT}` }) => {
     const totalWidth = sumWidths(widths);
@@ -968,7 +1076,9 @@ const drawPosReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) 
     const width = ctx.canvas.width / renderScale;
     const height = ctx.canvas.height / renderScale;
     const left = RECEIPT_PADDING;
-    const tableWidth = width - RECEIPT_PADDING * 2;
+    const rightPadding = getReceiptRightPadding();
+    const tableWidth = width - left - rightPadding;
+    const contentCenterX = left + (tableWidth / 2);
     const soldWidths = [
         Math.round(tableWidth * 0.34),
         Math.round(tableWidth * 0.22),
@@ -1014,7 +1124,7 @@ const drawPosReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) 
     drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
 
     const headerX = qrX + qrSize + px(18);
-    const headerWidth = width - headerX - RECEIPT_PADDING;
+    const headerWidth = width - headerX - rightPadding;
     const receiptHeaderFontSize = px(30);
     const receiptHeaderLineGap = px(38);
     const headerBlockHeight = Math.max(0, (model.headerLines.length - 1) * receiptHeaderLineGap);
@@ -1175,14 +1285,14 @@ const drawPosReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) 
     ctx.font = `italic 400 ${px(20)}px ${RECEIPT_FONT}`;
     model.footerBlocks.forEach((block, blockIndex) => {
         block.forEach((line, lineIndex) => {
-            ctx.fillText(line, width / 2, y + lineIndex * px(28));
+            ctx.fillText(line, contentCenterX, y + lineIndex * px(28));
         });
         y += block.length * px(28);
         if (blockIndex === 0) {
             y += px(10);
             ctx.beginPath();
             ctx.moveTo(left, y);
-            ctx.lineTo(width - RECEIPT_PADDING, y);
+            ctx.lineTo(width - rightPadding, y);
             ctx.stroke();
             y += px(30);
         }
@@ -1191,7 +1301,7 @@ const drawPosReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) 
     if (model.sourceLine) {
         y += px(12);
         ctx.font = `italic 400 ${px(15)}px ${RECEIPT_FONT}`;
-        ctx.fillText(model.sourceLine, width / 2, y);
+        ctx.fillText(model.sourceLine, contentCenterX, y);
     }
 
     ctx.restore();
@@ -1320,7 +1430,9 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     const width = ctx.canvas.width / renderScale;
     const height = ctx.canvas.height / renderScale;
     const tableLeft = RECEIPT_PADDING;
-    const tableWidth = width - RECEIPT_PADDING * 2;
+    const rightPadding = getReceiptRightPadding();
+    const tableWidth = width - tableLeft - rightPadding;
+    const contentCenterX = tableLeft + (tableWidth / 2);
     const colWidths = [
         Math.round(tableWidth * 0.22),
         Math.round(tableWidth * 0.17),
@@ -1352,7 +1464,7 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     drawQrCode(ctx, model.orderId, qrX, qrY, qrSize);
 
     const headerX = qrX + qrSize + px(18);
-    const headerWidth = width - headerX - RECEIPT_PADDING;
+    const headerWidth = width - headerX - rightPadding;
     const receiptHeaderFontSize = px(30);
     const receiptHeaderLineGap = px(38);
     const headerBlockHeight = Math.max(0, (model.headerLines.length - 1) * receiptHeaderLineGap);
@@ -1456,7 +1568,7 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
 
     ctx.beginPath();
     ctx.moveTo(tableLeft, y);
-    ctx.lineTo(width - RECEIPT_PADDING, y);
+    ctx.lineTo(width - rightPadding, y);
     ctx.strokeStyle = RECEIPT_BORDER_COLOR;
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -1468,20 +1580,20 @@ const drawReceiptToCanvas = (ctx, model, renderScale = RECEIPT_OUTPUT_SCALE) => 
     ctx.textBaseline = 'middle';
     ctx.font = `italic 400 ${px(26)}px ${RECEIPT_FONT}`;
     model.footerLines.forEach((line, index) => {
-        ctx.fillText(line, width / 2, y + index * px(30));
+        ctx.fillText(line, contentCenterX, y + index * px(30));
     });
     y += model.footerLines.length * px(30) + px(52);
     ctx.font = `600 ${px(23)}px ${RECEIPT_FONT}`;
     const formulaLines = (Array.isArray(model.formulaLines) ? model.formulaLines : [])
-        .flatMap(line => wrapText(ctx, line, width - RECEIPT_PADDING * 2, 4))
+        .flatMap(line => wrapText(ctx, line, tableWidth, 4))
         .filter(Boolean)
         .slice(0, 10);
     formulaLines.forEach((line, index) => {
-        ctx.fillText(line, width / 2, y + index * px(28));
+        ctx.fillText(line, contentCenterX, y + index * px(28));
     });
     y += formulaLines.length ? (formulaLines.length * px(28) + px(24)) : px(12);
     ctx.font = `italic 400 ${px(28)}px ${RECEIPT_FONT}`;
-    ctx.fillText(model.machineLine, width / 2, y);
+    ctx.fillText(model.machineLine, contentCenterX, y);
     ctx.restore();
 
     return y + px(58);
@@ -1658,4 +1770,5 @@ export {
     printSaleReceiptImage,
     downloadSaleReceiptImage,
     copySaleReceiptImageToClipboard,
+    drawQrCode,
 };

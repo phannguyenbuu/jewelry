@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IoAddOutline, IoCameraOutline, IoChevronDownOutline, IoChevronForward, IoHeart, IoHeartOutline, IoPrintOutline, IoRefreshOutline, IoSaveOutline, IoInformationCircleOutline, IoCloseOutline } from 'react-icons/io5';
 import TxLine from './TxLine';
 import { ConfirmDialog, ImageViewerModal } from './Dialogs';
 import CustomerCaptureModal from './CustomerCaptureModal';
 import SaleReceiptPreviewModal from './SaleReceiptPreviewModal';
 import { copySaleReceiptImageToClipboard, createSaleReceiptPreview, downloadSaleReceiptImage, printSaleReceiptImage } from './printSaleReceipt';
-import { API, S, createDefaultLine, createEmptyCustomerInfo, extractCustomerInfoFromOcrText, extractCustomerInfoFromQrPayload, fmtCalc, getDayGreeting, getTxTheme, parseFmt, readImageAsBase64, readAndCropImageAsBase64, scanCodeFromFile, today } from './shared';
+import { API, S, createDefaultLine, createEmptyCustomerInfo, extractCustomerInfoFromOcrText, extractCustomerInfoFromQrPayload, fmtCalc, getDayGreeting, getGoldLineEffectiveQuantity, getTradeOldGoldQuantity, getTxTheme, parseFmt, readImageAsBase64, readAndCropImageAsBase64, scanCodeFromFile, today } from './shared';
 
 function dispatchNotif(title, body) {
     window.dispatchEvent(new CustomEvent('jewelry-notification', { detail: { title, body, date: new Date().toISOString() } }));
@@ -233,9 +233,30 @@ export default function OrderScreen({
     const [backTextModalOpen, setBackTextModalOpen] = useState(false);
     const [imagePreview, setImagePreview] = useState(null);
     const [receiptActionError, setReceiptActionError] = useState(false);
+    const [printingReceiptPosNos, setPrintingReceiptPosNos] = useState([]);
+    const printingReceiptPosRef = useRef(new Set());
     const [photoDeleteConfirm, setPhotoDeleteConfirm] = useState(null); // { label, onConfirm }
     const askDeletePhoto = (label, onConfirm) => setPhotoDeleteConfirm({ label, onConfirm });
-    const hideBottomBar = lines.length === 1 && parseFmt(lines[0]?.qty || 0) === 0;
+    const setReceiptPosPrinting = (posNo, isPrinting) => {
+        const normalizedPosNo = Number(posNo || 0);
+        if (!normalizedPosNo) return false;
+        if (isPrinting) {
+            if (printingReceiptPosRef.current.has(normalizedPosNo)) return false;
+            printingReceiptPosRef.current.add(normalizedPosNo);
+            setPrintingReceiptPosNos((prev) => (prev.includes(normalizedPosNo) ? prev : [...prev, normalizedPosNo]));
+            return true;
+        }
+        printingReceiptPosRef.current.delete(normalizedPosNo);
+        setPrintingReceiptPosNos((prev) => prev.filter((value) => value !== normalizedPosNo));
+        return true;
+    };
+    const hasBottomBarLineData = (lines || []).some((line) => {
+        if (!line) return false;
+        const newGoldQty = getGoldLineEffectiveQuantity(line);
+        const oldGoldQty = getTradeOldGoldQuantity(line);
+        return newGoldQty > 0 || oldGoldQty > 0;
+    });
+    const hideBottomBar = !hasBottomBarLineData;
     const addLine = () => {
         setLines(ls => [...ls, createDefaultLine(rates)]);
     };
@@ -955,6 +976,7 @@ export default function OrderScreen({
     };
     const handlePosReceiptPrintSafe = async (posNo) => {
         const currentPosNo = Number(posNo || 1);
+        if (!setReceiptPosPrinting(currentPosNo, true)) return;
         const target = RECEIPT_PRINT_TARGETS[currentPosNo];
         const printOptions = {
             paper_width_mm: 76,
@@ -962,31 +984,25 @@ export default function OrderScreen({
             fit_width: true,
             print_strategy: 'gdi_image',
         };
-        let imageUrl = '';
-        if (!(await ensureOrderSaved())) {
-            return;
-        }
         try {
+            let imageUrl = '';
+            if (!(await ensureOrderSaved())) {
+                return;
+            }
             imageUrl = await renderReceiptPreviewImage(currentPosNo);
-        } catch (error) {
-            setReceiptActionMessage(error.message || `Khong tao duoc PNG cho may in ${currentPosNo}.`);
-            setReceiptActionError(true);
-            return;
-        }
-        if (!target) {
-            await handlePrintReceipt(currentPosNo, imageUrl);
-            return;
-        }
-        const imageData = parseImageDataUrl(imageUrl);
-        if (!imageData?.imageBase64) {
-            setReceiptActionMessage('Khong doc duoc PNG de gui may in.');
-            setReceiptActionError(true);
-            return;
-        }
-        const safeOrderId = String(orderId || 'phieu-giao-dich-pos').trim().replace(/[^a-zA-Z0-9_-]+/g, '-') || 'phieu-giao-dich-pos';
-        setReceiptActionMessage(`Dang gui PNG toi ${target.machineName}...`);
-        setReceiptActionError(false);
-        try {
+            if (!target) {
+                await handlePrintReceipt(currentPosNo, imageUrl);
+                return;
+            }
+            const imageData = parseImageDataUrl(imageUrl);
+            if (!imageData?.imageBase64) {
+                setReceiptActionMessage('Khong doc duoc PNG de gui may in.');
+                setReceiptActionError(true);
+                return;
+            }
+            const safeOrderId = String(orderId || 'phieu-giao-dich-pos').trim().replace(/[^a-zA-Z0-9_-]+/g, '-') || 'phieu-giao-dich-pos';
+            setReceiptActionMessage(`Dang gui PNG toi ${target.machineName}...`);
+            setReceiptActionError(false);
             const response = await fetch(`${API}/api/print/dispatch-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1011,8 +1027,11 @@ export default function OrderScreen({
             setReceiptActionMessage(printerName ? `Da gui PNG toi ${agentName} / ${printerName}.` : `Da gui PNG toi ${agentName}.`);
             setReceiptActionError(false);
         } catch (error) {
-            setReceiptActionMessage(error.message || `Khong gui duoc PNG toi ${target.machineName}.`);
+            const fallbackTargetName = target?.machineName || `POS ${currentPosNo}`;
+            setReceiptActionMessage(error.message || `Khong gui duoc PNG toi ${fallbackTargetName}.`);
             setReceiptActionError(true);
+        } finally {
+            setReceiptPosPrinting(currentPosNo, false);
         }
     };
     const handleDownloadReceipt = () => {
@@ -1052,6 +1071,7 @@ export default function OrderScreen({
                 onDownload={handleDownloadReceipt}
                 actionMessage={receiptActionMessage}
                 actionError={receiptActionError}
+                printingPosNos={printingReceiptPosNos}
             />
             <ImageViewerModal
                 open={Boolean(imagePreview?.url)}

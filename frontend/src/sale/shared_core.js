@@ -117,6 +117,11 @@ const sanitizeLineInventoryState = (line) => {
 
 const isStandardGoldAgeProduct = (product) => /^\d{3}$/.test(String(product || '').trim());
 const getGoldAgeProductValues = (rates) => Object.keys(rates?.gold || {}).filter(isStandardGoldAgeProduct);
+const getPreferredGoldAgeProduct = (rates, preferred = '999') => {
+    const goldAgeProducts = getGoldAgeProductValues(rates);
+    if (goldAgeProducts.includes(preferred)) return preferred;
+    return goldAgeProducts[0] || '';
+};
 const getDefaultProductForCategory = (rates, category) => (
     category === 'gold'
         ? (getGoldAgeProductValues(rates)[0] || '')
@@ -125,7 +130,10 @@ const getDefaultProductForCategory = (rates, category) => (
 
 const createDefaultLine = (rates, overrides = {}) => {
     const firstCat = Object.keys(rates)[0] || 'gold';
-    const firstProd = getDefaultProductForCategory(rates, firstCat);
+    const defaultTradeGoldProduct = getPreferredGoldAgeProduct(rates);
+    const firstProd = firstCat === 'gold'
+        ? (defaultTradeGoldProduct || getDefaultProductForCategory(rates, firstCat))
+        : getDefaultProductForCategory(rates, firstCat);
     return sanitizeLineInventoryState({
         id: Date.now(),
         cat: firstCat,
@@ -134,7 +142,7 @@ const createDefaultLine = (rates, overrides = {}) => {
         qty: '0',
         value: 0,
         customerQty: '',
-        customerProduct: '',
+        customerProduct: defaultTradeGoldProduct,
         customerCustomBuy: '',
         sellLabor: '',
         sellAddedGold: '',
@@ -567,6 +575,7 @@ export {
   sanitizeLineInventoryState,
   isStandardGoldAgeProduct,
   getGoldAgeProductValues,
+  getPreferredGoldAgeProduct,
   createDefaultLine,
   createRepairLine,
   readSavedSales,

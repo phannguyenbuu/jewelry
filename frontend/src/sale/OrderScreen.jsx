@@ -448,10 +448,14 @@ export default function OrderScreen({
         }));
         return nextCustomerInfo;
     };
-    const buildCustomerSavePayload = (sourceCustomerInfo = customerInfo) => {
-        const resolvedName = trimCustomerText(sourceCustomerInfo?.name) || DEFAULT_RED_INVOICE_CUSTOMER_NAME;
+    const buildCustomerSavePayload = (sourceCustomerInfo = customerInfo, options = {}) => {
+        const {
+            useDefaultName = true,
+            includeMedia = true,
+        } = options;
+        const resolvedName = trimCustomerText(sourceCustomerInfo?.name) || (useDefaultName ? DEFAULT_RED_INVOICE_CUSTOMER_NAME : '');
         const resolvedAddress = trimCustomerText(sourceCustomerInfo?.address) || trimCustomerText(sourceCustomerInfo?.residence);
-        return {
+        const payload = {
             id: sourceCustomerInfo?.id || '',
             ten: resolvedName,
             cccd: sourceCustomerInfo?.cccd || '',
@@ -467,14 +471,17 @@ export default function OrderScreen({
             yeu_thich: Boolean(sourceCustomerInfo?.favorite),
             favorite: Boolean(sourceCustomerInfo?.favorite),
             ocr_mat_sau: sourceCustomerInfo?.backText || '',
-            anh_mat_truoc: resolveApiAssetUrl(sourceCustomerInfo?.frontImage || ''),
-            anh_mat_sau: resolveApiAssetUrl(sourceCustomerInfo?.backImage || ''),
-            anh_bo_suu_tap: buildCustomerPhotoGallery(sourceCustomerInfo),
-            photo_gallery: buildCustomerPhotoGallery(sourceCustomerInfo),
-            photoGallery: buildCustomerPhotoGallery(sourceCustomerInfo),
             nguoi_tao: 'POS Mobile',
             ghi_chu: sourceCustomerInfo?.note || sourceCustomerInfo?.ghi_chu || '',
         };
+        if (includeMedia) {
+            payload.anh_mat_truoc = resolveApiAssetUrl(sourceCustomerInfo?.frontImage || '');
+            payload.anh_mat_sau = resolveApiAssetUrl(sourceCustomerInfo?.backImage || '');
+            payload.anh_bo_suu_tap = buildCustomerPhotoGallery(sourceCustomerInfo);
+            payload.photo_gallery = buildCustomerPhotoGallery(sourceCustomerInfo);
+            payload.photoGallery = buildCustomerPhotoGallery(sourceCustomerInfo);
+        }
+        return payload;
     };
     const describeDuplicateCustomer = (result = {}) => {
         const primaryDuplicate = result?.primary_duplicate || result?.duplicates?.[0] || null;
@@ -500,7 +507,12 @@ export default function OrderScreen({
         const result = await response.json().catch(() => ({}));
         return { response, result };
     };
-    const handleCustomerSaveSuccess = (result, payload) => {
+    const handleCustomerSaveSuccess = (result, payload, options = {}) => {
+        const {
+            successMessage = '',
+            notifyTitle = '',
+            silentNotify = false,
+        } = options;
         const savedRecord = result?.record || {};
         if (savedRecord?.id) {
             const resolvedAddress = savedRecord.dia_chi || savedRecord.noi_thuong_tru || '';
@@ -555,9 +567,11 @@ export default function OrderScreen({
         }
         const actionLabel = result.msg === 'Updated' ? 'cập nhật' : 'lưu mới';
         const customerLabel = trimCustomerText(payload?.ten) || trimCustomerText(payload?.so_dien_thoai) || trimCustomerText(payload?.cccd) || 'khách hàng';
-        const successMessage = `Đã ${actionLabel} khách hàng thành công: ${customerLabel}.`;
-        setCccdOcrMessage(successMessage);
-        dispatchNotif('Lưu khách hàng thành công', successMessage);
+        const resolvedSuccessMessage = successMessage || `Đã ${actionLabel} khách hàng thành công: ${customerLabel}.`;
+        setCccdOcrMessage(resolvedSuccessMessage);
+        if (!silentNotify) {
+            dispatchNotif(notifyTitle || 'Lưu khách hàng thành công', resolvedSuccessMessage);
+        }
     };
     const applyCustomerRecord = (record) => {
         if (!record) return;
@@ -835,6 +849,48 @@ export default function OrderScreen({
         } finally {
             setCustomerSaveLoading(false);
         }
+    };
+    const saveCustomerRatingToBackend = async (nextCustomerInfo) => {
+        const payload = buildCustomerSavePayload(nextCustomerInfo, { useDefaultName: false, includeMedia: false });
+        const hasStrongIdentity = Boolean(
+            String(payload.id || '').trim()
+            || String(payload.ten || '').trim()
+            || String(payload.cccd || '').trim()
+            || String(payload.so_dien_thoai || '').trim()
+        );
+        if (!hasStrongIdentity) return;
+        setCustomerSaveLoading(true);
+        try {
+            let { response, result } = await submitCustomerPayload(payload, false);
+            if (response.status === 409 && !payload.id && (payload.cccd || payload.so_dien_thoai)) {
+                ({ response, result } = await submitCustomerPayload(payload, true));
+            }
+            if (!response.ok) {
+                const failureMessage = result.error || result.msg || response.statusText || `HTTP ${response.status}`;
+                throw new Error(`Lưu đánh giá khách hàng thất bại (${response.status}): ${failureMessage}`);
+            }
+            handleCustomerSaveSuccess(result, payload, {
+                successMessage: `Đã lưu ${Number(nextCustomerInfo?.sao || 0)} sao cho khách hàng.`,
+                notifyTitle: 'Lưu đánh giá khách hàng',
+                silentNotify: true,
+            });
+        } catch (error) {
+            setCccdOcrMessage(error.message || 'Không lưu được đánh giá khách hàng.');
+        } finally {
+            setCustomerSaveLoading(false);
+        }
+    };
+    const handleCustomerRatingChange = (value) => {
+        const nextRating = Math.max(0, Math.min(5, Number(value || 0)));
+        const nextCustomerInfo = {
+            ...(customerInfo || {}),
+            sao: nextRating,
+        };
+        setCustomerInfo(prev => ({
+            ...prev,
+            sao: nextRating,
+        }));
+        saveCustomerRatingToBackend(nextCustomerInfo).catch(() => {});
     };
     const confirmCustomerOverwrite = async () => {
         const payload = customerOverwritePrompt?.payload;
@@ -1435,7 +1491,7 @@ export default function OrderScreen({
                                         />
                                         <div style={{ position: 'absolute', left: 10, right: 10, bottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                                                <StarRating value={Number(customerInfo?.sao || 0)} onChange={(value) => updateCustomerInfo('sao', value)} size={30} />
+                                                <StarRating value={Number(customerInfo?.sao || 0)} onChange={handleCustomerRatingChange} size={30} />
                                                 <button
                                                     type="button"
                                                     onClick={() => updateCustomerInfo('favorite', !customerInfo?.favorite)}

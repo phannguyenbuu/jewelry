@@ -3572,6 +3572,53 @@ DASHBOARD_HTML = """
       line-height: 1.1;
       white-space: nowrap;
     }
+    .printer-test-block {
+      margin-bottom: 14px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1.5px solid rgba(185, 28, 28, 0.22);
+      background: linear-gradient(180deg, #fff5f5 0%, #fff1f2 100%);
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .printer-test-toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .printer-test-copy {
+      flex: 1 1 320px;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.5;
+      color: var(--red);
+    }
+    .printer-test-status {
+      margin-top: 10px;
+      min-height: 20px;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.5;
+      color: var(--red);
+    }
+    .btn-printer-test {
+      background: linear-gradient(135deg, #dc2626, #b91c1c);
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      box-shadow: 0 10px 24px rgba(185, 28, 28, 0.18);
+    }
+    .btn-printer-test-soft {
+      background: rgba(185, 28, 28, 0.1);
+      color: var(--red);
+      border: 1px solid rgba(185, 28, 28, 0.18);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      box-shadow: none;
+    }
     .btn-mini:disabled {
       opacity: 0.65;
       cursor: wait;
@@ -3820,7 +3867,13 @@ DASHBOARD_HTML = """
                 <div class="section-copy">Local printers come from Win32_Printer. Network printer shares come from SMB browser, ARP, and subnet SMB probing.</div>
               </div>
             </div>
-            <div id="printerActionStatus" class="muted" style="margin-bottom:12px; min-height:20px;"></div>
+            <div class="printer-test-block">
+              <div class="printer-test-toolbar">
+                <button class="btn-printer-test" id="testAllPrintersBtn" type="button">TEST ALL</button>
+                <div class="printer-test-copy">ONE CLICK WILL DISPATCH A SAMPLE TEST PNG TO EVERY DETECTED PRINTER. KEEP THE PER-PRINTER TEST BUTTONS FOR SINGLE-TARGET CHECKS.</div>
+              </div>
+              <div id="printerActionStatus" class="printer-test-status">READY FOR PRINTER TESTS.</div>
+            </div>
             <div class="table-wrap">
               <table><thead><tr><th>Action</th><th>Printer</th><th>Host PC</th><th>UNC</th><th>Driver</th><th>Port</th><th>Flags</th><th>Source</th></tr></thead><tbody id="printersBody"></tbody></table>
             </div>
@@ -3908,10 +3961,12 @@ DASHBOARD_HTML = """
     const formStatus = document.getElementById('formStatus');
     const printerActionStatus = document.getElementById('printerActionStatus');
     const printersBody = document.getElementById('printersBody');
+    const testAllPrintersBtn = document.getElementById('testAllPrintersBtn');
     const navItems = Array.from(document.querySelectorAll('[data-view]'));
     const viewNames = ['overview', 'and', 'sartorius', 'printer', 'config', 'logs'];
     let latestState = null;
     let currentPrinters = [];
+    let printerBatchSending = false;
     const viewMeta = {
       overview: {
         title: 'Agent console',
@@ -4066,7 +4121,24 @@ DASHBOARD_HTML = """
     function setPrinterActionStatus(message, isError = false) {
       if (!printerActionStatus) return;
       printerActionStatus.textContent = message || '';
-      printerActionStatus.style.color = message ? (isError ? '#b91c1c' : '#0f766e') : '#64748b';
+      printerActionStatus.style.color = '#b91c1c';
+      printerActionStatus.dataset.error = isError ? '1' : '0';
+    }
+    function getPrinterTestButtons() {
+      return Array.from(printersBody.querySelectorAll('[data-print-voucher]'));
+    }
+    function setPrinterTestControlsDisabled(disabled) {
+      if (testAllPrintersBtn) testAllPrintersBtn.disabled = disabled;
+      getPrinterTestButtons().forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+    function cleanTextValue(value, fallback = '') {
+      const text = String(value || '').trim();
+      return text || fallback;
+    }
+    function getPrinterTestLabel(row, fallback = 'PRINTER') {
+      return cleanTextValue(row && (row.printer_name || row.share_name || row.unc_path), fallback);
     }
     function normalizeBaseUrl(value) {
       return String(value || '').trim().replace(/\\/+$/, '');
@@ -4203,28 +4275,36 @@ DASHBOARD_HTML = """
         unc_path: row.unc_path || '',
       };
     }
-    async function sendVoucherPrint(index, button) {
+    async function sendVoucherPrint(index, button, options = {}) {
+      const skipRefresh = !!options.skipRefresh;
+      const suppressAlert = !!options.suppressAlert;
+      const batchMode = !!options.batchMode;
       const row = currentPrinters[index];
       if (!row) {
-        window.alert('Printer row not found.');
-        return;
+        const message = 'Printer row not found.';
+        if (!suppressAlert) window.alert(message);
+        throw new Error(message);
       }
       const config = ((latestState || {}).config || {});
       const serverUrl = normalizeBaseUrl(config.server_url || '');
       if (!serverUrl) {
-        window.alert('Server URL is empty.');
-        return;
+        const message = 'Server URL is empty.';
+        if (!suppressAlert) window.alert(message);
+        throw new Error(message);
       }
       const target = buildPrinterDispatchTarget(row);
       if (!target.printer_name && !target.unc_path) {
-        window.alert('Printer target is empty.');
-        return;
+        const message = 'Printer target is empty.';
+        if (!suppressAlert) window.alert(message);
+        throw new Error(message);
       }
 
       const label = target.printer_name || target.unc_path || 'Phieu ke mua hang';
-      const originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = 'Dang gui...';
+      const originalText = button ? button.textContent : '';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Dang Gui';
+      }
       setPrinterActionStatus(`Dang gui phieu ke toi ${label}...`, false);
 
       try {
@@ -4267,18 +4347,85 @@ DASHBOARD_HTML = """
           printerName ? `Da gui phieu ke toi ${agentName} / ${printerName}.` : `Da gui phieu ke toi ${agentName}.`,
           false,
         );
-        button.textContent = 'Da gui';
-        await refreshState();
-        window.setTimeout(() => {
+        if (button) {
+          button.textContent = 'Da Gui';
+        }
+        if (!skipRefresh) {
+          await refreshState();
+        }
+        if (button && !batchMode) {
+          window.setTimeout(() => {
+            button.disabled = false;
+            button.textContent = originalText;
+          }, 1500);
+        }
+        return { row, label, agentName, printerName };
+      } catch (error) {
+        if (button) {
           button.disabled = false;
           button.textContent = originalText;
-        }, 1500);
-      } catch (error) {
-        button.disabled = false;
-        button.textContent = originalText;
+        }
         setPrinterActionStatus((error && error.message) ? error.message : 'Khong gui duoc phieu ke.', true);
-        window.alert((error && error.message) ? error.message : 'Khong gui duoc phieu ke.');
+        if (!suppressAlert) {
+          window.alert((error && error.message) ? error.message : 'Khong gui duoc phieu ke.');
+        }
+        if (!skipRefresh) {
+          await refreshState().catch(() => {});
+        }
+        throw error;
+      }
+    }
+    async function sendVoucherPrintAll(button) {
+      if (printerBatchSending) return;
+      const printers = Array.isArray(currentPrinters) ? currentPrinters : [];
+      if (!printers.length) {
+        setPrinterActionStatus('No printers detected. Scan printers first.', true);
+        return;
+      }
+      printerBatchSending = true;
+      const originalText = button ? button.textContent : '';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Dang Test';
+      }
+      setPrinterTestControlsDisabled(true);
+      setPrinterActionStatus(`Dang test all ${printers.length} printer(s)...`, false);
+      const rowButtonsByIndex = new Map(
+        getPrinterTestButtons().map((rowButton) => [Number(rowButton.dataset.printVoucher), rowButton]),
+      );
+      const successes = [];
+      const failures = [];
+      try {
+        for (let index = 0; index < printers.length; index += 1) {
+          const row = printers[index];
+          const rowButton = rowButtonsByIndex.get(index) || null;
+          try {
+            await sendVoucherPrint(index, rowButton, {
+              skipRefresh: true,
+              suppressAlert: true,
+              batchMode: true,
+            });
+            successes.push(getPrinterTestLabel(row, `PRINTER ${index + 1}`));
+          } catch (error) {
+            failures.push(`${getPrinterTestLabel(row, `PRINTER ${index + 1}`)}: ${(error && error.message) ? error.message : 'Dispatch failed.'}`);
+          }
+        }
         await refreshState().catch(() => {});
+        if (failures.length) {
+          setPrinterActionStatus(
+            `Test all complete. Success ${successes.length}. Failed ${failures.length}. ${failures[0]}`,
+            true,
+          );
+          return;
+        }
+        setPrinterActionStatus(`Test all complete. Success ${successes.length}.`, false);
+      } finally {
+        printerBatchSending = false;
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+        setPrinterTestControlsDisabled(false);
       }
     }
     function render(state) {
@@ -4349,7 +4496,7 @@ DASHBOARD_HTML = """
           const hostCell = hostAddress && hostAddress !== hostPc
             ? `<div>${escapeHtml(hostPc)}</div><div class="muted">${escapeHtml(hostAddress)}</div>`
             : escapeHtml(hostPc);
-          return `<tr><td><button type="button" class="btn-light btn-mini" data-print-voucher="${index}" title="Gui mot PNG phieu ke mau len server de server chuyen lenh toi dung agent va may in nay.">In Phiếu Kê</button></td><td>${escapeHtml(row.printer_name || row.share_name || '')}</td><td>${hostCell}</td><td>${escapeHtml(row.unc_path || '')}</td><td>${escapeHtml(row.driver_name || '')}</td><td>${escapeHtml(row.port_name || '')}</td><td>${row.is_default ? 'default ' : ''}${row.is_network ? 'network ' : ''}${row.is_shared ? 'shared' : ''}</td><td>${escapeHtml(row.source || '')}</td></tr>`;
+          return `<tr><td><button type="button" class="btn-printer-test-soft btn-mini" data-print-voucher="${index}" title="Gui mot PNG phieu ke mau len server de server chuyen lenh toi dung agent va may in nay.">TEST PRINTER</button></td><td>${escapeHtml(row.printer_name || row.share_name || '')}</td><td>${hostCell}</td><td>${escapeHtml(row.unc_path || '')}</td><td>${escapeHtml(row.driver_name || '')}</td><td>${escapeHtml(row.port_name || '')}</td><td>${row.is_default ? 'default ' : ''}${row.is_network ? 'network ' : ''}${row.is_shared ? 'shared' : ''}</td><td>${escapeHtml(row.source || '')}</td></tr>`;
         }),
         8,
       );
@@ -4407,6 +4554,11 @@ DASHBOARD_HTML = """
       if (!response.ok) window.alert(data.error || 'Printer scan failed.');
       await refreshState();
     });
+    if (testAllPrintersBtn) {
+      testAllPrintersBtn.addEventListener('click', () => {
+        sendVoucherPrintAll(testAllPrintersBtn).catch(console.error);
+      });
+    }
     printersBody.addEventListener('click', (event) => {
       const button = event.target.closest('[data-print-voucher]');
       if (!button) return;
@@ -4417,7 +4569,10 @@ DASHBOARD_HTML = """
     navItems.forEach((button) => button.addEventListener('click', () => activateView(button.dataset.view)));
     activateView('overview');
     refreshState().catch(console.error);
-    window.setInterval(() => refreshState().catch(console.error), 1000);
+    window.setInterval(() => {
+      if (printerBatchSending) return;
+      refreshState().catch(console.error);
+    }, 1000);
   </script>
 </body>
 </html>

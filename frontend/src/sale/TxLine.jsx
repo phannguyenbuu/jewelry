@@ -3,14 +3,20 @@ import { IoChevronDownOutline, IoChevronUpOutline, IoCloseOutline } from 'react-
 import FormattedNumberInput from './FormattedNumberInput';
 import { GoldBuyFieldGroup, GoldSaleFieldGroup } from './GoldFieldGroups';
 import { MoneyField } from './TxLineExtras.jsx';
-import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, TRADE_COMP_SUGGESTIONS, calcValueStyle, filterInventoryItems, findInventoryByCode, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldAgeProductValues, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getTradeBaseAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, getTxTheme, inventoryStatusLabel, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
+import { BUY_GOLD_OTHER_OPTION, INVENTORY_TXS, POS_RED, S, TRADE_COMP_SUGGESTIONS, calcValueStyle, filterInventoryItems, findInventoryByCode, fmtCalc, formatBuyGoldProductLabel, formatWeight, getGoldAgeProductValues, getLineSellAddedGoldWeight, getLineSellCutGoldWeight, getLineSellLaborAmount, getPreferredGoldAgeProduct, getTradeBaseAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, getTxTheme, inventoryStatusLabel, isPositiveTransaction, isUnavailableInventoryItem, normalizeGoldEntryMode, normalizeTradeRate, parseFmt, parseWeight, sanitizeLineInventoryState, scanCodeFromFile } from './shared';
 
 export default function TxLine({ line, rates, inventoryItems, onChange, onRemove, showRemove }) {
     const effectiveCat = line.tx === 'trade' ? 'gold' : line.cat;
     const goldProducts = getGoldAgeProductValues(rates);
-    const products = effectiveCat === 'gold' ? goldProducts : Object.keys(rates[effectiveCat] || {});
-    const tradeOldProductOptions = goldProducts.length ? [
-        ...goldProducts.map(product => ({ value: product, label: formatBuyGoldProductLabel(product) })),
+    const preferredTradeGoldProduct = getPreferredGoldAgeProduct(rates);
+    const orderedTradeGoldProducts = preferredTradeGoldProduct
+        ? [preferredTradeGoldProduct, ...goldProducts.filter(product => product !== preferredTradeGoldProduct)]
+        : goldProducts;
+    const products = effectiveCat === 'gold'
+        ? (line.tx === 'trade' ? orderedTradeGoldProducts : goldProducts)
+        : Object.keys(rates[effectiveCat] || {});
+    const tradeOldProductOptions = orderedTradeGoldProducts.length ? [
+        ...orderedTradeGoldProducts.map(product => ({ value: product, label: formatBuyGoldProductLabel(product) })),
         { value: BUY_GOLD_OTHER_OPTION, label: BUY_GOLD_OTHER_OPTION },
     ] : [];
     const tradeOldProductValues = tradeOldProductOptions.map(option => option.value);
@@ -32,7 +38,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
     const tradeRate = normalizeTradeRate(effectiveCat, line.customTrade !== undefined ? line.customTrade : rate[0]);
     const curRate = line.tx === 'buy' ? buyRate : line.tx === 'trade' ? tradeRate : sellRate;
     const hasCustomerCustomBuy = line.customerCustomBuy !== undefined && String(line.customerCustomBuy).trim() !== '';
-    const effectiveCustomerProduct = line.customerProduct || tradeOldProductValues[0] || goldProducts[0] || '';
+    const effectiveCustomerProduct = line.customerProduct || preferredTradeGoldProduct || tradeOldProductValues[0] || goldProducts[0] || '';
     const _custBuyRaw = rates.gold?.[effectiveCustomerProduct]?.[1] || 0;
     const customerRate = normalizeTradeRate(
         'gold',
@@ -109,7 +115,7 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         appendFormulaMoneyTerm('+', sellLabor);
         appendFormulaRateTerm('+', sellAddedGold, sellRate);
         appendFormulaRateTerm('-', sellCutGold, sellRate);
-    } else if (isTradeGold) {
+    } else if (isTradeGold && (effectiveGoldQty > 0 || tradeOldGoldQty > 0)) {
         const tradeBaseSign = tradeQuantityDirection === 'old' ? '-' : '+';
         const tradeBaseLeftQty = tradeQuantityDirection === 'old' ? tradeOldGoldQty : effectiveGoldQty;
         const tradeBaseRightQty = tradeQuantityDirection === 'old' ? effectiveGoldQty : tradeOldGoldQty;
@@ -231,10 +237,10 @@ export default function TxLine({ line, rates, inventoryItems, onChange, onRemove
         if (!isTrade) return;
         const productValid = line.customerProduct && tradeOldProductValues.includes(line.customerProduct);
         if (!productValid && tradeOldProductValues.length) {
-            onChange({ customerProduct: tradeOldProductValues[0] });
+            onChange({ customerProduct: preferredTradeGoldProduct || tradeOldProductValues[0] });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isTrade, tradeOldProductValues.join('|')]);
+    }, [isTrade, preferredTradeGoldProduct, tradeOldProductValues.join('|')]);
 
     useEffect(() => {
         const added = parseWeight(line.sellAddedGold || 0);

@@ -246,6 +246,8 @@ const computeInvoiceComponentAmount = (quantity, componentPrice) => Math.max(0, 
 
 const resolveInvoiceNetAmount = (total, labor) => Math.max(0, Math.round(Number(total || 0)) - parseInvoiceMoneyValue(labor));
 
+const normalizeInvoiceLockedField = (value) => (value === 'componentPrice' ? 'componentPrice' : 'quantity');
+
 const resolveInvoiceComponentPriceFromLockedTotal = ({ quantity, total, labor }) => {
 
     const safeQuantity = Number(quantity || 0);
@@ -289,6 +291,7 @@ const normalizeInvoiceItem = (item) => {
         ...item,
 
         manual: Boolean(item?.manual),
+        lockedField: normalizeInvoiceLockedField(item?.lockedField),
 
         unit: pickText(item?.unit, 'chi'),
 
@@ -317,6 +320,11 @@ const rebalanceInvoiceItemForLockedTotal = (item, field, value) => {
     let componentPrice = normalizedItem.componentPrice;
 
     let labor = normalizedItem.labor;
+    const lockedField = normalizeInvoiceLockedField(normalizedItem.lockedField);
+
+    if (field === 'lockedField') {
+        return normalizeInvoiceItem({ ...normalizedItem, lockedField: value, fixedTotal });
+    }
 
     if (field === 'quantity') {
 
@@ -341,8 +349,11 @@ const rebalanceInvoiceItemForLockedTotal = (item, field, value) => {
     if (field === 'labor') {
 
         labor = Math.min(parseInvoiceMoneyValue(value), fixedTotal);
-
-        componentPrice = resolveInvoiceComponentPriceFromLockedTotal({ quantity, total: fixedTotal, labor });
+        if (lockedField === 'componentPrice') {
+            quantity = resolveInvoiceQuantityFromLockedTotal({ componentPrice, total: fixedTotal, labor });
+        } else {
+            componentPrice = resolveInvoiceComponentPriceFromLockedTotal({ quantity, total: fixedTotal, labor });
+        }
 
         return normalizeInvoiceItem({ ...normalizedItem, quantity, componentPrice, labor, fixedTotal });
 
@@ -2098,7 +2109,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                         <span style={S.label}>Chuyển khoản</span>
 
-                        <EditableNumericInput value={bank} onValueChange={handleBankChange} style={isIn ? { ...numericInputStyle, color: '#2563eb' } : { ...largeNumericInputStyle, color: '#2563eb' }} commitOnBlur />
+                        <EditableNumericInput value={bank} onValueChange={handleBankChange} style={isIn ? { ...numericInputStyle, color: '#2563eb' } : { ...largeNumericInputStyle, color: '#2563eb' }} />
 
                     </div>
 
@@ -2106,7 +2117,7 @@ export default function PaymentScreen({ total, orderId, formula, lines, setLines
 
                         <span style={S.label}>Tiền mặt</span>
 
-                        <EditableNumericInput value={cash} onValueChange={handleCashChange} style={isIn ? { ...numericInputStyle, color: POS_RED } : { ...largeNumericInputStyle, color: POS_RED }} commitOnBlur />
+                        <EditableNumericInput value={cash} onValueChange={handleCashChange} style={isIn ? { ...numericInputStyle, color: POS_RED } : { ...largeNumericInputStyle, color: POS_RED }} />
 
                     </div>
 

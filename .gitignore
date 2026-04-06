@@ -25,6 +25,7 @@ agent/*.log
 instance/
 backend/instance/
 backend/uploads/
+android/
 
 # Frontend build
 frontend/node_modules/
@@ -47,3 +48,4 @@ Thumbs.db
 
 # Review / generated docs (optional: bỏ dòng này nếu muốn track)
 REVIEW.md
+recognize/

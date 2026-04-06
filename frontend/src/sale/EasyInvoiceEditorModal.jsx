@@ -1,4 +1,4 @@
-import { IoCloseOutline, IoDocumentTextOutline, IoTrashOutline } from 'react-icons/io5';
+import { IoCloseOutline, IoDocumentTextOutline, IoLockClosedOutline, IoLockOpenOutline, IoTrashOutline } from 'react-icons/io5';
 import FormattedNumberInput from './FormattedNumberInput';
 import { S } from './shared';
 
@@ -101,29 +101,64 @@ function PaperField({ label, en, value, onChange, type = 'text', align = 'left',
     );
 }
 
-function CellField({ label, value, onChange, align = 'left', inputMode = undefined }) {
+function LockToggle({ active, onClick, title }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            style={{
+                position: 'absolute',
+                right: 6,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: 22,
+                height: 22,
+                borderRadius: 999,
+                border: active ? 'none' : '1px solid rgba(120,53,15,.18)',
+                background: active ? 'linear-gradient(135deg,#0f766e,#14b8a6)' : 'rgba(255,255,255,.94)',
+                color: active ? '#ffffff' : '#7c2d12',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                cursor: 'pointer',
+                boxShadow: active ? '0 8px 16px rgba(15,118,110,.18)' : 'none',
+            }}
+            title={title}
+            aria-label={title}
+        >
+            {active ? <IoLockClosedOutline style={{ fontSize: 12 }} /> : <IoLockOpenOutline style={{ fontSize: 12 }} />}
+        </button>
+    );
+}
+
+function CellField({ label, value, onChange, align = 'left', inputMode = undefined, trailing = null }) {
     const isNumericField = inputMode === 'numeric' || inputMode === 'decimal';
+    const inputStyle = trailing ? { ...UI.cellInput, textAlign: align, paddingRight: 34 } : { ...UI.cellInput, textAlign: align };
     return (
         <div>
             <span style={UI.cellLabel}>{label}</span>
-            {isNumericField ? (
-                <FormattedNumberInput
-                    style={{ ...UI.cellInput, textAlign: align }}
-                    inputMode={inputMode}
-                    allowDecimal={inputMode === 'decimal'}
-                    maxDecimals={inputMode === 'decimal' ? 4 : undefined}
-                    value={value ?? ''}
-                    onValueChange={(nextValue) => onChange({ target: { value: nextValue } })}
-                />
-            ) : (
-                <input
-                    style={{ ...UI.cellInput, textAlign: align }}
-                    type="text"
-                    inputMode={inputMode}
-                    value={value ?? ''}
-                    onChange={onChange}
-                />
-            )}
+            <div style={{ position: 'relative' }}>
+                {isNumericField ? (
+                    <FormattedNumberInput
+                        style={inputStyle}
+                        inputMode={inputMode}
+                        allowDecimal={inputMode === 'decimal'}
+                        maxDecimals={inputMode === 'decimal' ? 4 : undefined}
+                        value={value ?? ''}
+                        onValueChange={(nextValue) => onChange({ target: { value: nextValue } })}
+                    />
+                ) : (
+                    <input
+                        style={inputStyle}
+                        type="text"
+                        inputMode={inputMode}
+                        value={value ?? ''}
+                        onChange={onChange}
+                    />
+                )}
+                {trailing}
+            </div>
         </div>
     );
 }
@@ -143,6 +178,100 @@ function CellDisplay({ label, value, align = 'left', accent = false }) {
             >
                 <span style={{ width: '100%', textAlign: align, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || ''}</span>
             </div>
+        </div>
+    );
+}
+
+function CellPlainValue({ label, value, align = 'left', accent = false }) {
+    return (
+        <div>
+            <span style={UI.cellLabel}>{label}</span>
+            <div
+                style={{
+                    minHeight: 30,
+                    padding: '6px 7px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                    color: accent ? '#166534' : '#111827',
+                    textAlign: align,
+                    fontFamily: "'Times New Roman', serif",
+                    whiteSpace: 'normal',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                }}
+            >
+                {value || ''}
+            </div>
+        </div>
+    );
+}
+
+function MobileInvoiceItems({ rows, onItemFieldChange, onRemoveItem }) {
+    return (
+        <div style={{ position: 'relative', zIndex: 1, display: 'grid' }}>
+            {rows.map((item, index) => {
+                const showBalanceLocks = Number(item?.labor || 0) > 0;
+                const lockedField = item?.lockedField === 'componentPrice' ? 'componentPrice' : 'quantity';
+                const isLastRow = index === rows.length - 1;
+                return (
+                    <div key={item?.key || `row-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr)', borderBottom: isLastRow ? 'none' : '1px solid rgba(120,53,15,.18)' }}>
+                        <div style={{ padding: 4, borderRight: '1px solid rgba(120,53,15,.18)', display: 'grid', gap: 8, justifyItems: 'center', alignContent: 'start' }}>
+                            <strong>{index + 1}</strong>
+                            {item?.manual ? (
+                                <button type="button" onClick={() => onRemoveItem(item.key)} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid rgba(239,68,68,.28)', background: '#fff1f2', color: '#b91c1c', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <IoTrashOutline />
+                                </button>
+                            ) : null}
+                        </div>
+
+                        <div style={{ padding: 4 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, alignItems: 'start' }}>
+                                <div style={{ display: 'grid', gap: 8 }}>
+                                    <CellDisplay label="Ma hang" value={item?.code || ''} />
+                                    <CellDisplay label="Ten hang" value={item?.name || ''} />
+                                </div>
+                                <div style={{ display: 'grid', gap: 8 }}>
+                                    <CellDisplay label="DVT" value={item?.unit || 'chi'} align="center" />
+                                    <CellField label="Tien cong" value={item?.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" />
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '1fr 2fr 2fr', gap: 8, alignItems: 'start' }}>
+                                <CellField
+                                    label="SLG"
+                                    value={item?.quantity ?? ''}
+                                    onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)}
+                                    align="right"
+                                    inputMode="decimal"
+                                    trailing={showBalanceLocks ? (
+                                        <LockToggle
+                                            active={lockedField === 'quantity'}
+                                            onClick={() => onItemFieldChange(item.key, 'lockedField', 'quantity')}
+                                            title="Khoa so luong khi doi tien cong"
+                                        />
+                                    ) : null}
+                                />
+                                <CellField
+                                    label="Gia TP"
+                                    value={item?.componentPrice ?? 0}
+                                    onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)}
+                                    align="right"
+                                    inputMode="numeric"
+                                    trailing={showBalanceLocks ? (
+                                        <LockToggle
+                                            active={lockedField === 'componentPrice'}
+                                            onClick={() => onItemFieldChange(item.key, 'lockedField', 'componentPrice')}
+                                            title="Khoa gia thanh phan khi doi tien cong"
+                                        />
+                                    ) : null}
+                                />
+                                <CellPlainValue label="Thanh tien" value={fmtMoney(item?.total || 0)} align="right" accent />
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }
@@ -167,6 +296,7 @@ export default function EasyInvoiceEditorModal({
     if (!open) return null;
 
     const compact = typeof window !== 'undefined' ? window.innerWidth < 980 : false;
+    const mobileLayout = typeof window !== 'undefined' ? window.innerWidth < 640 : false;
     const customer = draft?.customer || {};
     const invoice = draft?.invoice || {};
     const items = Array.isArray(draft?.items) ? draft.items : [];
@@ -251,7 +381,7 @@ export default function EasyInvoiceEditorModal({
                                     <PaperField label="Đơn vị tiền tệ" en="Currency" value={invoice.currencyUnit || 'VND'} onChange={(event) => onInvoiceFieldChange('currencyUnit', event.target.value)} />
                                 </div>
 
-                                <div style={{ position: 'relative', borderRadius: 0, overflow: 'hidden', border: '1px solid rgba(120,53,15,.22)', background: '#ffffff' }}>
+                                <div style={{ position: 'relative', borderRadius: 0, overflowX: mobileLayout ? 'hidden' : 'auto', overflowY: 'hidden', border: '1px solid rgba(120,53,15,.22)', background: '#ffffff' }}>
                                     <div
                                         aria-hidden="true"
                                         style={{
@@ -268,7 +398,83 @@ export default function EasyInvoiceEditorModal({
                                             zIndex: 0,
                                         }}
                                     />
+                                    {mobileLayout ? (
+                                    <MobileInvoiceItems rows={rows} onItemFieldChange={onItemFieldChange} onRemoveItem={onRemoveItem} />
+                                    ) : false ? (
                                     <table style={{ position: 'relative', zIndex: 1, width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                                        <tbody>
+                                            {rows.map((item, index) => {
+                                                const showBalanceLocks = Number(item?.labor || 0) > 0;
+                                                const lockedField = item?.lockedField === 'componentPrice' ? 'componentPrice' : 'quantity';
+                                                const rowKey = item?.key || `row-${index}`;
+                                                return [
+                                                    <tr key={`${rowKey}-top`}>
+                                                        <td rowSpan={2} style={{ ...UI.td, width: 44, textAlign: 'center' }}>
+                                                            <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+                                                                <strong>{index + 1}</strong>
+                                                                {item?.manual ? (
+                                                                    <button type="button" onClick={() => onRemoveItem(item.key)} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid rgba(239,68,68,.28)', background: '#fff1f2', color: '#b91c1c', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                        <IoTrashOutline />
+                                                                    </button>
+                                                                ) : null}
+                                                            </div>
+                                                        </td>
+                                                        <td colSpan={2} style={UI.td}>
+                                                            <div style={{ display: 'grid', gap: 8 }}>
+                                                                <CellDisplay label="MÃ£ hÃ ng" value={item?.code || ''} />
+                                                                <CellDisplay label="TÃªn hÃ ng" value={item?.name || ''} />
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ ...UI.td, width: 72 }}>
+                                                            <CellDisplay label="ÄVT" value={item?.unit || 'chi'} align="center" />
+                                                        </td>
+                                                    </tr>,
+                                                    <tr key={`${rowKey}-bottom`}>
+                                                        <td style={{ ...UI.td, width: 88 }}>
+                                                            <CellField
+                                                                label="SLG"
+                                                                value={item?.quantity ?? ''}
+                                                                onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)}
+                                                                align="right"
+                                                                inputMode="decimal"
+                                                                trailing={showBalanceLocks ? (
+                                                                    <LockToggle
+                                                                        active={lockedField === 'quantity'}
+                                                                        onClick={() => onItemFieldChange(item.key, 'lockedField', 'quantity')}
+                                                                        title="KhÃ³a sá»‘ lÆ°á»£ng khi Ä‘á»•i tiá»n cÃ´ng"
+                                                                    />
+                                                                ) : null}
+                                                            />
+                                                        </td>
+                                                        <td style={UI.td}>
+                                                            <div style={{ display: 'grid', gap: 8 }}>
+                                                                <CellField
+                                                                    label="GiÃ¡ TP"
+                                                                    value={item?.componentPrice ?? 0}
+                                                                    onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)}
+                                                                    align="right"
+                                                                    inputMode="numeric"
+                                                                    trailing={showBalanceLocks ? (
+                                                                        <LockToggle
+                                                                            active={lockedField === 'componentPrice'}
+                                                                            onClick={() => onItemFieldChange(item.key, 'lockedField', 'componentPrice')}
+                                                                            title="KhÃ³a giÃ¡ thÃ nh pháº§n khi Ä‘á»•i tiá»n cÃ´ng"
+                                                                        />
+                                                                    ) : null}
+                                                                />
+                                                                <CellField label="Tiá»n cÃ´ng" value={item?.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" />
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ ...UI.td, width: 120 }}>
+                                                            <CellDisplay label="ThÃ nh tiá»n" value={fmtMoney(item?.total || 0)} align="right" accent />
+                                                        </td>
+                                                    </tr>,
+                                                ];
+                                            })}
+                                        </tbody>
+                                    </table>
+                                    ) : (
+                                    <table style={{ position: 'relative', zIndex: 1, width: '100%', minWidth: 760, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                                         <thead>
                                             <tr style={{ background: 'rgba(120,53,15,.08)' }}>
                                                 <th style={{ ...UI.th, width: '6%' }}>STT</th>
@@ -280,7 +486,10 @@ export default function EasyInvoiceEditorModal({
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {rows.map((item, index) => (
+                                            {rows.map((item, index) => {
+                                                const showBalanceLocks = Number(item?.labor || 0) > 0;
+                                                const lockedField = item?.lockedField === 'componentPrice' ? 'componentPrice' : 'quantity';
+                                                return (
                                                 <tr key={item?.key || `row-${index}`}>
                                                     <td style={{ ...UI.td, textAlign: 'center' }}>
                                                         <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
@@ -302,11 +511,37 @@ export default function EasyInvoiceEditorModal({
                                                         <CellDisplay label="ĐVT" value={item?.unit || 'chi'} align="center" />
                                                     </td>
                                                     <td style={UI.td}>
-                                                        <CellField label="SLG" value={item?.quantity ?? ''} onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)} align="right" inputMode="decimal" />
+                                                        <CellField
+                                                            label="SLG"
+                                                            value={item?.quantity ?? ''}
+                                                            onChange={(event) => onItemFieldChange(item.key, 'quantity', event.target.value)}
+                                                            align="right"
+                                                            inputMode="decimal"
+                                                            trailing={showBalanceLocks ? (
+                                                                <LockToggle
+                                                                    active={lockedField === 'quantity'}
+                                                                    onClick={() => onItemFieldChange(item.key, 'lockedField', 'quantity')}
+                                                                    title="Khóa số lượng khi đổi tiền công"
+                                                                />
+                                                            ) : null}
+                                                        />
                                                     </td>
                                                     <td style={UI.td}>
                                                         <div style={{ display: 'grid', gap: 8 }}>
-                                                            <CellField label="Giá TP" value={item?.componentPrice ?? 0} onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)} align="right" inputMode="numeric" />
+                                                            <CellField
+                                                                label="Giá TP"
+                                                                value={item?.componentPrice ?? 0}
+                                                                onChange={(event) => onItemFieldChange(item.key, 'componentPrice', event.target.value)}
+                                                                align="right"
+                                                                inputMode="numeric"
+                                                                trailing={showBalanceLocks ? (
+                                                                    <LockToggle
+                                                                        active={lockedField === 'componentPrice'}
+                                                                        onClick={() => onItemFieldChange(item.key, 'lockedField', 'componentPrice')}
+                                                                        title="Khóa giá thành phần khi đổi tiền công"
+                                                                    />
+                                                                ) : null}
+                                                            />
                                                             <CellField label="Tiền công" value={item?.labor ?? 0} onChange={(event) => onItemFieldChange(item.key, 'labor', event.target.value)} align="right" inputMode="numeric" />
                                                         </div>
                                                     </td>
@@ -314,21 +549,33 @@ export default function EasyInvoiceEditorModal({
                                                         <CellDisplay label="Thành tiền" value={fmtMoney(item?.total || 0)} align="right" accent />
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
+                                    )}
                                 </div>
 
                                 <PaperField label="Ghi chú" en="Note" value={invoice.note || ''} onChange={(event) => onInvoiceFieldChange('note', event.target.value)} />
 
                                 <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '1fr 220px', gap: 12, alignItems: 'center' }}>
-                                    <div style={{ fontSize: 15, lineHeight: 1.6 }}>
-                                        <span style={{ fontWeight: 700 }}>Số tiền viết bằng chữ</span>
-                                        <span style={UI.subEn}>(Amount in words)</span>: <b>{moneyToWords(total)}</b>
+                                    <div style={{ fontSize: 15, lineHeight: 1.6, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                        {mobileLayout ? (
+                                            <>
+                                                <span style={{ display: 'block', fontWeight: 700 }}>Số tiền viết bằng chữ</span>
+                                                <span style={{ ...UI.subEn, display: 'block', marginLeft: 0, marginBottom: 4 }}>(Amount in words)</span>
+                                                <b style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{moneyToWords(total)}</b>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span style={{ fontWeight: 700 }}>Số tiền viết bằng chữ</span>
+                                                <span style={UI.subEn}>(Amount in words)</span>: <b>{moneyToWords(total)}</b>
+                                            </>
+                                        )}
                                     </div>
-                                    <div style={{ borderRadius: 16, border: '1px solid rgba(22,163,74,.22)', background: 'rgba(240,253,244,.85)', padding: '12px 14px', textAlign: 'right' }}>
+                                    <div style={{ minWidth: 0, borderRadius: 16, border: '1px solid rgba(22,163,74,.22)', background: 'rgba(240,253,244,.85)', padding: '12px 14px', textAlign: 'right' }}>
                                         <div style={{ fontSize: 11, color: '#166534', textTransform: 'uppercase', fontWeight: 800 }}>Tổng thanh toán</div>
-                                        <div data-sale-amount="true" style={{ marginTop: 4, fontSize: 28, lineHeight: 1, fontWeight: 900, color: '#166534' }}>{fmtMoney(total)}</div>
+                                        <div data-sale-amount="true" style={{ marginTop: 4, fontSize: 28, lineHeight: 1.1, fontWeight: 900, color: '#166534', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{fmtMoney(total)}</div>
                                     </div>
                                 </div>
                             </div>

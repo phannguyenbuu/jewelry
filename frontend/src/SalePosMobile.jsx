@@ -5,7 +5,7 @@ import OrderScreen from './sale/OrderScreen';
 import PaymentScreen from './sale/PaymentScreen';
 import RepairJobScreen from './sale/RepairJobScreen';
 import { OrderListScreen, SavedTransactionsModal } from './sale/SavedScreens';
-import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldAgeProductValues, getGoldLineEffectiveQuantity, getLineSellLaborAmount, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeNetAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
+import { API, BUY_GOLD_OTHER_OPTION, DEFAULT_RATES, INVENTORY_TXS, NUMBER_FONT, SAVED_SALE_KEY, SOLD_STATUS, S, UI_FONT, createDefaultLine, createEmptyCustomerInfo, createRepairLine, fmtVN, formatBuyGoldProductLabel, formatWeight, genOrderId, genRepairId, getGoldAgeProductValues, getGoldLineEffectiveQuantity, getLineSellLaborAmount, getPreferredGoldAgeProduct, getTradeCompensationAmount, getTradeCompensationQuantity, getTradeCompensationUnitAmount, getTradeNetAmount, getTradeOldGoldQuantity, getTradeQuantityDirection, hasCustomerInfo, isPositiveTransaction, normalizeTradeRate, parseFmt, parseWeight, readSavedSales, sanitizeLineInventoryState } from './sale/shared';
 
 const serializeOrderLines = (saleLines = []) => saleLines.map((line, index) => ({
     stt: index + 1,
@@ -105,7 +105,7 @@ export default function SalePosMobile() {
         return s + v;
     }, 0);
 
-    const formula = lines.map(l => {
+    const formulaLines = lines.map(l => {
         const effectiveCat = l.tx === 'trade' ? 'gold' : l.cat;
         const r = rates[effectiveCat]?.[l.product] || [0, 0];
         const rate = normalizeTradeRate(
@@ -128,6 +128,7 @@ export default function SalePosMobile() {
             const tradeCompUnitAmount = getTradeCompensationUnitAmount(l);
             const tradeCompAmount = getTradeCompensationAmount(l);
             const tradeAmount = getTradeNetAmount(l, rate, customerRate);
+            if (actualQty <= 0 && customerQty <= 0) return '';
             const baseLeftQty = tradeDirection === 'old' ? customerQty : actualQty;
             const baseRightQty = tradeDirection === 'old' ? actualQty : customerQty;
             const baseRate = tradeDirection === 'old' ? customerRate : rate;
@@ -161,7 +162,8 @@ export default function SalePosMobile() {
             return `${sign}${productLabel}${itemRef} ${fmtVN(rate)} x ${formatWeight(actualQty)}${weightNote} = ${fmtVN(l.value || 0)}`;
         }
         return `${sign}${productLabel}${itemRef} ${fmtVN(rate)} x ${l.qty} = ${fmtVN(l.value || 0)}`;
-    }).join('\n') + `\nTOTAL: ${fmtVN(total)} VND`;
+    }).filter(Boolean);
+    const formula = [...formulaLines, `TOTAL: ${fmtVN(total)} VND`].join('\n');
 
     const loadInventoryItems = useCallback(async () => {
         try {
@@ -224,6 +226,7 @@ export default function SalePosMobile() {
 
     useEffect(() => {
         const goldAgeProductValues = getGoldAgeProductValues(rates);
+        const preferredTradeGoldProduct = getPreferredGoldAgeProduct(rates);
         setLines(prev => {
             if (!prev.length) return [createDefaultLine(rates)];
             return prev.map(line => {
@@ -232,8 +235,20 @@ export default function SalePosMobile() {
                         ? [...goldAgeProductValues, BUY_GOLD_OTHER_OPTION]
                         : goldAgeProductValues)
                     : Object.keys(rates[line.cat] || {});
-                if (!availableProducts.length || availableProducts.includes(line.product)) return line;
-                return { ...line, product: availableProducts[0] };
+                if (!availableProducts.length) return line;
+                const nextPatch = {};
+                if (!availableProducts.includes(line.product)) {
+                    nextPatch.product = line.tx === 'trade'
+                        ? (preferredTradeGoldProduct || availableProducts[0])
+                        : availableProducts[0];
+                }
+                if (line.tx === 'trade') {
+                    const tradeOldProductOptions = [...goldAgeProductValues, BUY_GOLD_OTHER_OPTION];
+                    if (!tradeOldProductOptions.includes(line.customerProduct || '')) {
+                        nextPatch.customerProduct = preferredTradeGoldProduct || tradeOldProductOptions[0] || '';
+                    }
+                }
+                return Object.keys(nextPatch).length ? { ...line, ...nextPatch } : line;
             });
         });
     }, [rates]);
